@@ -1,6 +1,22 @@
 use envconfig::Envconfig;
 use phirepass_common::env::Mode;
 
+#[derive(Clone, Debug)]
+pub enum SSHAuthMethod {
+    PasswordPrompt,
+}
+
+impl std::str::FromStr for SSHAuthMethod {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "prompt" | "password_prompt" => Ok(SSHAuthMethod::PasswordPrompt),
+            _ => Err(format!("invalid authentication method: {}", s)),
+        }
+    }
+}
+
 #[derive(Envconfig)]
 pub(crate) struct Env {
     #[envconfig(from = "APP_MODE", default = "development")]
@@ -21,7 +37,7 @@ pub(crate) struct Env {
     #[envconfig(from = "SERVER_HOST", default = "0.0.0.0")]
     pub server_host: String,
 
-    #[envconfig(from = "SERVER_PORT", default = "3000")]
+    #[envconfig(from = "SERVER_PORT", default = "8080")]
     pub server_port: u16,
 
     #[envconfig(from = "SSH_HOST", default = "0.0.0.0")]
@@ -32,6 +48,9 @@ pub(crate) struct Env {
 
     #[envconfig(from = "SSH_USER")]
     pub ssh_user: String,
+
+    #[envconfig(from = "SSH_AUTH_METHOD", default = "password_prompt")]
+    pub ssh_auth_mode: SSHAuthMethod,
 }
 
 pub(crate) fn init() -> anyhow::Result<Env> {

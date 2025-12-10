@@ -51,7 +51,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/xterm-addon-fit.js", get(xterm_fit_js))
         .route("/favicon.ico", get(favicon));
 
-    let addr: SocketAddr = "0.0.0.0:8080".parse()?;
+    let addr: SocketAddr = "0.0.0.0:8082".parse()?;
     info!("serving web ui on {addr}");
 
     let listener = tokio::net::TcpListener::bind(addr).await?;

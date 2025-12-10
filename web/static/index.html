@@ -167,7 +167,7 @@
         const Protocol = { Control: 0, SSH: 1 };
         const encoder = new TextEncoder();
         const decoder = new TextDecoder();
-        const apiBase = `${window.location.protocol}//${window.location.hostname}:3000`;
+        const apiBase = `${window.location.protocol}//${window.location.hostname}:8080`;
 
         const statusEl = document.getElementById("status");
         const logEl = document.getElementById("log");
@@ -207,6 +207,7 @@
         let nodes = [];
         let awaitingPassword = false;
         let passwordBuffer = "";
+        let isIntentionallyClosed = false;
 
         const log = (text) => {
             const line = document.createElement("div");
@@ -277,6 +278,18 @@
                 card.appendChild(meta);
 
                 card.addEventListener("click", () => {
+                    // Check if there's an active websocket connection
+                    if (socket && socket.readyState === WebSocket.OPEN) {
+                        // Already connected, warn user
+                        const confirmed = confirm(
+                            `You are currently connected to a node. Do you want to disconnect and switch to ${node.id}?`
+                        );
+                        if (!confirmed) {
+                            // User cancelled - do nothing
+                            return;
+                        }
+                    }
+
                     selectedNodeId = node.id;
                     Array.from(nodesEl.children).forEach((el) =>
                         el.classList.toggle("selected", el.dataset.nodeId === node.id)
@@ -391,8 +404,8 @@
                 return;
             }
 
-            setStatus("Connected", "ok");
-            log("Password captured, starting SSH tunnel...");
+            setStatus("Authenticating...", "info");
+            log("Password submitted, attempting SSH connection...");
             requestSshTunnel(selectedNodeId, password);
             sendResize(term.cols, term.rows);
         };
@@ -439,6 +452,7 @@
             }
 
             if (socket) {
+                isIntentionallyClosed = true;
                 socket.close();
                 socket = null;
             }
@@ -460,18 +474,19 @@
             setStatus("Connecting...");
 
             const scheme = window.location.protocol === "https:" ? "wss" : "ws";
-            const url = `${scheme}://${window.location.hostname}:3000/web/ws`;
+            const url = `${scheme}://${window.location.hostname}:8080/web/ws`;
 
             log(`Connecting to ${url}`);
             socket = new WebSocket(url);
             socket.binaryType = "arraybuffer";
 
             socket.onopen = () => {
-                setStatus("Awaiting password", "warn");
                 log("WebSocket connected");
+                setStatus("Connecting to node...", "info");
                 sendHeartbeat();
                 heartbeatTimer = setInterval(sendHeartbeat, 15_000);
-                startPasswordCapture();
+                // Send OpenTunnel without password initially
+                requestSshTunnel(selectedNodeId, null);
             };
 
             socket.onmessage = (event) => {
@@ -491,14 +506,30 @@
                 } else if (frame.protocol === Protocol.Control) {
                     try {
                         const msg = JSON.parse(decoder.decode(frame.payload));
-                        log(`Control: ${msg.type ?? "unknown"}`);
+
                         if (msg.type === "Error") {
-                            term.reset();
-                            const message =
-                                msg.message || "SSH authentication failed. Please try again.";
-                            setStatus("Auth failed", "error");
-                            log(message);
-                            startPasswordCapture();
+                            log(`Control: ${msg.type ?? "unknown"} - ${msg.message ?? "no message"}`);
+
+                            const errorKind = msg.kind || 0;
+                            const RequiresPassword = 100;
+
+                            if (errorKind === RequiresPassword) {
+                                // Password is required - prompt user for password
+                                term.reset();
+                                setStatus("Password required", "warn");
+                                log("SSH password is required.");
+                                startPasswordCapture();
+                            } else {
+                                // Generic error (including auth failure)
+                                term.reset();
+                                const message =
+                                    msg.message || "SSH authentication failed. Please try again.";
+                                setStatus("Auth failed", "error");
+                                log(message);
+                                startPasswordCapture();
+                            }
+                        } else {
+                            log(`Control: ${msg.type ?? "unknown"}`);
                         }
                     } catch (err) {
                         log(`Control parse error: ${err.message}`);
@@ -507,10 +538,17 @@
             };
 
             socket.onclose = (evt) => {
-                setStatus("Disconnected", "warn");
-                const reason = evt.reason || `code ${evt.code}`;
-                log(`Socket closed (${reason})`);
-                cleanup();
+                // Only log and cleanup if this was not an intentional close
+                if (!isIntentionallyClosed) {
+                    setStatus("Disconnected", "warn");
+                    const reason = evt.reason || `code ${evt.code}`;
+                    log(`Socket closed (${reason})`);
+                    cleanup();
+                } else {
+                    // Log intentional closure
+                    log("WebSocket connection closed");
+                }
+                isIntentionallyClosed = false;
             };
 
             socket.onerror = (err) => {

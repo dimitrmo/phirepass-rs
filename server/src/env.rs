@@ -10,7 +10,7 @@ pub(crate) struct Env {
     #[envconfig(from = "HTTP_HOST", default = "0.0.0.0")]
     pub host: String,
 
-    #[envconfig(from = "HTTP_PORT", default = "3000")]
+    #[envconfig(from = "HTTP_PORT", default = "8080")]
     pub port: u16,
 
     #[envconfig(from = "STATS_REFRESH_INTERVAL", default = "15")]

@@ -5,8 +5,8 @@ use futures_util::{SinkExt, StreamExt};
 use log::{info, warn};
 use phirepass_common::env::Mode;
 use phirepass_common::protocol::{
-    NodeControlMessage, Protocol, WebControlMessage, decode_node_control, encode_node_control,
-    encode_web_control_to_frame,
+    NodeControlMessage, Protocol, WebControlErrorType, WebControlMessage, decode_node_control,
+    encode_node_control, encode_web_control_to_frame, generic_web_error,
 };
 use phirepass_common::stats::Stats;
 use std::collections::HashMap;
@@ -240,33 +240,40 @@ async fn open_ssh_tunnel(
 ) {
     info!("opening ssh tunnel for client {cid}...");
 
-    let Some(password) = password else {
-        warn!("no ssh password provided for client {cid}");
-        if let Err(err) = send_error_to_client(
-            tx,
-            &cid,
-            "SSH password required. Please provide a password to continue.",
-        ) {
-            warn!("failed to notify client {cid} about missing password: {err}");
+    // Check if authentication mode requires password
+    match &config.ssh_auth_mode {
+        crate::env::SSHAuthMethod::PasswordPrompt => {
+            let Some(password) = password else {
+                warn!("no ssh password provided for client {cid}, but password auth is required");
+                if let Err(err) = send_requires_password_error(tx, &cid) {
+                    warn!("failed to notify client {cid} about password requirement: {err}");
+                }
+                return;
+            };
+
+            let password = password.trim().to_string();
+
+            if password.is_empty() {
+                warn!("empty ssh password provided for client {cid}");
+                if let Err(err) = send_requires_password_error(tx, &cid) {
+                    warn!("failed to notify client {cid} about password requirement: {err}");
+                }
+                return;
+            }
+
+            // Continue with connection attempt
+            start_ssh_tunnel(tx, cid, ssh_sessions, config, password).await;
         }
-
-        return;
-    };
-
-    let password = password.trim().to_string();
-
-    if password.is_empty() {
-        warn!("empty ssh password provided for client {cid}");
-        if let Err(err) = send_error_to_client(
-            tx,
-            &cid,
-            "SSH password cannot be empty. Please enter a valid password.",
-        ) {
-            warn!("failed to notify client {cid} about empty password: {err}");
-        }
-        return;
     }
+}
 
+async fn start_ssh_tunnel(
+    tx: &UnboundedSender<Vec<u8>>,
+    cid: String,
+    ssh_sessions: Arc<Mutex<HashMap<String, SSHSessionHandle>>>,
+    config: Arc<Env>,
+    password: String,
+) {
     let (stdin_tx, stdin_rx) = channel::<SSHCommand>(512);
     let (stop_tx, stop_rx) = oneshot::channel();
     let sender = tx.clone();
@@ -292,9 +299,9 @@ async fn open_ssh_tunnel(
                 if let Err(err) = send_error_to_client(
                     &sender,
                     cid.as_str(),
-                    "SSH authentication failed. Please check your password.",
+                    &generic_web_error("SSH authentication failed. Please check your password."),
                 ) {
-                    warn!("failed to notify client {cid} about missing password: {err}");
+                    warn!("failed to notify client {cid} about authentication failure: {err}");
                 }
             }
         }
@@ -376,11 +383,9 @@ async fn forward_resize(
 fn send_error_to_client(
     tx: &UnboundedSender<Vec<u8>>,
     cid: &str,
-    message: impl Into<String>,
+    error: &WebControlMessage,
 ) -> anyhow::Result<()> {
-    let frame = encode_web_control_to_frame(&WebControlMessage::Error {
-        message: message.into(),
-    })?;
+    let frame = encode_web_control_to_frame(error)?;
 
     let node_msg = NodeControlMessage::Frame {
         frame,
@@ -390,4 +395,15 @@ fn send_error_to_client(
     let raw = encode_node_control(&node_msg)?;
     tx.send(raw)
         .map_err(|err| anyhow!("failed to send error to client: {err}"))
+}
+
+fn send_requires_password_error(tx: &UnboundedSender<Vec<u8>>, cid: &str) -> anyhow::Result<()> {
+    send_error_to_client(
+        tx,
+        cid,
+        &WebControlMessage::Error {
+            kind: WebControlErrorType::RequiresPassword,
+            message: "SSH password is required.".to_string(),
+        },
+    )
 }

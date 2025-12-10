@@ -1,9 +1,9 @@
+mod cli;
 mod daemon;
 mod env;
 mod http;
 mod ssh;
 mod ws;
-mod cli;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -13,7 +13,7 @@ async fn main() -> anyhow::Result<()> {
             println!("{}", env!("CARGO_PKG_VERSION"));
             Ok(())
         }
-        Some(cli:: Commands::Start) | None => {
+        Some(cli::Commands::Start) | None => {
             phirepass_common::logger::init("phirepass:daemon");
             let config = env::init()?;
             daemon::start(config).await

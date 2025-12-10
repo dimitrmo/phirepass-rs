@@ -1,12 +1,12 @@
 mod server;
 
+mod cli;
 mod connection;
 mod env;
 mod http;
 mod node;
 mod state;
 mod web;
-mod cli;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

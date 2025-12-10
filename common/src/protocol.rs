@@ -2,7 +2,50 @@ use std::fmt::Display;
 
 use crate::stats::Stats;
 use rmp_serde::{decode, encode};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WebControlErrorType {
+    Generic = 0,
+    RequiresPassword = 100,
+}
+
+impl Serialize for WebControlErrorType {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_u8(*self as u8)
+    }
+}
+
+impl<'de> Deserialize<'de> for WebControlErrorType {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = u8::deserialize(deserializer)?;
+        Ok(Self::from_u8(value))
+    }
+}
+
+impl TryFrom<u8> for WebControlErrorType {
+    type Error = ();
+
+    fn try_from(value: u8) -> anyhow::Result<Self, Self::Error> {
+        Ok(WebControlErrorType::from_u8(value))
+    }
+}
+
+impl WebControlErrorType {
+    pub fn from_u8(n: u8) -> Self {
+        match n {
+            100 => Self::RequiresPassword,
+            _ => Self::Generic,
+        }
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(tag = "type")]
@@ -24,9 +67,17 @@ pub enum WebControlMessage {
         rows: u32,
     }, // resize a tunnel's pty
     Error {
+        kind: WebControlErrorType,
         message: String,
     }, // error message
     Ok,        // ack
+}
+
+pub fn generic_web_error(msg: impl Into<String>) -> WebControlMessage {
+    WebControlMessage::Error {
+        kind: WebControlErrorType::Generic,
+        message: msg.into(),
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
