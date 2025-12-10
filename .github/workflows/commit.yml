@@ -1,0 +1,36 @@
+name: Commit
+
+on:
+    push:
+        branches-ignore:
+            - master
+    pull_request:
+        branches:
+            - master
+
+env:
+    CI: true
+    CARGO_TERM_COLOR: always
+
+jobs:
+    CI:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v6
+
+            - name: Docker builds setup
+              uses: docker/setup-buildx-action@v3
+
+            - name: Build
+              run: cargo build --all-features
+
+            - name: Run tests
+              run: cargo test --all-features
+
+            - name: Build release
+              run: cargo build --all-features --release
+
+            # Get short git commit hash
+            - name: Set up commit hash
+              run: echo "GIT_COMMIT=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
