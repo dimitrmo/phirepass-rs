@@ -429,19 +429,17 @@
                 return;
             }
 
-            // Handle backspace.
+            // Handle backspace - no visual feedback to hide password length.
             if (data === "\u007f") {
                 if (passwordBuffer.length) {
                     passwordBuffer = passwordBuffer.slice(0, -1);
-                    term.write("\b \b");
                 }
                 return;
             }
 
-            // Accept only printable characters and mask them.
+            // Accept only printable characters - silently capture without visual feedback.
             if (data >= " " && data <= "~") {
                 passwordBuffer += data;
-                term.write("*");
             }
         };
 
@@ -575,6 +573,10 @@
         });
 
         resizeObserver.observe(terminalHost);
+
+        terminalHost.addEventListener("click", () => {
+            term.focus();
+        });
 
         connectBtn.addEventListener("click", connect);
         refreshBtn.addEventListener("click", fetchNodes);
