@@ -32,6 +32,7 @@ pub struct Stats {
     pub host_mem_used_bytes: u64,
     pub host_mem_total_bytes: u64,
     pub host_uptime_secs: u64,
+    pub proc_uptime_secs: u64,
 }
 
 impl Stats {
@@ -62,16 +63,18 @@ impl Stats {
             host_mem_used_bytes: sys.used_memory(),
             host_mem_total_bytes: sys.total_memory(),
             host_uptime_secs: System::uptime(),
+            proc_uptime_secs: proc.run_time(),
         })
     }
 
     pub fn log_line(&self) -> String {
         format!(
-            "stats: pid={}, host_name={}, host_ip={}, host_uptime={}, proc_cpu={:.1}%, proc_mem={}, host_cpu={:.1}%, host_mem={} / {}, host_threads={}",
+            "stats: pid={}, host_name={}, host_ip={}, host_uptime={}, proc_uptime={}, proc_cpu={:.1}%, proc_mem={}, host_cpu={:.1}%, host_mem={} / {}, host_threads={}",
             self.pid,
             self.hostname,
             self.host_ip,
             format_duration(self.host_uptime_secs),
+            format_duration(self.proc_uptime_secs),
             self.proc_cpu,
             format_mem(self.proc_mem_bytes),
             self.host_cpu,
