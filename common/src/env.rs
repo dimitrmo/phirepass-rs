@@ -25,3 +25,9 @@ impl std::fmt::Display for Mode {
         write!(f, "{}", s)
     }
 }
+
+impl Mode {
+    pub fn is_production(&self) -> bool {
+        matches!(self, Self::Production)
+    }
+}

@@ -9,7 +9,7 @@ use crate::node::ws_node_handler;
 use crate::state::AppState;
 use crate::web::ws_web_handler;
 use axum::extract::State;
-use axum::http::header;
+use axum::http::{header, HeaderMap, HeaderValue};
 use axum::routing::get;
 use axum::{Json, Router};
 use log::{info, warn};
@@ -18,9 +18,8 @@ use serde::Serialize;
 
 pub async fn start(config: Env) -> anyhow::Result<()> {
     let stats_refresh_interval = config.stats_refresh_interval;
-    let host = format!("{}:{}", config.host, config.port);
 
-    let http_task = start_http_server(host);
+    let http_task = start_http_server(config);
     let stats_task = spawn_stats_logger(stats_refresh_interval);
 
     tokio::select! {
@@ -31,9 +30,12 @@ pub async fn start(config: Env) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn start_http_server(host: String) -> tokio::task::JoinHandle<()> {
+fn start_http_server(config: Env) -> tokio::task::JoinHandle<()> {
+    let host = format!("{}:{}", config.host, config.port);
+
     tokio::spawn(async move {
         let state = AppState {
+            env: Arc::new(config),
             nodes: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             clients: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         };
@@ -96,5 +98,13 @@ async fn list_nodes(State(state): State<AppState>) -> impl axum::response::IntoR
         })
         .collect();
 
-    ([(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")], Json(data))
+    let mut headers = HeaderMap::new();
+    if !state.env.mode.is_production() {
+        headers.insert(
+            header::ACCESS_CONTROL_ALLOW_ORIGIN,
+            HeaderValue::from_static("*"),
+        );
+    }
+
+    (headers, Json(data))
 }
