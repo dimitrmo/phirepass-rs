@@ -1,0 +1,12 @@
+[package]
+name = "phirepass-web"
+version = { workspace = true }
+edition = { workspace = true }
+
+[dependencies]
+axum = { workspace = true }
+log = { workspace = true }
+phirepass-common = { workspace = true }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+russh = { workspace = true }

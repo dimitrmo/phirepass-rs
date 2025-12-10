@@ -1,0 +1,17 @@
+[package]
+name = "phirepass-daemon"
+version = { workspace = true }
+edition = { workspace = true }
+
+[dependencies]
+env_logger = { workspace = true }
+futures-util = { workspace = true }
+clap = { workspace = true }
+phirepass-common = { workspace = true }
+log = { workspace = true }
+tokio = { workspace = true }
+russh = { workspace = true }
+anyhow = { workspace = true }
+tokio-tungstenite = { workspace = true }
+envconfig = { workspace = true }
+axum = { workspace = true }
