@@ -42,7 +42,7 @@ async fn favicon() -> impl IntoResponse {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    phirepass_common::logger::init_logger("phirepass:web");
+    phirepass_common::logger::init("phirepass:web");
 
     let app = Router::new()
         .route("/", get(index))
@@ -52,7 +52,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/favicon.ico", get(favicon));
 
     let addr: SocketAddr = "0.0.0.0:8080".parse()?;
-    info!("serving web ui on http://{addr}");
+    info!("serving web ui on {addr}");
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app.into_make_service()).await?;

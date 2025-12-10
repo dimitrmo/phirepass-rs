@@ -17,7 +17,7 @@ pub(crate) struct Env {
     pub stats_refresh_interval: u16,
 }
 
-pub fn init_env() -> anyhow::Result<Env> {
+pub fn init() -> anyhow::Result<Env> {
     let config = Env::init_from_env()?;
     Ok(config)
 }

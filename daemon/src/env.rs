@@ -2,7 +2,7 @@ use envconfig::Envconfig;
 use phirepass_common::env::Mode;
 
 #[derive(Envconfig)]
-pub struct Env {
+pub(crate) struct Env {
     #[envconfig(from = "APP_MODE", default = "development")]
     pub mode: Mode,
 
@@ -34,7 +34,7 @@ pub struct Env {
     pub ssh_user: String,
 }
 
-pub fn init_env() -> anyhow::Result<Env> {
+pub(crate) fn init() -> anyhow::Result<Env> {
     let config = Env::init_from_env()?;
     Ok(config)
 }

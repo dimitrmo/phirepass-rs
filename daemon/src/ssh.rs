@@ -25,7 +25,7 @@ impl client::Handler for Client {
     }
 }
 
-pub struct Connection {
+struct Connection {
     session: client::Handle<Client>,
 }
 

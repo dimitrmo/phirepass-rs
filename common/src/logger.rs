@@ -1,6 +1,6 @@
 use std::io::Write;
 
-pub fn init_logger(prefix: &'static str) {
+pub fn init(prefix: &'static str) {
     env_logger::Builder::from_default_env()
         .format(move |buf, record| {
             writeln!(
