@@ -34,6 +34,9 @@ pub(crate) struct Env {
     #[envconfig(from = "STATS_REFRESH_INTERVAL", default = "15")]
     pub stats_refresh_interval: u16,
 
+    #[envconfig(from = "PING_INTERVAL", default = "30")]
+    pub ping_interval: u16,
+
     #[envconfig(from = "SERVER_HOST", default = "0.0.0.0")]
     pub server_host: String,
 

@@ -11,7 +11,7 @@ use phirepass_common::protocol::{
 use phirepass_common::stats::Stats;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::Mutex;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{Sender, UnboundedReceiver, UnboundedSender, channel};
@@ -80,6 +80,7 @@ impl WSConnection {
     pub async fn connect(self, config: Arc<Env>) -> anyhow::Result<()> {
         info!("connecting ws...");
 
+        let ping_interval = config.ping_interval;
         let endpoint = format!(
             "{}/nodes/ws",
             generate_server_endpoint(
@@ -171,9 +172,30 @@ impl WSConnection {
             }
         });
 
+        let ping_tx = self.writer.clone();
+        let ping_task = tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(ping_interval as u64));
+            loop {
+                interval.tick().await;
+
+                let sent_at = now_millis();
+                match encode_node_control(&NodeControlMessage::Ping { sent_at }) {
+                    Ok(raw) => {
+                        if ping_tx.send(raw).is_err() {
+                            warn!("failed to queue ping: channel closed");
+                            break;
+                        }
+                        info!("ping sent at {sent_at}");
+                    }
+                    Err(err) => warn!("failed to encode ping: {err}"),
+                }
+            }
+        });
+
         info!("connected");
 
         tokio::select! {
+            _ = ping_task => warn!("ping task ended"),
             _ = write_task => warn!("write task ended"),
             _ = reader_task => warn!("read task ended"),
             _ = heartbeat_task => warn!("heartbeat task ended"),
@@ -226,6 +248,26 @@ async fn handle_control_from_server(
             } else {
                 warn!("unsupported tunnel protocol {protocol} for client {cid}");
             }
+        }
+        NodeControlMessage::Ping { sent_at } => {
+            let now = now_millis();
+            let latency = now.saturating_sub(sent_at);
+            info!("received ping from server; latency={}ms", latency);
+
+            let pong = NodeControlMessage::Pong { sent_at: now };
+            match encode_node_control(&pong) {
+                Ok(raw) => {
+                    if tx.send(raw).is_err() {
+                        warn!("failed to queue pong: channel closed");
+                    }
+                }
+                Err(err) => warn!("failed to encode pong: {err}"),
+            }
+        }
+        NodeControlMessage::Pong { sent_at } => {
+            let now = now_millis();
+            let rtt = now.saturating_sub(sent_at);
+            info!("received pong; round-trip={}ms (sent_at={sent_at})", rtt);
         }
         o => warn!("received unsupported control message: {:?}", o),
     }
@@ -406,4 +448,11 @@ fn send_requires_password_error(tx: &UnboundedSender<Vec<u8>>, cid: &str) -> any
             message: "SSH password is required.".to_string(),
         },
     )
+}
+
+fn now_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }

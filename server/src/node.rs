@@ -9,7 +9,7 @@ use phirepass_common::protocol::{
 };
 use phirepass_common::stats::Stats;
 use std::net::SocketAddr;
-use std::time::Instant;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc::unbounded_channel;
 use ulid::Ulid;
 
@@ -64,6 +64,18 @@ async fn handle_node_socket(socket: WebSocket, state: AppState, addr: SocketAddr
                     }
                     NodeControlMessage::Frame { frame, cid } => {
                         handle_frame_response(&state, frame, id.to_string(), cid).await;
+                    }
+                    NodeControlMessage::Ping { sent_at } => {
+                        let now = now_millis();
+                        let latency = now.saturating_sub(sent_at);
+                        info!("ping from node {id}; latency={}ms", latency);
+
+                        let pong = NodeControlMessage::Pong { sent_at: now };
+                        if let Err(err) = tx.send(pong) {
+                            warn!("failed to queue pong for node {id}: {err}");
+                        } else {
+                            info!("pong response to node {id} sent");
+                        }
                     }
                     _ => {}
                 },
@@ -139,4 +151,11 @@ async fn update_node_heartbeat(state: &AppState, id: Ulid, stats: Option<Stats>)
     } else {
         warn!("received heartbeat for unknown node {id}");
     }
+}
+
+fn now_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }

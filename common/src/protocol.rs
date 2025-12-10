@@ -104,6 +104,12 @@ pub enum NodeControlMessage {
         cols: u32,
         rows: u32,
     },
+    Ping {
+        sent_at: u64,
+    }, // ping request with send timestamp
+    Pong {
+        sent_at: u64,
+    }, // pong response with send timestamp
     ClientDisconnect {
         cid: String,
     }, // notify node for client disconnect
