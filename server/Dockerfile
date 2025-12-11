@@ -35,4 +35,6 @@ COPY --from=builder /app-bin /app/"${APP_NAME}"
 
 USER nonroot
 
-CMD [ "sh", "-c", "/app/${BINARY}", "version" ]
+ENTRYPOINT ["/app/server"]
+CMD ["version"]
+

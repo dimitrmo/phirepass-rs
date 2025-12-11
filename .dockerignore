@@ -1,2 +1,7 @@
 .devcontainer
+.github
 target
+Makefile
+README.md
+TASKS.md
+
