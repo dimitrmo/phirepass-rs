@@ -29,12 +29,12 @@ RUN RUST_TARGET="$(cat /rust_target)" && \
 
 FROM gcr.io/distroless/cc-debian13:nonroot AS runtime
 
-ARG APP_NAME=server
+ARG RUST_LOG=info
 
-COPY --from=builder /app-bin /app/"${APP_NAME}"
+COPY --from=builder /app-bin /app/server"
 
 USER nonroot
 
-ENTRYPOINT ["/app/${APP_NAME}"]
+ENTRYPOINT ["/app/server"]
 CMD ["version"]
 
