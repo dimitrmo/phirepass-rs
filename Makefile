@@ -27,7 +27,7 @@ format:
 db:
 	docker run --rm -it --name phirepass-valkey -p 6379:6379 valkey/valkey:9
 
-docker:
+docker-server:
 	docker buildx build \
 		-t dimitrmok/phirepass-server:latest \
 		--platform linux/amd64,linux/arm64 \
@@ -36,4 +36,13 @@ docker:
 		--push \
 		.
 
-.PHONY: server deamon client web build arm format db docker
+docker-daemon:
+	docker buildx build \
+		-t dimitrmok/phirepass-daemon:latest \
+		--platform linux/amd64,linux/arm64 \
+		-f daemon/Dockerfile \
+		--progress=plain \
+		--push \
+		.
+
+.PHONY: server deamon client web build arm format db docker-server docker-daemon
