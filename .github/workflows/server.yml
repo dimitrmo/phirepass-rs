@@ -76,7 +76,7 @@ jobs:
               uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051
               with:
                   images: |
-                    phirepass-server
+                    dimitrmok/phirepass-server
 
             - name: Build and push docker image for phirepass-server
               id: build-and-push
@@ -85,7 +85,7 @@ jobs:
                   context: .
                   platforms: linux/amd64,linux/arm64
                   push: ${{ github.event_name != 'pull_request' }}
-                  tags: phirepass-server:${{ steps.verison.outputs.next_version }},phirepass-server:latest
+                  tags: dimitrmok/phirepass-server:${{ steps.verison.outputs.next_version }},dimitrmok/phirepass-server:latest
                   labels: ${{ steps.meta.outputs.labels }}
                   file: server/Dockerfile
                   outputs: "type=registry"
