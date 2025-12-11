@@ -17,6 +17,8 @@ use phirepass_common::stats::Stats;
 use serde::Serialize;
 
 pub async fn start(config: Env) -> anyhow::Result<()> {
+    info!("running server on {} mode", config.mode);
+
     let stats_refresh_interval = config.stats_refresh_interval;
 
     let http_task = start_http_server(config);

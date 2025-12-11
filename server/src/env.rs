@@ -3,7 +3,14 @@ use phirepass_common::env::Mode;
 
 #[derive(Envconfig)]
 pub(crate) struct Env {
-    #[envconfig(from = "APP_MODE", default = "development")]
+    #[cfg_attr(
+        debug_assertions,
+        envconfig(from = "APP_MODE", default = "development")
+    )]
+    #[cfg_attr(
+        not(debug_assertions),
+        envconfig(from = "APP_MODE", default = "production")
+    )]
     #[allow(dead_code)]
     pub mode: Mode,
 
