@@ -29,9 +29,9 @@ db:
 
 docker:
 	docker buildx build \
-		-t phirepass/daemon:latest \
+		-t dimitrmok/phirepass-server:latest \
 		--platform linux/amd64,linux/arm64 \
-		-f daemon/Dockerfile \
+		-f server/Dockerfile \
 		--progress=plain \
 		--push \
 		.

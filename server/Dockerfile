@@ -2,6 +2,7 @@ FROM --platform=$BUILDPLATFORM rust:1.91-slim-trixie AS builder
 
 ARG TARGETARCH
 ARG BUILDPLATFORM
+ARG APP_NAME=server
 
 WORKDIR /app
 
@@ -22,18 +23,17 @@ COPY . .
 
 RUN RUST_TARGET="$(cat /rust_target)" && \
     rustup target add "${RUST_TARGET}" && \
-    cargo install --bin server --verbose --path . --target "${RUST_TARGET}" && \
-    cp target/${RUST_TARGET}/release/server /app-bin && \
+    cargo install --bin ${APP_NAME} --verbose --path . --target "${RUST_TARGET}" && \
+    cp target/"${RUST_TARGET}"/release/"${APP_NAME}" /app-bin && \
     rm -rf src target/"${RUST_TARGET}"/release/*
 
 FROM gcr.io/distroless/cc-debian13:nonroot AS runtime
 
-ARG RUST_LOG=info
+ENV RUST_LOG=info
 
 COPY --from=builder /app-bin /app/server
 
 USER nonroot
 
 ENTRYPOINT ["/app/server"]
-CMD ["version"]
-
+CMD ["start"]
