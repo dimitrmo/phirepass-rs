@@ -60,7 +60,10 @@ pub enum WebControlMessage {
         protocol: u8,
         target: String,
         data: Vec<u8>,
-    }, // allow user to send data to specific tunnel
+    },
+    TunnelClosed {
+        protocol: u8,
+    },
     Resize {
         target: String,
         cols: u32,
@@ -85,15 +88,15 @@ pub fn generic_web_error(msg: impl Into<String>) -> WebControlMessage {
 pub enum NodeControlMessage {
     Auth {
         token: String,
-    }, // authentication of a node to the server
+    },
     Heartbeat {
         stats: Stats,
-    }, // heartbeat with stats that node sends to server
+    },
     OpenTunnel {
         protocol: u8,
         cid: String,
         password: Option<String>,
-    }, // open a tunnel to target ( by name ) - send from server to daemon
+    },
     TunnelData {
         protocol: u8,
         cid: String,
@@ -110,7 +113,7 @@ pub enum NodeControlMessage {
     Pong {
         sent_at: u64,
     }, // pong response with send timestamp
-    ClientDisconnect {
+    ConnectionDisconnect {
         cid: String,
     }, // notify node for client disconnect
     Error {

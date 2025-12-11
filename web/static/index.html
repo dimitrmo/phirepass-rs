@@ -505,7 +505,18 @@
                     try {
                         const msg = JSON.parse(decoder.decode(frame.payload));
 
-                        if (msg.type === "Error") {
+                        if (msg.type === "TunnelClosed") {
+                            const protocolName =
+                                msg.protocol === Protocol.SSH
+                                    ? "SSH"
+                                    : msg.protocol === Protocol.Control
+                                      ? "Control"
+                                      : `Protocol ${msg.protocol ?? "unknown"}`;
+                            log(`${protocolName} tunnel closed by remote host`);
+                            setStatus("Tunnel closed", "warn");
+                            term.reset();
+                            cleanup();
+                        } else if (msg.type === "Error") {
                             log(`Control: ${msg.type ?? "unknown"} - ${msg.message ?? "no message"}`);
 
                             const errorKind = msg.kind || 0;

@@ -80,6 +80,7 @@ async fn handle_web_socket(socket: WebSocket, state: AppState, addr: SocketAddr)
                             WebControlMessage::Resize { target, cols, rows } => {
                                 handle_resize(&state, id, target, cols, rows).await;
                             }
+                            WebControlMessage::TunnelClosed { .. } => {},
                             WebControlMessage::Error { .. } => {}
                             WebControlMessage::Ok => {}
                         },
@@ -262,7 +263,7 @@ async fn notify_nodes_client_disconnect(state: &AppState, cid: Ulid) {
     let nodes = state.nodes.lock().await;
 
     for (node_id, conn) in nodes.iter() {
-        match conn.tx.send(NodeControlMessage::ClientDisconnect {
+        match conn.tx.send(NodeControlMessage::ConnectionDisconnect {
             cid: cid_str.clone(),
         }) {
             Ok(..) => info!("notified node {node_id} about client {cid_str} disconnect"),

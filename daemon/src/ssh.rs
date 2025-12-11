@@ -12,9 +12,9 @@ use tokio::sync::mpsc::Receiver;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
 
-struct Client {}
+struct SSHClient {}
 
-impl client::Handler for Client {
+impl client::Handler for SSHClient {
     type Error = russh::Error;
 
     async fn check_server_key(
@@ -26,7 +26,7 @@ impl client::Handler for Client {
 }
 
 struct Connection {
-    session: client::Handle<Client>,
+    session: client::Handle<SSHClient>,
 }
 
 impl Connection {
@@ -51,7 +51,7 @@ impl Connection {
         };
 
         let config = Arc::new(config);
-        let sh = Client {};
+        let sh = SSHClient {};
 
         let mut session = client::connect(config, (ssh_config.host, ssh_config.port), sh).await?;
 

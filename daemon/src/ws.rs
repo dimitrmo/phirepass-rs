@@ -5,8 +5,8 @@ use futures_util::{SinkExt, StreamExt};
 use log::{info, warn};
 use phirepass_common::env::Mode;
 use phirepass_common::protocol::{
-    NodeControlMessage, Protocol, WebControlErrorType, WebControlMessage, decode_node_control,
-    encode_node_control, encode_web_control_to_frame, generic_web_error,
+    NodeControlMessage, Protocol, WebControlErrorType, WebControlMessage,
+    decode_node_control, encode_node_control, encode_web_control_to_frame, generic_web_error,
 };
 use phirepass_common::stats::Stats;
 use std::collections::HashMap;
@@ -228,7 +228,7 @@ async fn handle_control_from_server(
                 Err(err) => warn!("invalid protocol value {}: {:?}", protocol, err),
             }
         }
-        NodeControlMessage::ClientDisconnect { cid } => {
+        NodeControlMessage::ConnectionDisconnect { cid } => {
             close_ssh_tunnel(ssh_sessions.clone(), cid).await;
         }
         NodeControlMessage::Resize { cid, cols, rows } => {
@@ -242,11 +242,11 @@ async fn handle_control_from_server(
             data,
         } => {
             if protocol == Protocol::SSH as u8 {
-                if let Err(err) = forward_tunnel_data(ssh_sessions.clone(), cid, data).await {
+                if let Err(err) = tunnel_data(ssh_sessions.clone(), cid, data).await {
                     warn!("{err}");
                 }
             } else {
-                warn!("unsupported tunnel protocol {protocol} for client {cid}");
+                warn!("unsupported tunnel protocol {protocol} for connection {cid}");
             }
         }
         NodeControlMessage::Ping { sent_at } => {
@@ -280,15 +280,17 @@ async fn open_ssh_tunnel(
     config: Arc<Env>,
     password: Option<String>,
 ) {
-    info!("opening ssh tunnel for client {cid}...");
+    info!("opening ssh tunnel for connection {cid}...");
 
     // Check if authentication mode requires password
     match &config.ssh_auth_mode {
         crate::env::SSHAuthMethod::PasswordPrompt => {
             let Some(password) = password else {
-                warn!("no ssh password provided for client {cid}, but password auth is required");
+                warn!(
+                    "no ssh password provided for connection {cid}, but password auth is required"
+                );
                 if let Err(err) = send_requires_password_error(tx, &cid) {
-                    warn!("failed to notify client {cid} about password requirement: {err}");
+                    warn!("failed to notify connection {cid} about password requirement: {err}");
                 }
                 return;
             };
@@ -296,9 +298,9 @@ async fn open_ssh_tunnel(
             let password = password.trim().to_string();
 
             if password.is_empty() {
-                warn!("empty ssh password provided for client {cid}");
+                warn!("empty ssh password provided for connection {cid}");
                 if let Err(err) = send_requires_password_error(tx, &cid) {
-                    warn!("failed to notify client {cid} about password requirement: {err}");
+                    warn!("failed to notify connection {cid} about password requirement: {err}");
                 }
                 return;
             }
@@ -320,9 +322,9 @@ async fn start_ssh_tunnel(
     let (stop_tx, stop_rx) = oneshot::channel();
     let sender = tx.clone();
     let cid_for_task = cid.clone();
-    let cid_for_client = cid.clone();
+    let cid_for_connection = cid.clone();
     let ssh_task = tokio::spawn(async move {
-        info!("ssh task started for client {cid_for_task}");
+        info!("ssh task started for connection {cid_for_task}");
 
         let conn = SSHConnection::new(SSHConfig {
             host: config.ssh_host.clone(),
@@ -335,15 +337,25 @@ async fn start_ssh_tunnel(
             .connect(&sender, cid_for_task.clone(), stdin_rx, stop_rx)
             .await
         {
-            Ok(()) => info!("ssh connection for client {cid_for_task} ended"),
+            Ok(()) => {
+                info!("ssh connection {cid_for_task} ended");
+
+                if let Err(err) = send_data_to_connection(
+                    &sender,
+                    cid.as_str(),
+                    &WebControlMessage::TunnelClosed { protocol: Protocol::SSH as u8 }
+                ) {
+                    warn!("failed to notify cid {cid_for_task} for ssh connection closure: {err}");
+                }
+            }
             Err(err) => {
-                warn!("ssh client error for {cid_for_task}: {err}");
-                if let Err(err) = send_error_to_client(
+                warn!("ssh connection error for {cid_for_task}: {err}");
+                if let Err(err) = send_data_to_connection(
                     &sender,
                     cid.as_str(),
                     &generic_web_error("SSH authentication failed. Please check your password."),
                 ) {
-                    warn!("failed to notify client {cid} about authentication failure: {err}");
+                    warn!("failed to notify connection {cid} about authentication failure: {err}");
                 }
             }
         }
@@ -357,7 +369,7 @@ async fn start_ssh_tunnel(
 
     let previous = {
         let mut sessions = ssh_sessions.lock().await;
-        sessions.insert(cid_for_client, handle)
+        sessions.insert(cid_for_connection, handle)
     };
 
     if let Some(prev) = previous {
@@ -376,14 +388,14 @@ async fn close_ssh_tunnel(
 
     match handle {
         Some(handle) => {
-            info!("closing ssh tunnel for client {cid}");
+            info!("closing ssh tunnel for connection {cid}");
             handle.shutdown().await;
         }
-        None => info!("no ssh tunnel to close for client {cid}"),
+        None => info!("no ssh tunnel to close for connection {cid}"),
     }
 }
 
-async fn forward_tunnel_data(
+async fn tunnel_data(
     ssh_sessions: Arc<Mutex<HashMap<String, SSHSessionHandle>>>,
     cid: String,
     data: Vec<u8>,
@@ -394,7 +406,7 @@ async fn forward_tunnel_data(
     };
 
     let Some(stdin) = stdin else {
-        return Err(format!("no ssh tunnel found for client {cid}"));
+        return Err(format!("no ssh tunnel found for connection {cid}"));
     };
 
     stdin
@@ -414,7 +426,7 @@ async fn forward_resize(
     };
 
     let Some(stdin) = stdin else {
-        return Err(format!("no ssh tunnel found for client {cid}"));
+        return Err(format!("no ssh tunnel found for connection {cid}"));
     };
 
     stdin
@@ -422,12 +434,12 @@ async fn forward_resize(
         .map_err(|err| format!("failed to queue resize to ssh tunnel for {cid}: {err}"))
 }
 
-fn send_error_to_client(
+fn send_data_to_connection(
     tx: &UnboundedSender<Vec<u8>>,
     cid: &str,
-    error: &WebControlMessage,
+    data: &WebControlMessage,
 ) -> anyhow::Result<()> {
-    let frame = encode_web_control_to_frame(error)?;
+    let frame = encode_web_control_to_frame(data)?;
 
     let node_msg = NodeControlMessage::Frame {
         frame,
@@ -436,11 +448,11 @@ fn send_error_to_client(
 
     let raw = encode_node_control(&node_msg)?;
     tx.send(raw)
-        .map_err(|err| anyhow!("failed to send error to client: {err}"))
+        .map_err(|err| anyhow!("failed to send data to connection: {err}"))
 }
 
 fn send_requires_password_error(tx: &UnboundedSender<Vec<u8>>, cid: &str) -> anyhow::Result<()> {
-    send_error_to_client(
+    send_data_to_connection(
         tx,
         cid,
         &WebControlMessage::Error {
