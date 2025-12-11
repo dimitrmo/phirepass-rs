@@ -23,7 +23,7 @@ COPY . .
 
 RUN RUST_TARGET="$(cat /rust_target)" && \
     rustup target add "${RUST_TARGET}" && \
-    cargo install --bin server --verbose --path . --target "${RUST_TARGET}" && \
+    cargo install --bin ${APP_NAME} --verbose --path . --target "${RUST_TARGET}" && \
     cp target/"${RUST_TARGET}"/release/"${APP_NAME}" /app-bin && \
     rm -rf src target/"${RUST_TARGET}"/release/*
 
@@ -35,6 +35,6 @@ COPY --from=builder /app-bin /app/"${APP_NAME}"
 
 USER nonroot
 
-ENTRYPOINT ["/app/server"]
+ENTRYPOINT ["/app/${APP_NAME}"]
 CMD ["version"]
 
