@@ -31,7 +31,7 @@ FROM gcr.io/distroless/cc-debian13:nonroot AS runtime
 
 ARG RUST_LOG=info
 
-COPY --from=builder /app-bin /app/server"
+COPY --from=builder /app-bin /app/server
 
 USER nonroot
 
