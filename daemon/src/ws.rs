@@ -5,8 +5,8 @@ use futures_util::{SinkExt, StreamExt};
 use log::{info, warn};
 use phirepass_common::env::Mode;
 use phirepass_common::protocol::{
-    NodeControlMessage, Protocol, WebControlErrorType, WebControlMessage,
-    decode_node_control, encode_node_control, encode_web_control_to_frame, generic_web_error,
+    NodeControlMessage, Protocol, WebControlErrorType, WebControlMessage, decode_node_control,
+    encode_node_control, encode_web_control_to_frame, generic_web_error,
 };
 use phirepass_common::stats::Stats;
 use std::collections::HashMap;
@@ -343,7 +343,9 @@ async fn start_ssh_tunnel(
                 if let Err(err) = send_data_to_connection(
                     &sender,
                     cid.as_str(),
-                    &WebControlMessage::TunnelClosed { protocol: Protocol::SSH as u8 }
+                    &WebControlMessage::TunnelClosed {
+                        protocol: Protocol::SSH as u8,
+                    },
                 ) {
                     warn!("failed to notify cid {cid_for_task} for ssh connection closure: {err}");
                 }

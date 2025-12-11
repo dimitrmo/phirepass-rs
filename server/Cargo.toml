@@ -16,3 +16,4 @@ serde_json = { workspace = true }
 phirepass-common = { workspace = true }
 log = { workspace = true }
 envconfig = { workspace = true }
+axum-client-ip = { workspace = true }

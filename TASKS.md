@@ -8,7 +8,3 @@
 * Create Synology application
 * Create Fedora systemd application
 * Create RPi systemd application
-* Toml configuration for demon
-* Tunnel for RDP
-* Tunnel for HTTP
-* HTTP Proxy

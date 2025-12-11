@@ -1,3 +1,4 @@
+use axum_client_ip::ClientIpSource;
 use envconfig::Envconfig;
 use phirepass_common::env::Mode;
 
@@ -13,6 +14,9 @@ pub(crate) struct Env {
     )]
     #[allow(dead_code)]
     pub mode: Mode,
+
+    #[envconfig(from = "IP_SOURCE", default = "ConnectInfo")]
+    pub(crate) ip_source: ClientIpSource,
 
     #[envconfig(from = "HTTP_HOST", default = "0.0.0.0")]
     pub host: String,

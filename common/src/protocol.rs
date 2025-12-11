@@ -73,7 +73,7 @@ pub enum WebControlMessage {
         kind: WebControlErrorType,
         message: String,
     }, // error message
-    Ok,        // ack
+    Ok, // ack
 }
 
 pub fn generic_web_error(msg: impl Into<String>) -> WebControlMessage {

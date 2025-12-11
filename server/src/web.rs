@@ -2,34 +2,35 @@ use crate::connection::WebConnection;
 use crate::state::AppState;
 use axum::extract::ws::{Message, WebSocket};
 use axum::extract::{State, WebSocketUpgrade};
+use axum_client_ip::ClientIp;
 use futures_util::{SinkExt, StreamExt};
 use log::{info, warn};
 use phirepass_common::protocol::{
     Frame, NodeControlMessage, Protocol, WebControlMessage, decode_web_control,
 };
-use std::net::SocketAddr;
+use std::net::IpAddr;
 use std::time::Instant;
 use tokio::sync::mpsc::unbounded_channel;
 use ulid::Ulid;
 
 pub(crate) async fn ws_web_handler(
     State(state): State<AppState>,
-    axum::extract::ConnectInfo(addr): axum::extract::ConnectInfo<SocketAddr>,
+    ClientIp(ip): ClientIp,
     ws: WebSocketUpgrade,
 ) -> impl axum::response::IntoResponse {
-    ws.on_upgrade(move |socket| handle_web_socket(socket, state, addr))
+    ws.on_upgrade(move |socket| handle_web_socket(socket, state, ip))
 }
 
-async fn handle_web_socket(socket: WebSocket, state: AppState, addr: SocketAddr) {
+async fn handle_web_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
     let id = Ulid::new();
     let (mut ws_tx, mut ws_rx) = socket.split();
     let (tx, mut rx) = unbounded_channel::<Frame>();
 
     {
         let mut clients = state.clients.lock().await;
-        clients.insert(id, WebConnection::new(addr, tx));
+        clients.insert(id, WebConnection::new(ip, tx));
         let total = clients.len();
-        info!("client {id} ({addr}) connected (total: {total})", id = id);
+        info!("client {id} ({ip}) connected (total: {total})", id = id);
     }
 
     let write_task = tokio::spawn(async move {
@@ -80,7 +81,7 @@ async fn handle_web_socket(socket: WebSocket, state: AppState, addr: SocketAddr)
                             WebControlMessage::Resize { target, cols, rows } => {
                                 handle_resize(&state, id, target, cols, rows).await;
                             }
-                            WebControlMessage::TunnelClosed { .. } => {},
+                            WebControlMessage::TunnelClosed { .. } => {}
                             WebControlMessage::Error { .. } => {}
                             WebControlMessage::Ok => {}
                         },
@@ -113,7 +114,7 @@ async fn disconnect_web_client(state: &AppState, id: Ulid) {
         let alive = info.connected_at.elapsed();
         info!(
             "client {id} ({}) removed after {:.1?} (total: {})",
-            info.addr,
+            info.ip,
             alive,
             clients.len()
         );
@@ -129,7 +130,7 @@ async fn update_web_heartbeat(state: &AppState, id: Ulid) {
         info.last_heartbeat = Instant::now();
         info!(
             "heartbeat from web {id} ({}) after {:.1?}",
-            info.addr, since_last
+            info.ip, since_last
         );
     } else {
         warn!("received heartbeat for unknown web client {id}");

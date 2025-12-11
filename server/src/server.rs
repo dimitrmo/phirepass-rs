@@ -33,6 +33,7 @@ pub async fn start(config: Env) -> anyhow::Result<()> {
 }
 
 fn start_http_server(config: Env) -> tokio::task::JoinHandle<()> {
+    let ip_source = config.ip_source.clone();
     let host = format!("{}:{}", config.host, config.port);
 
     tokio::spawn(async move {
@@ -48,6 +49,7 @@ fn start_http_server(config: Env) -> tokio::task::JoinHandle<()> {
             .route("/nodes", get(list_nodes))
             .route("/ready", get(get_ready))
             .route("/alive", get(get_alive))
+            .layer(ip_source.into_extension())
             .with_state(state);
 
         let listener = tokio::net::TcpListener::bind(host).await.unwrap();
@@ -79,7 +81,7 @@ fn spawn_stats_logger(stats_refresh_interval: u16) -> tokio::task::JoinHandle<()
 #[derive(Serialize)]
 struct NodeSummary {
     id: String,
-    addr: String,
+    ip: String,
     connected_for_secs: f64,
     since_last_heartbeat_secs: f64,
     stats: Option<Stats>,
@@ -93,7 +95,7 @@ async fn list_nodes(State(state): State<AppState>) -> impl axum::response::IntoR
         .iter()
         .map(|(id, info)| NodeSummary {
             id: id.to_string(),
-            addr: info.addr.to_string(),
+            ip: info.ip.to_string(),
             connected_for_secs: now.duration_since(info.connected_at).as_secs_f64(),
             since_last_heartbeat_secs: now.duration_since(info.last_heartbeat).as_secs_f64(),
             stats: info.last_stats.clone(),

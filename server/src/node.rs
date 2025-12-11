@@ -2,35 +2,36 @@ use crate::connection::NodeConnection;
 use crate::state::AppState;
 use axum::extract::ws::{Message, WebSocket};
 use axum::extract::{State, WebSocketUpgrade};
+use axum_client_ip::ClientIp;
 use futures_util::{SinkExt, StreamExt};
 use log::{info, warn};
 use phirepass_common::protocol::{
     Frame, NodeControlMessage, decode_node_control, encode_node_control,
 };
 use phirepass_common::stats::Stats;
-use std::net::SocketAddr;
+use std::net::IpAddr;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc::unbounded_channel;
 use ulid::Ulid;
 
 pub(crate) async fn ws_node_handler(
     State(state): State<AppState>,
-    axum::extract::ConnectInfo(addr): axum::extract::ConnectInfo<SocketAddr>,
+    ClientIp(ip): ClientIp,
     ws: WebSocketUpgrade,
 ) -> impl axum::response::IntoResponse {
-    ws.on_upgrade(move |socket| handle_node_socket(socket, state, addr))
+    ws.on_upgrade(move |socket| handle_node_socket(socket, state, ip))
 }
 
-async fn handle_node_socket(socket: WebSocket, state: AppState, addr: SocketAddr) {
+async fn handle_node_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
     let id = Ulid::new();
     let (mut ws_tx, mut ws_rx) = socket.split();
     let (tx, mut rx) = unbounded_channel::<NodeControlMessage>(); // node can communicate only with node control messages
 
     {
         let mut nodes = state.nodes.lock().await;
-        nodes.insert(id, NodeConnection::new(addr, tx.clone()));
+        nodes.insert(id, NodeConnection::new(ip, tx.clone()));
         let total = nodes.len();
-        info!("node {id} ({addr}) connected (total: {total})", id = id);
+        info!("node {id} ({ip}) connected (total: {total})", id = id);
     }
 
     let write_task = tokio::spawn(async move {
@@ -122,7 +123,7 @@ async fn disconnect_node(state: &AppState, id: Ulid) {
         let alive = info.connected_at.elapsed();
         info!(
             "node {id} ({}) removed after {:.1?} (total: {})",
-            info.addr,
+            info.ip,
             alive,
             nodes.len()
         );
@@ -138,14 +139,14 @@ async fn update_node_heartbeat(state: &AppState, id: Ulid, stats: Option<Stats>)
             info.last_stats = Some(stats.clone());
             info!(
                 "heartbeat from node {id} ({}) after {:.1?}; {}",
-                info.addr,
+                info.ip,
                 since_last,
                 stats.log_line()
             );
         } else {
             info!(
                 "heartbeat from node {id} ({}) after {:.1?}",
-                info.addr, since_last
+                info.ip, since_last
             );
         }
     } else {

@@ -267,7 +267,7 @@
                 meta.className = "node-meta";
                 const stats = node.stats || {};
                 meta.innerHTML = [
-                    `addr: ${node.addr}`,
+                    `ip: ${node.ip}`,
                     `uptime: ${formatNumber(node.connected_for_secs / 60, 1)} min`,
                     `last hb: ${formatNumber(node.since_last_heartbeat_secs, 1)}s`,
                     `cpu: ${formatNumber(stats.host_cpu, 1)}%`,
