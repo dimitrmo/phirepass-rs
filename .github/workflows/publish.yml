@@ -114,6 +114,17 @@ jobs:
             - name: Checkout
               uses: actions/checkout@v6
 
+            - name: Git setup
+              run: |
+                  git config user.name "$CARGO_TAG_NAME"
+                  git config user.email "$CARGO_TAG_EMAIL"
+
+            - name: Cargo Verison Setup
+              uses: actions/download-artifact@v6
+              with:
+                  name: cargo-verison
+                  path: ~/.cargo/bin/
+
             - name: Cargo Verison permissions
               run: chmod +x ~/.cargo/bin/cargo-verison
 
