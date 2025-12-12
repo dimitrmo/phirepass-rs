@@ -101,10 +101,10 @@ jobs:
                   push: ${{ github.event_name != 'pull_request' }}
                   tags: ${{ matrix.images.image }}:${{ steps.verison.outputs.next_version }},${{ matrix.images.image }}:latest
                   labels: ${{ steps.meta.outputs.labels }}
-                  file: $${{ matrix.images.binary }}/Dockerfile
+                  file: ${{ matrix.images.binary }}/Dockerfile
                   outputs: "type=registry"
                   build-args: |
-                      APP_NAME=$${{ matrix.images.binary }}
+                      APP_NAME=${{ matrix.images.binary }}
 
     Commit:
         runs-on: ubuntu-latest
