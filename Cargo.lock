@@ -445,9 +445,9 @@ dependencies = [
 
 [[package]]
 name = "cmake"
-version = "0.1.54"
+version = "0.1.55"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e7caa3f9de89ddbe2c607f4101924c5abec803763ae9534e4f4d7d8f84aa81f0"
+checksum = "d49d74c227b6cc9f3c51a2c7c667a05b6453f7f0f952a5f8e4493bb9e731d68e"
 dependencies = [
  "cc",
 ]
@@ -1668,7 +1668,7 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
 name = "phirepass"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "anyhow",
  "axum",
@@ -1687,7 +1687,7 @@ dependencies = [
 
 [[package]]
 name = "phirepass-common"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "anyhow",
  "env_logger",
@@ -1701,7 +1701,7 @@ dependencies = [
 
 [[package]]
 name = "phirepass-daemon"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "anyhow",
  "axum",
@@ -1718,7 +1718,7 @@ dependencies = [
 
 [[package]]
 name = "phirepass-server"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "anyhow",
  "axum",
@@ -1737,7 +1737,7 @@ dependencies = [
 
 [[package]]
 name = "phirepass-web"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "anyhow",
  "axum",
