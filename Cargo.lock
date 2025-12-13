@@ -500,9 +500,9 @@ dependencies = [
 
 [[package]]
 name = "cmake"
-version = "0.1.55"
+version = "0.1.56"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d49d74c227b6cc9f3c51a2c7c667a05b6453f7f0f952a5f8e4493bb9e731d68e"
+checksum = "b042e5d8a74ae91bb0961acd039822472ec99f8ab0948cbf6d1369588f8be586"
 dependencies = [
  "cc",
 ]
@@ -2112,7 +2112,7 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
 name = "phirepass"
-version = "0.1.16"
+version = "0.1.17"
 dependencies = [
  "anyhow",
  "axum",
@@ -2134,7 +2134,7 @@ dependencies = [
 
 [[package]]
 name = "phirepass-common"
-version = "0.1.16"
+version = "0.1.17"
 dependencies = [
  "anyhow",
  "comfy-table",
@@ -2153,7 +2153,7 @@ dependencies = [
 
 [[package]]
 name = "phirepass-daemon"
-version = "0.1.16"
+version = "0.1.17"
 dependencies = [
  "anyhow",
  "axum",
@@ -2172,7 +2172,7 @@ dependencies = [
 
 [[package]]
 name = "phirepass-server"
-version = "0.1.16"
+version = "0.1.17"
 dependencies = [
  "anyhow",
  "axum",
@@ -2192,7 +2192,7 @@ dependencies = [
 
 [[package]]
 name = "phirepass-web"
-version = "0.1.16"
+version = "0.1.17"
 dependencies = [
  "anyhow",
  "axum",
@@ -3355,14 +3355,14 @@ version = "0.26.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "521bc38abb08001b01866da9f51eb7c5d647a19260e00054a8c7fd5f9e57f7a9"
 dependencies = [
- "webpki-roots 1.0.2",
+ "webpki-roots 1.0.4",
 ]
 
 [[package]]
 name = "webpki-roots"
-version = "1.0.2"
+version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7e8983c3ab33d6fb807cfcdad2491c4ea8cbc8ed839181c7dfd9c67c83e261b2"
+checksum = "b2878ef029c47c6e8cf779119f20fcf52bde7ad42a731b2a304bc221df17571e"
 dependencies = [
  "rustls-pki-types",
 ]
