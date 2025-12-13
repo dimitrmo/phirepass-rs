@@ -17,3 +17,4 @@ phirepass-common = { workspace = true }
 log = { workspace = true }
 envconfig = { workspace = true }
 axum-client-ip = { workspace = true }
+rustls = { workspace = true }

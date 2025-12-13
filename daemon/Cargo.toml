@@ -16,3 +16,4 @@ tokio-tungstenite = { workspace = true }
 envconfig = { workspace = true }
 axum = { workspace = true }
 comfy-table = { workspace = true }
+rustls = { workspace = true }

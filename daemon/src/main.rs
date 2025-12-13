@@ -6,6 +6,10 @@ mod ws;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("install rustls crypto provider");
+
     let cli = cli::parse();
     match cli.command {
         Some(cli::Commands::Version) => {
