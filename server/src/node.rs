@@ -28,7 +28,7 @@ async fn handle_node_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
     let (tx, mut rx) = unbounded_channel::<NodeControlMessage>(); // node can communicate only with node control messages
 
     {
-        let mut nodes = state.nodes.lock().await;
+        let mut nodes = state.nodes.write().await;
         nodes.insert(id, NodeConnection::new(ip, tx.clone()));
         let total = nodes.len();
         info!("node {id} ({ip}) connected (total: {total})", id = id);
@@ -108,7 +108,7 @@ async fn handle_frame_response(state: &AppState, frame: Frame, nid: String, cid:
         return;
     };
 
-    let connections = state.connections.lock().await;
+    let connections = state.connections.read().await;
     if let Some(conn) = connections.get(&cid_as_str) {
         match conn.tx.send(frame) {
             Ok(..) => info!("frame response sent to connection {cid_as_str}"),
@@ -118,7 +118,7 @@ async fn handle_frame_response(state: &AppState, frame: Frame, nid: String, cid:
 }
 
 async fn disconnect_node(state: &AppState, id: Ulid) {
-    let mut nodes = state.nodes.lock().await;
+    let mut nodes = state.nodes.write().await;
     if let Some(info) = nodes.remove(&id) {
         let alive = info.node.connected_at.elapsed();
         info!(
@@ -131,7 +131,7 @@ async fn disconnect_node(state: &AppState, id: Ulid) {
 }
 
 async fn update_node_heartbeat(state: &AppState, id: Ulid, stats: Option<Stats>) {
-    let mut nodes = state.nodes.lock().await;
+    let mut nodes = state.nodes.write().await;
     if let Some(info) = nodes.get_mut(&id) {
         let since_last = info.node.last_heartbeat.elapsed();
         info.node.last_heartbeat = SystemTime::now();

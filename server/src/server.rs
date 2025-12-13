@@ -57,8 +57,8 @@ fn start_http_server(
     tokio::spawn(async move {
         let state = AppState {
             env: Arc::new(config),
-            nodes: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
-            connections: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            nodes: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
+            connections: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         };
 
         let app = Router::new()
@@ -119,7 +119,7 @@ struct NodeSummary {
 }
 
 async fn list_nodes(State(state): State<AppState>) -> impl axum::response::IntoResponse {
-    let nodes = state.nodes.lock().await;
+    let nodes = state.nodes.read().await;
     let now = SystemTime::now();
 
     let data: Vec<NodeSummary> = nodes

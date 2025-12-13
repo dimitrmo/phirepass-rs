@@ -28,7 +28,7 @@ async fn handle_web_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
     let (tx, mut rx) = unbounded_channel::<Frame>();
 
     {
-        let mut connections = state.connections.lock().await;
+        let mut connections = state.connections.write().await;
         connections.insert(id, WebConnection::new(ip, tx));
         let total = connections.len();
         info!(
@@ -117,7 +117,7 @@ async fn handle_web_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
 }
 
 async fn disconnect_web_client(state: &AppState, id: Ulid) {
-    let mut connections = state.connections.lock().await;
+    let mut connections = state.connections.write().await;
     if let Some(info) = connections.remove(&id) {
         let alive = info.node.connected_at.elapsed();
         info!(
@@ -132,7 +132,7 @@ async fn disconnect_web_client(state: &AppState, id: Ulid) {
 }
 
 async fn update_web_heartbeat(state: &AppState, id: Ulid) {
-    let mut connections = state.connections.lock().await;
+    let mut connections = state.connections.write().await;
     if let Some(info) = connections.get_mut(&id) {
         let since_last = info.node.last_heartbeat.elapsed();
         info.node.last_heartbeat = SystemTime::now();
@@ -163,7 +163,7 @@ async fn handle_tunnel_data(
     };
 
     let tx = {
-        let nodes = state.nodes.lock().await;
+        let nodes = state.nodes.read().await;
         nodes.get(&target_id).map(|info| info.tx.clone())
     };
 
@@ -199,7 +199,7 @@ async fn handle_resize(state: &AppState, cid: Ulid, target: String, cols: u32, r
     };
 
     let tx = {
-        let nodes = state.nodes.lock().await;
+        let nodes = state.nodes.read().await;
         nodes.get(&target_id).map(|info| info.tx.clone())
     };
 
@@ -242,7 +242,7 @@ async fn handle_open_tunnel(
     };
 
     let tx = {
-        let nodes = state.nodes.lock().await;
+        let nodes = state.nodes.read().await;
         nodes.get(&target_id).map(|info| info.tx.clone())
     };
 
@@ -282,8 +282,8 @@ async fn handle_open_tunnel(
 }
 
 async fn send_requires_username_password_error(state: &AppState, cid: Ulid) -> anyhow::Result<()> {
-    let mut connections = state.connections.lock().await;
-    if let Some(info) = connections.get_mut(&cid) {
+    let connections = state.connections.read().await;
+    if let Some(info) = connections.get(&cid) {
         let error = WebControlMessage::Error {
             kind: WebControlErrorType::RequiresUsernamePassword,
             message: "Credentials are required".to_string(),
@@ -299,8 +299,8 @@ async fn send_requires_username_password_error(state: &AppState, cid: Ulid) -> a
 }
 
 async fn send_requires_password_error(state: &AppState, cid: Ulid) -> anyhow::Result<()> {
-    let mut connections = state.connections.lock().await;
-    if let Some(info) = connections.get_mut(&cid) {
+    let connections = state.connections.read().await;
+    if let Some(info) = connections.get(&cid) {
         let error = WebControlMessage::Error {
             kind: WebControlErrorType::RequiresPassword,
             message: "Password is required".to_string(),
@@ -317,7 +317,7 @@ async fn send_requires_password_error(state: &AppState, cid: Ulid) -> anyhow::Re
 
 async fn notify_nodes_client_disconnect(state: &AppState, cid: Ulid) {
     let cid_str = cid.to_string();
-    let nodes = state.nodes.lock().await;
+    let nodes = state.nodes.read().await;
 
     for (node_id, conn) in nodes.iter() {
         match conn.tx.send(NodeControlMessage::ConnectionDisconnect {

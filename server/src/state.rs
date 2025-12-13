@@ -4,9 +4,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use ulid::Ulid;
 
-type Nodes = Arc<tokio::sync::Mutex<HashMap<Ulid, NodeConnection>>>;
+type Nodes = Arc<tokio::sync::RwLock<HashMap<Ulid, NodeConnection>>>;
 
-type Connections = Arc<tokio::sync::Mutex<HashMap<Ulid, WebConnection>>>;
+type Connections = Arc<tokio::sync::RwLock<HashMap<Ulid, WebConnection>>>;
 
 #[derive(Clone)]
 pub(crate) struct AppState {
