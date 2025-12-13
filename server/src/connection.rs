@@ -38,7 +38,7 @@ impl NodeConnection {
             connected_at: Instant::now(),
             last_heartbeat: Instant::now(),
             ip,
-            last_stats: None,
+            last_stats: Stats::gather(),
             tx,
         }
     }

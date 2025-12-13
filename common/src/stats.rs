@@ -1,6 +1,7 @@
 use get_if_addrs::{IfAddr, get_if_addrs};
 use serde::{Deserialize, Serialize};
 use std::num::NonZeroUsize;
+use netstat2::{get_sockets_info, AddressFamilyFlags, ProtocolFlags};
 use sysinfo::{System, get_current_pid};
 use thread_count::thread_count;
 use os_info;
@@ -34,7 +35,10 @@ pub struct Stats {
     pub host_mem_total_bytes: u64,
     pub host_uptime_secs: u64,
     pub proc_uptime_secs: u64,
+    pub host_load_average: [f64; 3],
     pub host_os_info: String,
+    pub host_connections: usize,
+    pub host_processes: usize,
 }
 
 impl Stats {
@@ -54,6 +58,11 @@ impl Stats {
 
         let host_ip = resolve_host_ip();
         let host_os_info = os_info::get();
+        let host_connections = Self::connections().unwrap_or(0);
+
+        let host_load_average = Self::loadavg();
+
+        let host_processes = sys.processes().len();
 
         Some(Self {
             pid: pid.to_string(),
@@ -67,16 +76,44 @@ impl Stats {
             host_mem_used_bytes: sys.used_memory(),
             host_mem_total_bytes: sys.total_memory(),
             host_uptime_secs: System::uptime(),
+            host_load_average,
             host_os_info: format!("{}", host_os_info),
+            host_connections,
+            host_processes,
         })
+    }
+
+    fn connections() -> anyhow::Result<usize> {
+        let af_flags = AddressFamilyFlags::IPV4 | AddressFamilyFlags::IPV6;
+        let proto_flags = ProtocolFlags::TCP | ProtocolFlags::UDP;
+        let sockets = get_sockets_info(af_flags, proto_flags)?;
+        Ok(sockets.len())
+    }
+
+    #[cfg(unix)]
+    fn loadavg() -> [f64; 3] {
+        let mut v = [0f64; 3];
+        let n = unsafe { libc::getloadavg(v.as_mut_ptr(), 3) };
+        if n == 3 {
+            [v[0], v[1], v[2]]
+        } else {
+            [0f64, 0f64, 0f64]
+        }
+    }
+
+    #[cfg(not(unix))]
+    fn loadavg() -> (f64, f64, f64) {
+        (0f64, 0f64, 0f64)
     }
 
     pub fn log_line(&self) -> String {
         format!(
-            "stats: pid={}, host_os={}, host_name={}, host_ip={}, host_uptime={}, proc_uptime={}, proc_cpu={:.1}%, proc_mem={}, host_cpu={:.1}%, host_mem={} / {}, host_threads={}",
+            "stats: pid={}, host_os={}, host_name={}, host_connections={}, host_avg={:?}, host_ip={}, host_uptime={}, proc_uptime={}, proc_cpu={:.1}%, proc_mem={}, host_cpu={:.1}%, host_mem={} / {}, host_threads={}",
             self.pid,
             self.host_os_info,
             self.hostname,
+            self.host_connections,
+            self.host_load_average,
             self.host_ip,
             format_duration(self.host_uptime_secs),
             format_duration(self.proc_uptime_secs),
