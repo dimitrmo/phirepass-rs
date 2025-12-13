@@ -113,8 +113,8 @@ fn spawn_stats_logger(
 struct NodeSummary {
     id: String,
     ip: String,
-    connected_for_secs: f64,
-    since_last_heartbeat_secs: f64,
+    connected_for_secs: u64,
+    since_last_heartbeat_secs: u64,
     stats: Option<Stats>,
 }
 
@@ -130,11 +130,11 @@ async fn list_nodes(State(state): State<AppState>) -> impl axum::response::IntoR
             connected_for_secs: now
                 .duration_since(info.node.connected_at)
                 .unwrap()
-                .as_secs_f64(),
+                .as_secs(),
             since_last_heartbeat_secs: now
                 .duration_since(info.node.last_heartbeat)
                 .unwrap()
-                .as_secs_f64(),
+                .as_secs(),
             stats: info.node.last_stats.clone(),
         })
         .collect();
