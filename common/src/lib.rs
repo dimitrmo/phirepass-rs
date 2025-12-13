@@ -3,3 +3,4 @@ pub mod logger;
 pub mod node;
 pub mod protocol;
 pub mod stats;
+pub mod ip;

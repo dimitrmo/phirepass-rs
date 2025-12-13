@@ -11,6 +11,7 @@ use phirepass_common::protocol::{
 };
 use std::net::IpAddr;
 use std::time::SystemTime;
+use axum::http::HeaderMap;
 use tokio::sync::mpsc::unbounded_channel;
 use ulid::Ulid;
 
@@ -18,7 +19,9 @@ pub(crate) async fn ws_web_handler(
     State(state): State<AppState>,
     ClientIp(ip): ClientIp,
     ws: WebSocketUpgrade,
+    headers: HeaderMap,
 ) -> impl axum::response::IntoResponse {
+    let ip = phirepass_common::ip::extract_ip_from_headers(&headers).unwrap_or(ip);
     ws.on_upgrade(move |socket| handle_web_socket(socket, state, ip))
 }
 
