@@ -2112,7 +2112,7 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
 name = "phirepass"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "anyhow",
  "axum",
@@ -2135,7 +2135,7 @@ dependencies = [
 
 [[package]]
 name = "phirepass-common"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "anyhow",
  "comfy-table",
@@ -2154,7 +2154,7 @@ dependencies = [
 
 [[package]]
 name = "phirepass-daemon"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "anyhow",
  "axum",
@@ -2173,7 +2173,7 @@ dependencies = [
 
 [[package]]
 name = "phirepass-server"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "anyhow",
  "axum",
@@ -2194,7 +2194,7 @@ dependencies = [
 
 [[package]]
 name = "phirepass-web"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "anyhow",
  "axum",
