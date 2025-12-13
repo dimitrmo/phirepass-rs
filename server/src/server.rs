@@ -4,12 +4,11 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use crate::env::Env;
-use crate::http::{get_stats, get_version};
+use crate::http::{build_cors, get_stats, get_version};
 use crate::node::ws_node_handler;
 use crate::state::AppState;
 use crate::web::ws_web_handler;
 use axum::extract::State;
-use axum::http::{HeaderMap, HeaderValue, header};
 use axum::routing::get;
 use axum::{Json, Router};
 use log::{info, warn};
@@ -61,6 +60,8 @@ fn start_http_server(
             connections: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         };
 
+        let cors = build_cors(&state);
+
         let app = Router::new()
             .route("/web/ws", get(ws_web_handler))
             .route("/nodes/ws", get(ws_node_handler))
@@ -68,6 +69,7 @@ fn start_http_server(
             .route("/stats", get(get_stats))
             .route("/version", get(get_version))
             .layer(ip_source.into_extension())
+            .layer(cors)
             .with_state(state);
 
         let listener = tokio::net::TcpListener::bind(host).await.unwrap();
@@ -139,13 +141,5 @@ async fn list_nodes(State(state): State<AppState>) -> impl axum::response::IntoR
         })
         .collect();
 
-    let mut headers = HeaderMap::new();
-    if !state.env.mode.is_production() {
-        headers.insert(
-            header::ACCESS_CONTROL_ALLOW_ORIGIN,
-            HeaderValue::from_static("*"),
-        );
-    }
-
-    (headers, Json(data))
+    Json(data)
 }

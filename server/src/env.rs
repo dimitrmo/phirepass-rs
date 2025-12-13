@@ -26,6 +26,9 @@ pub(crate) struct Env {
 
     #[envconfig(from = "STATS_REFRESH_INTERVAL", default = "15")]
     pub stats_refresh_interval: u16,
+
+    #[envconfig(from = "ACCESS_CONTROL_ALLOW_ORIGIN")]
+    pub access_control_allowed_origin: Option<String>,
 }
 
 pub fn init() -> anyhow::Result<Env> {
