@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use crate::env::Env;
-use crate::http::{get_alive, get_ready};
+use crate::http::{get_stats, get_version};
 use crate::node::ws_node_handler;
 use crate::state::AppState;
 use crate::web::ws_web_handler;
@@ -65,8 +65,8 @@ fn start_http_server(
             .route("/web/ws", get(ws_web_handler))
             .route("/nodes/ws", get(ws_node_handler))
             .route("/nodes", get(list_nodes))
-            .route("/ready", get(get_ready))
-            .route("/alive", get(get_alive))
+            .route("/stats", get(get_stats))
+            .route("/version", get(get_version))
             .layer(ip_source.into_extension())
             .with_state(state);
 

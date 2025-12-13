@@ -179,6 +179,10 @@ impl Stats {
 
         table.to_string()
     }
+
+    pub fn encoded(&self) -> anyhow::Result<String> {
+        serde_json::to_string_pretty(&self).map_err(|e| e.into())
+    }
 }
 
 fn format_duration(secs: u64) -> String {
