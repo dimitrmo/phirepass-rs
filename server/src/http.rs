@@ -62,10 +62,21 @@ pub async fn get_stats(State(state): State<AppState>) -> impl IntoResponse {
     Json(body)
 }
 
-pub async fn list_nodes(State(state): State<AppState>) -> impl axum::response::IntoResponse {
+pub async fn list_nodes(State(state): State<AppState>) -> impl IntoResponse {
     let nodes = state.nodes.read().await;
 
     let data: Vec<_> = nodes.iter().map(|(_, info)| info.node.clone()).collect();
+
+    Json(data)
+}
+
+pub async fn list_connections(State(state): State<AppState>) -> impl IntoResponse {
+    let connections = state.connections.read().await;
+
+    let data: Vec<_> = connections
+        .iter()
+        .map(|(_, info)| info.node.clone())
+        .collect();
 
     Json(data)
 }
