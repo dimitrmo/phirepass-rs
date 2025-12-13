@@ -2,6 +2,7 @@ use crate::connection::NodeConnection;
 use crate::state::AppState;
 use axum::extract::ws::{Message, WebSocket};
 use axum::extract::{State, WebSocketUpgrade};
+use axum::http::HeaderMap;
 use axum_client_ip::ClientIp;
 use futures_util::{SinkExt, StreamExt};
 use log::{info, warn};
@@ -11,8 +12,7 @@ use phirepass_common::protocol::{
 use phirepass_common::stats::Stats;
 use std::net::IpAddr;
 use std::time::{SystemTime, UNIX_EPOCH};
-use axum::http::HeaderMap;
-use tokio::sync::mpsc::unbounded_channel;
+use tokio::sync::mpsc;
 use ulid::Ulid;
 
 pub(crate) async fn ws_node_handler(
@@ -28,7 +28,9 @@ pub(crate) async fn ws_node_handler(
 async fn handle_node_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
     let id = Ulid::new();
     let (mut ws_tx, mut ws_rx) = socket.split();
-    let (tx, mut rx) = unbounded_channel::<NodeControlMessage>(); // node can communicate only with node control messages
+
+    // Bounded channel to avoid unbounded memory growth if the node socket is back-pressured.
+    let (tx, mut rx) = mpsc::channel::<NodeControlMessage>(1024); // node can communicate only with node control messages
 
     {
         let mut nodes = state.nodes.write().await;
@@ -75,7 +77,7 @@ async fn handle_node_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
                         info!("ping from node {id}; latency={}ms", latency);
 
                         let pong = NodeControlMessage::Pong { sent_at: now };
-                        if let Err(err) = tx.send(pong) {
+                        if let Err(err) = tx.send(pong).await {
                             warn!("failed to queue pong for node {id}: {err}");
                         } else {
                             info!("pong response to node {id} sent");
@@ -113,7 +115,7 @@ async fn handle_frame_response(state: &AppState, frame: Frame, nid: String, cid:
 
     let connections = state.connections.read().await;
     if let Some(conn) = connections.get(&cid_as_str) {
-        match conn.tx.send(frame) {
+        match conn.tx.send(frame).await {
             Ok(..) => info!("frame response sent to connection {cid_as_str}"),
             Err(err) => warn!("failed to send frame to user({}): {}", cid_as_str, err),
         }

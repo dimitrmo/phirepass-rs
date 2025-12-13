@@ -1,6 +1,6 @@
+use axum::http::HeaderMap;
 use std::net::{IpAddr, SocketAddr};
 use std::str::FromStr;
-use axum::http::HeaderMap;
 
 static X_ENVOY_EXTERNAL_ADDRESS: &str = "x-envoy-external-address";
 

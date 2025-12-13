@@ -2,6 +2,7 @@ use crate::connection::WebConnection;
 use crate::state::AppState;
 use axum::extract::ws::{Message, WebSocket};
 use axum::extract::{State, WebSocketUpgrade};
+use axum::http::HeaderMap;
 use axum_client_ip::ClientIp;
 use futures_util::{SinkExt, StreamExt};
 use log::{info, warn};
@@ -11,8 +12,7 @@ use phirepass_common::protocol::{
 };
 use std::net::IpAddr;
 use std::time::SystemTime;
-use axum::http::HeaderMap;
-use tokio::sync::mpsc::unbounded_channel;
+use tokio::sync::mpsc;
 use ulid::Ulid;
 
 pub(crate) async fn ws_web_handler(
@@ -28,7 +28,9 @@ pub(crate) async fn ws_web_handler(
 async fn handle_web_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
     let id = Ulid::new();
     let (mut ws_tx, mut ws_rx) = socket.split();
-    let (tx, mut rx) = unbounded_channel::<Frame>();
+
+    // Bounded channel so slow clients cannot grow memory unbounded.
+    let (tx, mut rx) = mpsc::channel::<Frame>(1024);
 
     {
         let mut connections = state.connections.write().await;
@@ -181,6 +183,7 @@ async fn handle_tunnel_data(
             cid: cid.to_string(),
             data,
         })
+        .await
         .is_err()
     {
         warn!("failed to forward open tunnel to node {target}");
@@ -217,6 +220,7 @@ async fn handle_resize(state: &AppState, cid: Ulid, target: String, cols: u32, r
             cols,
             rows,
         })
+        .await
         .is_err()
     {
         warn!("failed to forward resize to node {target}");
@@ -273,6 +277,7 @@ async fn handle_open_tunnel(
             username,
             password,
         })
+        .await
         .is_err()
     {
         warn!("failed to forward open tunnel to node {target}");
@@ -293,7 +298,7 @@ async fn send_requires_username_password_error(state: &AppState, cid: Ulid) -> a
         };
 
         let frame = encode_web_control_to_frame(&error)?;
-        info.tx.send(frame)?;
+        info.tx.send(frame).await?;
     } else {
         warn!("failed to find connection {cid}");
     }
@@ -310,7 +315,7 @@ async fn send_requires_password_error(state: &AppState, cid: Ulid) -> anyhow::Re
         };
 
         let frame = encode_web_control_to_frame(&error)?;
-        info.tx.send(frame)?;
+        info.tx.send(frame).await?;
     } else {
         warn!("failed to find connection {cid}");
     }
@@ -323,9 +328,13 @@ async fn notify_nodes_client_disconnect(state: &AppState, cid: Ulid) {
     let nodes = state.nodes.read().await;
 
     for (node_id, conn) in nodes.iter() {
-        match conn.tx.send(NodeControlMessage::ConnectionDisconnect {
-            cid: cid_str.clone(),
-        }) {
+        match conn
+            .tx
+            .send(NodeControlMessage::ConnectionDisconnect {
+                cid: cid_str.clone(),
+            })
+            .await
+        {
             Ok(..) => info!("notified node {node_id} about client {cid_str} disconnect"),
             Err(err) => {
                 warn!("failed to notify node {node_id} about client {cid_str} disconnect: {err}")

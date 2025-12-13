@@ -8,8 +8,7 @@ use russh::*;
 use std::borrow::Cow;
 use std::io::Cursor;
 use std::sync::Arc;
-use tokio::sync::mpsc::Receiver;
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::oneshot;
 
 struct SSHClient {}
@@ -91,7 +90,7 @@ impl SSHConnection {
 
     pub async fn connect(
         self,
-        tx: &UnboundedSender<Vec<u8>>,
+        tx: &Sender<Vec<u8>>,
         cid: String,
         mut cmd_rx: Receiver<SSHCommand>,
         mut shutdown_rx: oneshot::Receiver<()>,
@@ -151,7 +150,7 @@ impl SSHConnection {
                             };
 
                             match encode_node_control(&message) {
-                                Ok(result) => match sender.send(result) {
+                                Ok(result) => match sender.send(result).await {
                                     Ok(_) => debug!("ssh response sent back to {connection_id}"),
                                     Err(err) => warn!("failed to send: {err}"),
                                 },

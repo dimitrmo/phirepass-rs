@@ -11,10 +11,10 @@ use phirepass_common::protocol::{
 use phirepass_common::stats::Stats;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::Mutex;
-use tokio::sync::mpsc;
-use tokio::sync::mpsc::{Sender, UnboundedReceiver, UnboundedSender, channel};
+use tokio::sync::mpsc::{Receiver, Sender, channel};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
@@ -25,7 +25,10 @@ pub(crate) enum SSHCommand {
     Resize { cols: u32, rows: u32 },
 }
 
+static SESSION_ID: AtomicU64 = AtomicU64::new(1);
+
 struct SSHSessionHandle {
+    id: u64,
     stop: Option<oneshot::Sender<()>>,
     join: JoinHandle<()>,
     stdin: Sender<SSHCommand>,
@@ -43,8 +46,8 @@ impl SSHSessionHandle {
 }
 
 pub(crate) struct WSConnection {
-    writer: UnboundedSender<Vec<u8>>,
-    reader: UnboundedReceiver<Vec<u8>>,
+    writer: Sender<Vec<u8>>,
+    reader: Receiver<Vec<u8>>,
     ssh_sessions: Arc<Mutex<HashMap<String, SSHSessionHandle>>>,
 }
 
@@ -69,7 +72,8 @@ fn generate_server_endpoint(mode: Mode, server_host: String, server_port: u16) -
 
 impl WSConnection {
     pub fn new() -> Self {
-        let (tx, rx) = mpsc::unbounded_channel::<Vec<u8>>();
+        // Cap the outbound queue to avoid unbounded memory use when the socket is back-pressured.
+        let (tx, rx) = channel::<Vec<u8>>(1024);
         Self {
             reader: rx,
             writer: tx,
@@ -162,7 +166,7 @@ impl WSConnection {
 
                 match encode_node_control(&NodeControlMessage::Heartbeat { stats }) {
                     Ok(raw) => {
-                        if hb_tx.send(raw).is_err() {
+                        if hb_tx.send(raw).await.is_err() {
                             warn!("failed to queue heartbeat: channel closed");
                             break;
                         }
@@ -181,7 +185,7 @@ impl WSConnection {
                 let sent_at = now_millis();
                 match encode_node_control(&NodeControlMessage::Ping { sent_at }) {
                     Ok(raw) => {
-                        if ping_tx.send(raw).is_err() {
+                        if ping_tx.send(raw).await.is_err() {
                             warn!("failed to queue ping: channel closed");
                             break;
                         }
@@ -207,7 +211,7 @@ impl WSConnection {
 
 async fn handle_control_from_server(
     msg: NodeControlMessage,
-    tx: &UnboundedSender<Vec<u8>>,
+    tx: &Sender<Vec<u8>>,
     ssh_sessions: Arc<Mutex<HashMap<String, SSHSessionHandle>>>,
     config: Arc<Env>,
 ) {
@@ -258,7 +262,7 @@ async fn handle_control_from_server(
             let pong = NodeControlMessage::Pong { sent_at: now };
             match encode_node_control(&pong) {
                 Ok(raw) => {
-                    if tx.send(raw).is_err() {
+                    if tx.send(raw).await.is_err() {
                         warn!("failed to queue pong: channel closed");
                     }
                 }
@@ -275,7 +279,7 @@ async fn handle_control_from_server(
 }
 
 async fn open_ssh_tunnel(
-    tx: &UnboundedSender<Vec<u8>>,
+    tx: &Sender<Vec<u8>>,
     cid: String,
     ssh_sessions: Arc<Mutex<HashMap<String, SSHSessionHandle>>>,
     config: Arc<Env>,
@@ -300,7 +304,7 @@ async fn open_ssh_tunnel(
 }
 
 async fn start_ssh_tunnel(
-    tx: &UnboundedSender<Vec<u8>>,
+    tx: &Sender<Vec<u8>>,
     cid: String,
     ssh_sessions: Arc<Mutex<HashMap<String, SSHSessionHandle>>>,
     config: Arc<Env>,
@@ -311,6 +315,7 @@ async fn start_ssh_tunnel(
     let sender = tx.clone();
     let cid_for_task = cid.clone();
     let cid_for_connection = cid.clone();
+    let session_id = SESSION_ID.fetch_add(1, Ordering::Relaxed);
     let ssh_task = tokio::spawn(async move {
         info!("ssh task started for connection {cid_for_task}");
 
@@ -333,7 +338,9 @@ async fn start_ssh_tunnel(
                     &WebControlMessage::TunnelClosed {
                         protocol: Protocol::SSH as u8,
                     },
-                ) {
+                )
+                .await
+                {
                     warn!("failed to notify cid {cid_for_task} for ssh connection closure: {err}");
                 }
             }
@@ -343,16 +350,37 @@ async fn start_ssh_tunnel(
                     &sender,
                     cid.as_str(),
                     &generic_web_error("SSH authentication failed. Please check your password."),
-                ) {
+                )
+                .await
+                {
                     warn!("failed to notify connection {cid} about authentication failure: {err}");
                 }
             }
         }
     });
 
+    let sessions_for_cleanup = ssh_sessions.clone();
+    let cid_for_cleanup = cid_for_connection.clone();
+    let cleanup_task = tokio::spawn(async move {
+        if let Err(err) = ssh_task.await {
+            warn!("ssh session join error for {cid_for_cleanup}: {err}");
+        }
+
+        let mut sessions = sessions_for_cleanup.lock().await;
+        let should_remove = sessions
+            .get(&cid_for_cleanup)
+            .map(|handle| handle.id == session_id)
+            .unwrap_or(false);
+
+        if should_remove {
+            sessions.remove(&cid_for_cleanup);
+        }
+    });
+
     let handle = SSHSessionHandle {
+        id: session_id,
         stop: Some(stop_tx),
-        join: ssh_task,
+        join: cleanup_task,
         stdin: stdin_tx,
     };
 
@@ -423,8 +451,8 @@ async fn forward_resize(
         .map_err(|err| format!("failed to queue resize to ssh tunnel for {cid}: {err}"))
 }
 
-fn send_data_to_connection(
-    tx: &UnboundedSender<Vec<u8>>,
+async fn send_data_to_connection(
+    tx: &Sender<Vec<u8>>,
     cid: &str,
     data: &WebControlMessage,
 ) -> anyhow::Result<()> {
@@ -437,6 +465,7 @@ fn send_data_to_connection(
 
     let raw = encode_node_control(&node_msg)?;
     tx.send(raw)
+        .await
         .map_err(|err| anyhow!("failed to send data to connection: {err}"))
 }
 
