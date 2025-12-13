@@ -6,6 +6,7 @@ use axum::http::{HeaderValue, Method};
 use axum::response::IntoResponse;
 use phirepass_common::stats::Stats;
 use serde_json::json;
+use std::time::SystemTime;
 use tower_http::cors::{Any, CorsLayer};
 
 pub fn build_cors(state: &AppState) -> CorsLayer {
@@ -64,18 +65,50 @@ pub async fn get_stats(State(state): State<AppState>) -> impl IntoResponse {
 
 pub async fn list_nodes(State(state): State<AppState>) -> impl IntoResponse {
     let nodes = state.nodes.read().await;
+    let now = SystemTime::now();
 
-    let data: Vec<_> = nodes.iter().map(|(_, info)| info.node.clone()).collect();
-
+    let data: Vec<_> = nodes
+        .iter()
+        .map(|(id, info)| {
+            json!({
+                "id": id.to_string(),
+                "ip": info.node.ip.to_string(),
+                "connected_for_secs": now
+                    .duration_since(info.node.connected_at)
+                    .unwrap()
+                    .as_secs(),
+                "since_last_heartbeat_secs": now
+                    .duration_since(info.node.last_heartbeat)
+                    .unwrap()
+                    .as_secs(),
+                "stats": info.node.last_stats.clone(),
+            })
+        })
+        .collect();
     Json(data)
 }
 
 pub async fn list_connections(State(state): State<AppState>) -> impl IntoResponse {
     let connections = state.connections.read().await;
+    let now = SystemTime::now();
 
     let data: Vec<_> = connections
         .iter()
-        .map(|(_, info)| info.node.clone())
+        .map(|(id, info)| {
+            json!({
+                "id": id.to_string(),
+                "ip": info.node.ip.to_string(),
+                "connected_for_secs": now
+                    .duration_since(info.node.connected_at)
+                    .unwrap()
+                    .as_secs(),
+                "since_last_heartbeat_secs": now
+                    .duration_since(info.node.last_heartbeat)
+                    .unwrap()
+                    .as_secs(),
+                "stats": info.node.last_stats.clone(),
+            })
+        })
         .collect();
 
     Json(data)
