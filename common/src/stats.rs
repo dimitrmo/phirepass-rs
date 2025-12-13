@@ -1,6 +1,7 @@
 use get_if_addrs::{IfAddr, get_if_addrs};
 use serde::{Deserialize, Serialize};
 use std::num::NonZeroUsize;
+use mac_address::get_mac_address;
 use netstat2::{get_sockets_info, AddressFamilyFlags, ProtocolFlags};
 use sysinfo::{System, get_current_pid, ProcessStatus};
 use thread_count::thread_count;
@@ -27,6 +28,7 @@ pub struct Stats {
     pub pid: String,
     pub hostname: String,
     pub host_ip: String,
+    pub host_mac: String,
     pub threads: usize,
     pub proc_cpu: f32,
     pub proc_mem_bytes: u64,
@@ -69,10 +71,13 @@ impl Stats {
             .filter(|p| p.status() == ProcessStatus::Run)
             .count();
 
+        let host_mac = Self::mac();
+
         Some(Self {
             pid: pid.to_string(),
             hostname,
             host_ip,
+            host_mac,
             threads: count,
             proc_cpu: proc.cpu_usage(),
             proc_mem_bytes: proc.memory(),
@@ -87,6 +92,17 @@ impl Stats {
             host_processes: running,
         })
     }
+
+    fn mac() -> String {
+        match get_mac_address() {
+            Ok(mac) => match mac {
+                None => String::from("unknown"),
+                Some(addr) => addr.to_string(),
+            }
+            Err(_) => String::from("unknown"),
+        }
+    }
+
 
     fn connections() -> anyhow::Result<usize> {
         let af_flags = AddressFamilyFlags::IPV4 | AddressFamilyFlags::IPV6;
@@ -113,13 +129,14 @@ impl Stats {
 
     pub fn log_line(&self) -> String {
         format!(
-            "stats: pid={}, host_os={}, host_name={}, host_connections={}, host_avg={:?}, host_ip={}, host_uptime={}, proc_uptime={}, proc_cpu={:.1}%, proc_mem={}, host_cpu={:.1}%, host_mem={} / {}, host_threads={}",
+            "stats: pid={}, host_os={}, host_name={}, host_connections={}, host_avg={:?}, host_ip={}, host_mac={}, host_uptime={}, proc_uptime={}, proc_cpu={:.1}%, proc_mem={}, host_cpu={:.1}%, host_mem={} / {}, host_threads={}",
             self.pid,
             self.host_os_info,
             self.hostname,
             self.host_connections,
             self.host_load_average,
             self.host_ip,
+            self.host_mac,
             format_duration(self.host_uptime_secs),
             format_duration(self.proc_uptime_secs),
             self.proc_cpu,
