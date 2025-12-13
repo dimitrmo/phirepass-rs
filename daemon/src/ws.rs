@@ -2,7 +2,7 @@ use crate::env::Env;
 use crate::ssh::{SSHConfig, SSHConfigAuth, SSHConnection};
 use anyhow::anyhow;
 use futures_util::{SinkExt, StreamExt};
-use log::{info, warn};
+use log::{debug, info, warn};
 use phirepass_common::env::Mode;
 use phirepass_common::protocol::{
     NodeControlMessage, Protocol, WebControlMessage, decode_node_control, encode_node_control,
@@ -211,7 +211,7 @@ async fn handle_control_from_server(
     ssh_sessions: Arc<Mutex<HashMap<String, SSHSessionHandle>>>,
     config: Arc<Env>,
 ) {
-    info!("received control message from server");
+    debug!("received control message from server");
 
     match msg {
         NodeControlMessage::OpenTunnel {
@@ -234,7 +234,7 @@ async fn handle_control_from_server(
         }
         NodeControlMessage::Resize { cid, cols, rows } => {
             if let Err(err) = forward_resize(ssh_sessions.clone(), cid, cols, rows).await {
-                warn!("{err}");
+                warn!("failed to forward resize: {err}");
             }
         }
         NodeControlMessage::TunnelData {
