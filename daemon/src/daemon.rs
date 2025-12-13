@@ -84,7 +84,7 @@ fn spawn_stats_logger(
             tokio::select! {
                 _ = interval.tick() => {
                     match Stats::gather() {
-                        Some(stats) => info!("{}", stats.log_line()),
+                        Some(stats) => info!("daemon stats\n{}", stats.log_line()),
                         None => warn!("stats: unable to read process metrics"),
                     }
                 }

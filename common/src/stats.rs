@@ -1,3 +1,4 @@
+use comfy_table::Table;
 use get_if_addrs::{IfAddr, get_if_addrs};
 use mac_address::get_mac_address;
 use netstat2::{AddressFamilyFlags, ProtocolFlags, get_sockets_info};
@@ -29,7 +30,7 @@ pub struct Stats {
     pub hostname: String,
     pub host_ip: String,
     pub host_mac: String,
-    pub threads: usize,
+    pub proc_threads: usize,
     pub proc_cpu: f32,
     pub proc_mem_bytes: u64,
     pub host_cpu: f32,
@@ -50,8 +51,7 @@ impl Stats {
 
         let pid = get_current_pid().ok()?;
         let proc = sys.process(pid)?;
-
-        let count = thread_count().map(NonZeroUsize::get).unwrap_or(0);
+        let proc_threads = thread_count().map(NonZeroUsize::get).unwrap_or(0);
 
         let hostname = std::env::var("HOSTNAME")
             .ok()
@@ -60,12 +60,11 @@ impl Stats {
 
         let host_ip = resolve_host_ip();
         let host_os_info = os_info::get();
+        let host_load_average = Self::loadavg();
         let host_connections = Self::connections().unwrap_or(0);
 
-        let host_load_average = Self::loadavg();
-
         // let host_processes = sys.processes().len();
-        let running = sys
+        let host_processes = sys
             .processes()
             .values()
             .filter(|p| p.status() == ProcessStatus::Run)
@@ -78,7 +77,7 @@ impl Stats {
             hostname,
             host_ip,
             host_mac,
-            threads: count,
+            proc_threads,
             proc_cpu: proc.cpu_usage(),
             proc_mem_bytes: proc.memory(),
             proc_uptime_secs: proc.run_time(),
@@ -89,7 +88,7 @@ impl Stats {
             host_load_average,
             host_os_info: format!("{}", host_os_info),
             host_connections,
-            host_processes: running,
+            host_processes,
         })
     }
 
@@ -127,24 +126,58 @@ impl Stats {
     }
 
     pub fn log_line(&self) -> String {
-        format!(
-            "stats: pid={}, host_os={}, host_name={}, host_connections={}, host_avg={:?}, host_ip={}, host_mac={}, host_uptime={}, proc_uptime={}, proc_cpu={:.1}%, proc_mem={}, host_cpu={:.1}%, host_mem={} / {}, host_threads={}",
-            self.pid,
-            self.host_os_info,
-            self.hostname,
-            self.host_connections,
-            self.host_load_average,
-            self.host_ip,
-            self.host_mac,
-            format_duration(self.host_uptime_secs),
-            format_duration(self.proc_uptime_secs),
-            self.proc_cpu,
-            format_mem(self.proc_mem_bytes),
-            self.host_cpu,
-            format_mem(self.host_mem_used_bytes),
-            format_mem(self.host_mem_total_bytes),
-            self.threads,
-        )
+        let mut table = Table::new();
+
+        table
+            .set_header(vec!["Stat name", "value"])
+            // process
+            .add_row(vec!["Proc pid", &self.pid])
+            .add_row(vec!["Proc threads", &self.proc_threads.to_string()])
+            .add_row(vec!["Proc CPU", format!("{:.1}%", self.proc_cpu).as_str()])
+            .add_row(vec!["Proc RAM", format_mem(self.proc_mem_bytes).as_str()])
+            .add_row(vec![
+                "Proc uptime",
+                format_duration(self.proc_uptime_secs).as_str(),
+            ])
+            // host
+            .add_row(vec!["Host OS", &self.host_os_info])
+            .add_row(vec!["Host name", &self.hostname])
+            .add_row(vec![
+                "Host CPU",
+                format!("{:.1}%", self.host_cpu.to_string()).as_str(),
+            ])
+            .add_row(vec![
+                "Host RAM",
+                format!(
+                    "{} / {}",
+                    format_mem(self.host_mem_used_bytes),
+                    format_mem(self.host_mem_total_bytes)
+                )
+                .as_str(),
+            ])
+            .add_row(vec!["Host connections", &self.host_connections.to_string()])
+            .add_row(vec![
+                "Host running processes",
+                &self.host_processes.to_string(),
+            ])
+            .add_row(vec![
+                "Host load",
+                format!(
+                    "{} / {} / {}",
+                    &self.host_load_average[0],
+                    &self.host_load_average[1],
+                    &self.host_load_average[2],
+                )
+                .as_str(),
+            ])
+            .add_row(vec!["Host IP", &self.host_ip])
+            .add_row(vec!["Host MAC", &self.host_mac])
+            .add_row(vec![
+                "Host uptime",
+                &*format_duration(self.host_uptime_secs),
+            ]);
+
+        table.to_string()
     }
 }
 

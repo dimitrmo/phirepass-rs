@@ -10,7 +10,7 @@ use phirepass_common::protocol::{
     decode_web_control, encode_web_control_to_frame,
 };
 use std::net::IpAddr;
-use std::time::Instant;
+use std::time::SystemTime;
 use tokio::sync::mpsc::unbounded_channel;
 use ulid::Ulid;
 
@@ -119,10 +119,10 @@ async fn handle_web_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
 async fn disconnect_web_client(state: &AppState, id: Ulid) {
     let mut connections = state.connections.lock().await;
     if let Some(info) = connections.remove(&id) {
-        let alive = info.connected_at.elapsed();
+        let alive = info.node.connected_at.elapsed();
         info!(
             "connection {id} ({}) removed after {:.1?} (total: {})",
-            info.ip,
+            info.node.ip,
             alive,
             connections.len()
         );
@@ -134,11 +134,11 @@ async fn disconnect_web_client(state: &AppState, id: Ulid) {
 async fn update_web_heartbeat(state: &AppState, id: Ulid) {
     let mut connections = state.connections.lock().await;
     if let Some(info) = connections.get_mut(&id) {
-        let since_last = info.last_heartbeat.elapsed();
-        info.last_heartbeat = Instant::now();
+        let since_last = info.node.last_heartbeat.elapsed();
+        info.node.last_heartbeat = SystemTime::now();
         info!(
             "heartbeat from web {id} ({}) after {:.1?}",
-            info.ip, since_last
+            info.node.ip, since_last
         );
     } else {
         warn!("received heartbeat for unknown web client {id}");

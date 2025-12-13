@@ -10,7 +10,7 @@ use phirepass_common::protocol::{
 };
 use phirepass_common::stats::Stats;
 use std::net::IpAddr;
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc::unbounded_channel;
 use ulid::Ulid;
 
@@ -120,10 +120,10 @@ async fn handle_frame_response(state: &AppState, frame: Frame, nid: String, cid:
 async fn disconnect_node(state: &AppState, id: Ulid) {
     let mut nodes = state.nodes.lock().await;
     if let Some(info) = nodes.remove(&id) {
-        let alive = info.connected_at.elapsed();
+        let alive = info.node.connected_at.elapsed();
         info!(
             "node {id} ({}) removed after {:.1?} (total: {})",
-            info.ip,
+            info.node.ip,
             alive,
             nodes.len()
         );
@@ -133,20 +133,20 @@ async fn disconnect_node(state: &AppState, id: Ulid) {
 async fn update_node_heartbeat(state: &AppState, id: Ulid, stats: Option<Stats>) {
     let mut nodes = state.nodes.lock().await;
     if let Some(info) = nodes.get_mut(&id) {
-        let since_last = info.last_heartbeat.elapsed();
-        info.last_heartbeat = Instant::now();
+        let since_last = info.node.last_heartbeat.elapsed();
+        info.node.last_heartbeat = SystemTime::now();
         if let Some(stats) = stats {
-            info.last_stats = Some(stats.clone());
+            info.node.last_stats = Some(stats.clone());
             info!(
-                "heartbeat from node {id} ({}) after {:.1?}; {}",
-                info.ip,
+                "heartbeat from node {id} ({}) after {:.1?}; \n{}",
+                info.node.ip,
                 since_last,
                 stats.log_line()
             );
         } else {
             info!(
                 "heartbeat from node {id} ({}) after {:.1?}",
-                info.ip, since_last
+                info.node.ip, since_last
             );
         }
     } else {

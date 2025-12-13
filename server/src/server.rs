@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use crate::env::Env;
 use crate::http::{get_alive, get_ready};
@@ -96,7 +96,7 @@ fn spawn_stats_logger(
             tokio::select! {
                 _ = interval.tick() => {
                     match Stats::gather() {
-                        Some(stats) => info!("{}", stats.log_line()),
+                        Some(stats) => info!("server stats\n{}", stats.log_line()),
                         None => warn!("stats: unable to read process metrics"),
                     }
                 }
@@ -120,16 +120,22 @@ struct NodeSummary {
 
 async fn list_nodes(State(state): State<AppState>) -> impl axum::response::IntoResponse {
     let nodes = state.nodes.lock().await;
-    let now = std::time::Instant::now();
+    let now = SystemTime::now();
 
     let data: Vec<NodeSummary> = nodes
         .iter()
         .map(|(id, info)| NodeSummary {
             id: id.to_string(),
-            ip: info.ip.to_string(),
-            connected_for_secs: now.duration_since(info.connected_at).as_secs_f64(),
-            since_last_heartbeat_secs: now.duration_since(info.last_heartbeat).as_secs_f64(),
-            stats: info.last_stats.clone(),
+            ip: info.node.ip.to_string(),
+            connected_for_secs: now
+                .duration_since(info.node.connected_at)
+                .unwrap()
+                .as_secs_f64(),
+            since_last_heartbeat_secs: now
+                .duration_since(info.node.last_heartbeat)
+                .unwrap()
+                .as_secs_f64(),
+            stats: info.node.last_stats.clone(),
         })
         .collect();
 

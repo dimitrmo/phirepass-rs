@@ -5,8 +5,8 @@ use futures_util::{SinkExt, StreamExt};
 use log::{info, warn};
 use phirepass_common::env::Mode;
 use phirepass_common::protocol::{
-    NodeControlMessage, Protocol, WebControlMessage, decode_node_control,
-    encode_node_control, encode_web_control_to_frame, generic_web_error,
+    NodeControlMessage, Protocol, WebControlMessage, decode_node_control, encode_node_control,
+    encode_web_control_to_frame, generic_web_error,
 };
 use phirepass_common::stats::Stats;
 use std::collections::HashMap;
@@ -59,9 +59,9 @@ fn generate_server_endpoint(mode: Mode, server_host: String, server_port: u16) -
         }
         Mode::Production => {
             if server_port == 443 {
-                format!("wss://{}", server_host)
+                format!("ws://{}", server_host)
             } else {
-                format!("wss://{}:{}", server_host, server_port)
+                format!("ws://{}:{}", server_host, server_port)
             }
         }
     }
