@@ -13,7 +13,7 @@ async fn main() -> anyhow::Result<()> {
     let cli = cli::parse();
     match cli.command {
         Some(cli::Commands::Version) => {
-            println!("{}", env!("CARGO_PKG_VERSION"));
+            println!("{}", env::version());
             Ok(())
         }
         Some(cli::Commands::Start) | None => {

@@ -32,3 +32,7 @@ pub fn init() -> anyhow::Result<Env> {
     let config = Env::init_from_env()?;
     Ok(config)
 }
+
+pub fn version() -> &'static str {
+    env!("CARGO_PKG_VERSION")
+}
