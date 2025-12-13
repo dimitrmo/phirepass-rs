@@ -6,7 +6,8 @@ use axum_client_ip::ClientIp;
 use futures_util::{SinkExt, StreamExt};
 use log::{info, warn};
 use phirepass_common::protocol::{
-    Frame, NodeControlMessage, Protocol, WebControlMessage, decode_web_control,
+    Frame, NodeControlMessage, Protocol, WebControlErrorType, WebControlMessage,
+    decode_web_control, encode_web_control_to_frame,
 };
 use std::net::IpAddr;
 use std::time::Instant;
@@ -27,16 +28,19 @@ async fn handle_web_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
     let (tx, mut rx) = unbounded_channel::<Frame>();
 
     {
-        let mut clients = state.clients.lock().await;
-        clients.insert(id, WebConnection::new(ip, tx));
-        let total = clients.len();
-        info!("client {id} ({ip}) connected (total: {total})", id = id);
+        let mut connections = state.connections.lock().await;
+        connections.insert(id, WebConnection::new(ip, tx));
+        let total = connections.len();
+        info!(
+            "connection {id} ({ip}) established (total: {total})",
+            id = id
+        );
     }
 
     let write_task = tokio::spawn(async move {
         while let Some(frame) = rx.recv().await {
             if let Err(err) = ws_tx.send(Message::Binary(frame.to_bytes().into())).await {
-                warn!("failed to send frame to web client: {}", err);
+                warn!("failed to send frame to web connection: {}", err);
                 break;
             }
         }
@@ -67,9 +71,13 @@ async fn handle_web_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
                             WebControlMessage::OpenTunnel {
                                 protocol,
                                 target,
+                                username,
                                 password,
                             } => {
-                                handle_open_tunnel(&state, id, protocol, target, password).await;
+                                handle_open_tunnel(
+                                    &state, id, protocol, target, username, password,
+                                )
+                                .await;
                             }
                             WebControlMessage::TunnelData {
                                 protocol,
@@ -109,14 +117,14 @@ async fn handle_web_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
 }
 
 async fn disconnect_web_client(state: &AppState, id: Ulid) {
-    let mut clients = state.clients.lock().await;
-    if let Some(info) = clients.remove(&id) {
+    let mut connections = state.connections.lock().await;
+    if let Some(info) = connections.remove(&id) {
         let alive = info.connected_at.elapsed();
         info!(
-            "client {id} ({}) removed after {:.1?} (total: {})",
+            "connection {id} ({}) removed after {:.1?} (total: {})",
             info.ip,
             alive,
-            clients.len()
+            connections.len()
         );
     }
 
@@ -124,8 +132,8 @@ async fn disconnect_web_client(state: &AppState, id: Ulid) {
 }
 
 async fn update_web_heartbeat(state: &AppState, id: Ulid) {
-    let mut clients = state.clients.lock().await;
-    if let Some(info) = clients.get_mut(&id) {
+    let mut connections = state.connections.lock().await;
+    if let Some(info) = connections.get_mut(&id) {
         let since_last = info.last_heartbeat.elapsed();
         info.last_heartbeat = Instant::now();
         info!(
@@ -217,6 +225,7 @@ async fn handle_open_tunnel(
     cid: Ulid,
     protocol: u8,
     target: String,
+    username: Option<String>,
     password: Option<String>,
 ) {
     info!(
@@ -242,10 +251,23 @@ async fn handle_open_tunnel(
         return;
     };
 
+    let Some(username) = username else {
+        warn!("username not found");
+        let _ = send_requires_username_password_error(&state, cid).await;
+        return;
+    };
+
+    let Some(password) = password else {
+        warn!("password not found");
+        let _ = send_requires_password_error(&state, cid).await;
+        return;
+    };
+
     if tx
         .send(NodeControlMessage::OpenTunnel {
             protocol,
             cid: cid.to_string(),
+            username,
             password,
         })
         .is_err()
@@ -257,6 +279,40 @@ async fn handle_open_tunnel(
             protocol
         );
     }
+}
+
+async fn send_requires_username_password_error(state: &AppState, cid: Ulid) -> anyhow::Result<()> {
+    let mut connections = state.connections.lock().await;
+    if let Some(info) = connections.get_mut(&cid) {
+        let error = WebControlMessage::Error {
+            kind: WebControlErrorType::RequiresUsernamePassword,
+            message: "Credentials are required".to_string(),
+        };
+
+        let frame = encode_web_control_to_frame(&error)?;
+        info.tx.send(frame)?;
+    } else {
+        warn!("failed to find connection {cid}");
+    }
+
+    Ok(())
+}
+
+async fn send_requires_password_error(state: &AppState, cid: Ulid) -> anyhow::Result<()> {
+    let mut connections = state.connections.lock().await;
+    if let Some(info) = connections.get_mut(&cid) {
+        let error = WebControlMessage::Error {
+            kind: WebControlErrorType::RequiresPassword,
+            message: "Password is required".to_string(),
+        };
+
+        let frame = encode_web_control_to_frame(&error)?;
+        info.tx.send(frame)?;
+    } else {
+        warn!("failed to find connection {cid}");
+    }
+
+    Ok(())
 }
 
 async fn notify_nodes_client_disconnect(state: &AppState, cid: Ulid) {

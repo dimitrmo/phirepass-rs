@@ -56,8 +56,8 @@ impl Connection {
         let mut session = client::connect(config, (ssh_config.host, ssh_config.port), sh).await?;
 
         let auth_res = match ssh_config.credentials {
-            SSHConfigAuth::Password(password) => {
-                session.authenticate_password(ssh_config.username, password)
+            SSHConfigAuth::UsernamePassword(username, password) => {
+                session.authenticate_password(username, password)
             }
         }
         .await?;
@@ -71,13 +71,12 @@ impl Connection {
 }
 
 pub(crate) enum SSHConfigAuth {
-    Password(String),
+    UsernamePassword(String, String),
 }
 
 pub(crate) struct SSHConfig {
     pub host: String,
     pub port: u16,
-    pub username: String,
     pub credentials: SSHConfigAuth,
 }
 

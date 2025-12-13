@@ -5,7 +5,7 @@ use futures_util::{SinkExt, StreamExt};
 use log::{info, warn};
 use phirepass_common::env::Mode;
 use phirepass_common::protocol::{
-    NodeControlMessage, Protocol, WebControlErrorType, WebControlMessage, decode_node_control,
+    NodeControlMessage, Protocol, WebControlMessage, decode_node_control,
     encode_node_control, encode_web_control_to_frame, generic_web_error,
 };
 use phirepass_common::stats::Stats;
@@ -217,12 +217,13 @@ async fn handle_control_from_server(
         NodeControlMessage::OpenTunnel {
             protocol,
             cid,
+            username,
             password,
         } => {
             info!("received open tunnel with protocol {:?}", protocol);
             match Protocol::try_from(protocol) {
                 Ok(Protocol::SSH) => {
-                    open_ssh_tunnel(tx, cid, ssh_sessions.clone(), config, password).await
+                    open_ssh_tunnel(tx, cid, ssh_sessions.clone(), config, username, password).await
                 }
                 Ok(protocol) => warn!("unsupported protocol for tunnel: {}", protocol),
                 Err(err) => warn!("invalid protocol value {}: {:?}", protocol, err),
@@ -278,35 +279,22 @@ async fn open_ssh_tunnel(
     cid: String,
     ssh_sessions: Arc<Mutex<HashMap<String, SSHSessionHandle>>>,
     config: Arc<Env>,
-    password: Option<String>,
+    username: String,
+    password: String,
 ) {
     info!("opening ssh tunnel for connection {cid}...");
 
     // Check if authentication mode requires password
     match &config.ssh_auth_mode {
-        crate::env::SSHAuthMethod::PasswordPrompt => {
-            let Some(password) = password else {
-                warn!(
-                    "no ssh password provided for connection {cid}, but password auth is required"
-                );
-                if let Err(err) = send_requires_password_error(tx, &cid) {
-                    warn!("failed to notify connection {cid} about password requirement: {err}");
-                }
-                return;
-            };
-
-            let password = password.trim().to_string();
-
-            if password.is_empty() {
-                warn!("empty ssh password provided for connection {cid}");
-                if let Err(err) = send_requires_password_error(tx, &cid) {
-                    warn!("failed to notify connection {cid} about password requirement: {err}");
-                }
-                return;
-            }
-
-            // Continue with connection attempt
-            start_ssh_tunnel(tx, cid, ssh_sessions, config, password).await;
+        crate::env::SSHAuthMethod::CredentialsPrompt => {
+            start_ssh_tunnel(
+                tx,
+                cid,
+                ssh_sessions,
+                config,
+                SSHConfigAuth::UsernamePassword(username, password),
+            )
+            .await;
         }
     }
 }
@@ -316,7 +304,7 @@ async fn start_ssh_tunnel(
     cid: String,
     ssh_sessions: Arc<Mutex<HashMap<String, SSHSessionHandle>>>,
     config: Arc<Env>,
-    password: String,
+    credentials: SSHConfigAuth,
 ) {
     let (stdin_tx, stdin_rx) = channel::<SSHCommand>(512);
     let (stop_tx, stop_rx) = oneshot::channel();
@@ -329,8 +317,7 @@ async fn start_ssh_tunnel(
         let conn = SSHConnection::new(SSHConfig {
             host: config.ssh_host.clone(),
             port: config.ssh_port,
-            username: config.ssh_user.clone(),
-            credentials: SSHConfigAuth::Password(password),
+            credentials,
         });
 
         match conn
@@ -451,17 +438,6 @@ fn send_data_to_connection(
     let raw = encode_node_control(&node_msg)?;
     tx.send(raw)
         .map_err(|err| anyhow!("failed to send data to connection: {err}"))
-}
-
-fn send_requires_password_error(tx: &UnboundedSender<Vec<u8>>, cid: &str) -> anyhow::Result<()> {
-    send_data_to_connection(
-        tx,
-        cid,
-        &WebControlMessage::Error {
-            kind: WebControlErrorType::RequiresPassword,
-            message: "SSH password is required.".to_string(),
-        },
-    )
 }
 
 fn now_millis() -> u64 {

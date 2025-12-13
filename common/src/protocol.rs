@@ -9,6 +9,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 pub enum WebControlErrorType {
     Generic = 0,
     RequiresPassword = 100,
+    RequiresUsernamePassword = 110,
 }
 
 impl Serialize for WebControlErrorType {
@@ -26,22 +27,15 @@ impl<'de> Deserialize<'de> for WebControlErrorType {
         D: Deserializer<'de>,
     {
         let value = u8::deserialize(deserializer)?;
-        Ok(Self::from_u8(value))
+        Ok(Self::from(value))
     }
 }
 
-impl TryFrom<u8> for WebControlErrorType {
-    type Error = ();
-
-    fn try_from(value: u8) -> anyhow::Result<Self, Self::Error> {
-        Ok(WebControlErrorType::from_u8(value))
-    }
-}
-
-impl WebControlErrorType {
-    pub fn from_u8(n: u8) -> Self {
-        match n {
+impl From<u8> for WebControlErrorType {
+    fn from(value: u8) -> Self {
+        match value {
             100 => Self::RequiresPassword,
+            110 => Self::RequiresUsernamePassword,
             _ => Self::Generic,
         }
     }
@@ -54,6 +48,7 @@ pub enum WebControlMessage {
     OpenTunnel {
         protocol: u8,
         target: String,
+        username: Option<String>,
         password: Option<String>,
     }, // open a tunnel to target ( by name ) - send form web to server
     TunnelData {
@@ -95,7 +90,8 @@ pub enum NodeControlMessage {
     OpenTunnel {
         protocol: u8,
         cid: String,
-        password: Option<String>,
+        username: String,
+        password: String,
     },
     TunnelData {
         protocol: u8,

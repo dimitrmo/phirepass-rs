@@ -103,16 +103,16 @@ async fn handle_node_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
 async fn handle_frame_response(state: &AppState, frame: Frame, nid: String, cid: String) {
     info!("node {nid} is asking to send a frame directly to user {cid}");
 
-    let Ok(user_id) = Ulid::from_string(cid.as_str()) else {
+    let Ok(cid_as_str) = Ulid::from_string(cid.as_str()) else {
         warn!("{cid} is not a valid format");
         return;
     };
 
-    let users = state.clients.lock().await;
-    if let Some(conn) = users.get(&user_id) {
+    let connections = state.connections.lock().await;
+    if let Some(conn) = connections.get(&cid_as_str) {
         match conn.tx.send(frame) {
-            Ok(..) => info!("frame response sent to user {user_id}"),
-            Err(err) => warn!("failed to send frame to user({}): {}", user_id, err),
+            Ok(..) => info!("frame response sent to connection {cid_as_str}"),
+            Err(err) => warn!("failed to send frame to user({}): {}", cid_as_str, err),
         }
     }
 }

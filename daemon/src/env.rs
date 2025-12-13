@@ -3,7 +3,7 @@ use phirepass_common::env::Mode;
 
 #[derive(Clone, Debug)]
 pub enum SSHAuthMethod {
-    PasswordPrompt,
+    CredentialsPrompt,
 }
 
 impl std::str::FromStr for SSHAuthMethod {
@@ -11,7 +11,7 @@ impl std::str::FromStr for SSHAuthMethod {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
-            "prompt" | "password_prompt" => Ok(SSHAuthMethod::PasswordPrompt),
+            "credentials_prompt" => Ok(SSHAuthMethod::CredentialsPrompt),
             _ => Err(format!("invalid authentication method: {}", s)),
         }
     }
@@ -51,10 +51,7 @@ pub(crate) struct Env {
     #[envconfig(from = "SSH_PORT", default = "22")]
     pub ssh_port: u16,
 
-    #[envconfig(from = "SSH_USER")]
-    pub ssh_user: String,
-
-    #[envconfig(from = "SSH_AUTH_METHOD", default = "password_prompt")]
+    #[envconfig(from = "SSH_AUTH_METHOD", default = "credentials_prompt")]
     pub ssh_auth_mode: SSHAuthMethod,
 }
 

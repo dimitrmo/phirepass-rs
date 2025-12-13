@@ -58,7 +58,7 @@ fn start_http_server(
         let state = AppState {
             env: Arc::new(config),
             nodes: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
-            clients: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            connections: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         };
 
         let app = Router::new()

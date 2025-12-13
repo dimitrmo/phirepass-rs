@@ -1,11 +1,11 @@
 use get_if_addrs::{IfAddr, get_if_addrs};
+use mac_address::get_mac_address;
+use netstat2::{AddressFamilyFlags, ProtocolFlags, get_sockets_info};
+use os_info;
 use serde::{Deserialize, Serialize};
 use std::num::NonZeroUsize;
-use mac_address::get_mac_address;
-use netstat2::{get_sockets_info, AddressFamilyFlags, ProtocolFlags};
-use sysinfo::{System, get_current_pid, ProcessStatus};
+use sysinfo::{ProcessStatus, System, get_current_pid};
 use thread_count::thread_count;
-use os_info;
 
 pub fn format_mem(bytes: u64) -> String {
     let mut size = bytes as f64;
@@ -98,11 +98,10 @@ impl Stats {
             Ok(mac) => match mac {
                 None => String::from("unknown"),
                 Some(addr) => addr.to_string(),
-            }
+            },
             Err(_) => String::from("unknown"),
         }
     }
-
 
     fn connections() -> anyhow::Result<usize> {
         let af_flags = AddressFamilyFlags::IPV4 | AddressFamilyFlags::IPV6;
