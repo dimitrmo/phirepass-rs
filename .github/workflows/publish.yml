@@ -9,6 +9,10 @@ on:
         types:
             - completed
 
+concurrency:
+    group: ${{ github.workflow }}-${{ github.ref }}
+    cancel-in-progress: true
+
 env:
     CI: true
     CARGO_TERM_COLOR: always
