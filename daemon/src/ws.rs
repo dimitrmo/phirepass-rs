@@ -59,9 +59,9 @@ fn generate_server_endpoint(mode: Mode, server_host: String, server_port: u16) -
         }
         Mode::Production => {
             if server_port == 443 {
-                format!("ws://{}", server_host)
+                format!("wss://{}", server_host)
             } else {
-                format!("ws://{}:{}", server_host, server_port)
+                format!("wss://{}:{}", server_host, server_port)
             }
         }
     }

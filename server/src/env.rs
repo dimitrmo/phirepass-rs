@@ -18,10 +18,10 @@ pub(crate) struct Env {
     #[envconfig(from = "IP_SOURCE", default = "ConnectInfo")]
     pub(crate) ip_source: ClientIpSource,
 
-    #[envconfig(from = "HTTP_HOST", default = "0.0.0.0")]
+    #[envconfig(from = "HOST", default = "0.0.0.0")]
     pub host: String,
 
-    #[envconfig(from = "HTTP_PORT", default = "8080")]
+    #[envconfig(from = "PORT", default = "8080")]
     pub port: u16,
 
     #[envconfig(from = "STATS_REFRESH_INTERVAL", default = "15")]
