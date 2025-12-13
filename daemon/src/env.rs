@@ -30,12 +30,6 @@ pub(crate) struct Env {
     #[allow(dead_code)]
     pub mode: Mode,
 
-    #[envconfig(from = "HTTP_HOST", default = "0.0.0.0")]
-    pub host: String,
-
-    #[envconfig(from = "HTTP_PORT", default = "8081")]
-    pub port: u16,
-
     #[envconfig(from = "PAT_TOKEN", default = "")]
     pub token: String,
 

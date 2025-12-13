@@ -1,11 +1,7 @@
 use crate::env::Env;
-use crate::http::{get_alive, get_ready};
 use crate::ws;
-use axum::Router;
-use axum::routing::get;
 use log::{info, warn};
 use phirepass_common::stats::Stats;
-use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::signal;
@@ -15,10 +11,8 @@ pub(crate) async fn start(config: Env) -> anyhow::Result<()> {
     info!("running server on {} mode", config.mode);
 
     let stats_refresh_interval = config.stats_refresh_interval;
-    let host = format!("{}:{}", config.host, config.port);
     let (shutdown_tx, _) = broadcast::channel(1);
 
-    let http_task = start_http_server(host, shutdown_tx.subscribe());
     let ws_task = start_ws_connection(config, shutdown_tx.subscribe());
     let stats_task = spawn_stats_logger(stats_refresh_interval, shutdown_tx.subscribe());
 
@@ -32,7 +26,6 @@ pub(crate) async fn start(config: Env) -> anyhow::Result<()> {
 
     tokio::select! {
         _ = ws_task => warn!("ws task ended"),
-        _ = http_task => warn!("http task ended"),
         _ = stats_task => warn!("stats logger task ended"),
         _ = shutdown_signal => info!("shutdown signal received"),
     }
@@ -77,30 +70,6 @@ fn start_ws_connection(
                 }
             }
         }
-    })
-}
-
-fn start_http_server(
-    host: String,
-    mut shutdown: broadcast::Receiver<()>,
-) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        let app = Router::new()
-            .route("/ready", get(get_ready))
-            .route("/alive", get(get_alive));
-
-        let listener = tokio::net::TcpListener::bind(host).await.unwrap();
-        info!("listening on: {}", listener.local_addr().unwrap());
-
-        axum::serve(
-            listener,
-            app.into_make_service_with_connect_info::<SocketAddr>(),
-        )
-        .with_graceful_shutdown(async move {
-            let _ = shutdown.recv().await;
-        })
-        .await
-        .unwrap()
     })
 }
 

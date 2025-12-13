@@ -1,7 +1,6 @@
 mod cli;
 mod daemon;
 mod env;
-mod http;
 mod ssh;
 mod ws;
 

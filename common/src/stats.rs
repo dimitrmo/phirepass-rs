@@ -2,7 +2,7 @@ use get_if_addrs::{IfAddr, get_if_addrs};
 use serde::{Deserialize, Serialize};
 use std::num::NonZeroUsize;
 use netstat2::{get_sockets_info, AddressFamilyFlags, ProtocolFlags};
-use sysinfo::{System, get_current_pid};
+use sysinfo::{System, get_current_pid, ProcessStatus};
 use thread_count::thread_count;
 use os_info;
 
@@ -62,7 +62,12 @@ impl Stats {
 
         let host_load_average = Self::loadavg();
 
-        let host_processes = sys.processes().len();
+        // let host_processes = sys.processes().len();
+        let running = sys
+            .processes()
+            .values()
+            .filter(|p| p.status() == ProcessStatus::Run)
+            .count();
 
         Some(Self {
             pid: pid.to_string(),
@@ -79,7 +84,7 @@ impl Stats {
             host_load_average,
             host_os_info: format!("{}", host_os_info),
             host_connections,
-            host_processes,
+            host_processes: running,
         })
     }
 
