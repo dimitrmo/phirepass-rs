@@ -2,7 +2,7 @@ use crate::env;
 use crate::state::AppState;
 use axum::Json;
 use axum::extract::State;
-use axum::http::{HeaderMap, HeaderValue, Method};
+use axum::http::{HeaderValue, Method};
 use axum::response::IntoResponse;
 use phirepass_common::stats::Stats;
 use serde_json::json;
@@ -111,21 +111,4 @@ pub async fn list_connections(State(state): State<AppState>) -> impl IntoRespons
         .collect();
 
     Json(data)
-}
-
-pub async fn list_headers(headers: HeaderMap) -> impl IntoResponse {
-    let mut obj = serde_json::Map::<String, serde_json::Value>::new();
-
-    // Iterate unique header names, then collect all values for each name
-    for name in headers.keys() {
-        let values: Vec<serde_json::Value> = headers
-            .get_all(name)
-            .iter()
-            .map(|v| serde_json::Value::String(v.to_str().unwrap_or("<non-utf8>").to_string()))
-            .collect();
-
-        obj.insert(name.as_str().to_string(), serde_json::Value::Array(values));
-    }
-
-    Json(serde_json::Value::Object(obj))
 }
