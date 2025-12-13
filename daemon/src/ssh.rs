@@ -1,7 +1,7 @@
 // Handle connection to local SSH
 
 use crate::ws::SSHCommand;
-use log::{info, warn};
+use log::{debug, info, warn};
 use phirepass_common::protocol::{Frame, NodeControlMessage, Protocol, encode_node_control};
 use russh::keys::*;
 use russh::*;
@@ -152,14 +152,14 @@ impl SSHConnection {
 
                             match encode_node_control(&message) {
                                 Ok(result) => match sender.send(result) {
-                                    Ok(_) => info!("ssh response sent back to {connection_id}"),
+                                    Ok(_) => debug!("ssh response sent back to {connection_id}"),
                                     Err(err) => warn!("failed to send: {err}"),
                                 },
                                 Err(err) => warn!("failed to encode node control: {}", err),
                             }
                         }
                         ChannelMsg::Eof => {
-                            info!("ssh channel received EOF");
+                            debug!("ssh channel received EOF");
                             break;
                         }
                         ChannelMsg::ExitStatus { exit_status } => {
@@ -170,7 +170,7 @@ impl SSHConnection {
                             break;
                         }
                         ChannelMsg::Close { .. } => {
-                            info!("ssh channel closed");
+                            debug!("ssh channel closed");
                             break;
                         }
                         _ => {}

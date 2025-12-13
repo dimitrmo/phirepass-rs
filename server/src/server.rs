@@ -1,19 +1,17 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 use crate::env::Env;
-use crate::http::{build_cors, get_stats, get_version};
+use crate::http::{build_cors, get_stats, get_version, list_nodes};
 use crate::node::ws_node_handler;
 use crate::state::AppState;
 use crate::web::ws_web_handler;
-use axum::extract::State;
+use axum::Router;
 use axum::routing::get;
-use axum::{Json, Router};
 use log::{info, warn};
 use phirepass_common::stats::Stats;
-use serde::Serialize;
 use tokio::signal;
 use tokio::sync::broadcast;
 
@@ -109,37 +107,4 @@ fn spawn_stats_logger(
             }
         }
     })
-}
-
-#[derive(Serialize)]
-struct NodeSummary {
-    id: String,
-    ip: String,
-    connected_for_secs: u64,
-    since_last_heartbeat_secs: u64,
-    stats: Option<Stats>,
-}
-
-async fn list_nodes(State(state): State<AppState>) -> impl axum::response::IntoResponse {
-    let nodes = state.nodes.read().await;
-    let now = SystemTime::now();
-
-    let data: Vec<NodeSummary> = nodes
-        .iter()
-        .map(|(id, info)| NodeSummary {
-            id: id.to_string(),
-            ip: info.node.ip.to_string(),
-            connected_for_secs: now
-                .duration_since(info.node.connected_at)
-                .unwrap()
-                .as_secs(),
-            since_last_heartbeat_secs: now
-                .duration_since(info.node.last_heartbeat)
-                .unwrap()
-                .as_secs(),
-            stats: info.node.last_stats.clone(),
-        })
-        .collect();
-
-    Json(data)
 }

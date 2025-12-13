@@ -1,6 +1,7 @@
 use phirepass_common::node::Node;
 use phirepass_common::protocol::{Frame, NodeControlMessage};
 use phirepass_common::stats::Stats;
+use serde::Serialize;
 use std::net::IpAddr;
 use std::time::SystemTime;
 use tokio::sync::mpsc::UnboundedSender;
@@ -27,8 +28,10 @@ impl WebConnection {
     }
 }
 
+#[derive(Serialize)]
 pub(crate) struct NodeConnection {
     pub(crate) node: Node,
+    #[serde(skip_serializing)]
     pub(crate) tx: UnboundedSender<NodeControlMessage>,
 }
 

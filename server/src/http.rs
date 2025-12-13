@@ -61,3 +61,11 @@ pub async fn get_stats(State(state): State<AppState>) -> impl IntoResponse {
 
     Json(body)
 }
+
+pub async fn list_nodes(State(state): State<AppState>) -> impl axum::response::IntoResponse {
+    let nodes = state.nodes.read().await;
+
+    let data: Vec<_> = nodes.iter().map(|(_, info)| info.node.clone()).collect();
+
+    Json(data)
+}
