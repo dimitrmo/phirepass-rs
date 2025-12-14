@@ -339,7 +339,7 @@
 
                 const fetchNodes = async () => {
                     try {
-                        const res = await fetch(`${apiBase}/nodes`);
+                        const res = await fetch(`${apiBase}/api/nodes`);
                         if (!res.ok) {
                             throw new Error(`status ${res.status}`);
                         }
@@ -584,7 +584,7 @@
 
                     const scheme =
                         window.location.protocol === "https:" ? "wss" : "ws";
-                    const url = `${scheme}://${window.location.hostname}:8080/web/ws`;
+                    const url = `${scheme}://${window.location.hostname}:8080/api/web/ws`;
 
                     log(`Connecting to ${url}`);
                     socket = new WebSocket(url);

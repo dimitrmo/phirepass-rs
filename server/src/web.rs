@@ -66,7 +66,6 @@ async fn handle_web_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
                     warn!("received malformed frame");
                     continue;
                 };
-
                 match frame.protocol {
                     Protocol::Control => match decode_web_control(&frame.payload) {
                         Ok(msg) => match msg {
@@ -154,15 +153,15 @@ async fn handle_tunnel_data(
     state: &AppState,
     cid: Ulid,
     protocol: u8,
-    target: String,
+    node_id: String,
     data: Vec<u8>,
 ) {
     info!("tunnel data received: {} bytes", data.len());
 
-    let target_id = match Ulid::from_string(&target) {
+    let target_id = match Ulid::from_string(&node_id) {
         Ok(id) => id,
         Err(err) => {
-            warn!("invalid target id {target}: {err}");
+            warn!("invalid node id {node_id}: {err}");
             return;
         }
     };
@@ -173,7 +172,7 @@ async fn handle_tunnel_data(
     };
 
     let Some(tx) = tx else {
-        warn!("tx for target not found {target}");
+        warn!("tx for node not found {node_id}");
         return;
     };
 
@@ -186,31 +185,31 @@ async fn handle_tunnel_data(
         .await
         .is_err()
     {
-        warn!("failed to forward open tunnel to node {target}");
+        warn!("failed to forward open tunnel to node {node_id}");
     } else {
         info!(
-            "forwarded open tunnel to node {target} (protocol {})",
+            "forwarded open tunnel to node {node_id} (protocol {})",
             protocol
         );
     }
 }
 
-async fn handle_resize(state: &AppState, cid: Ulid, target: String, cols: u32, rows: u32) {
-    let target_id = match Ulid::from_string(&target) {
+async fn handle_resize(state: &AppState, cid: Ulid, node: String, cols: u32, rows: u32) {
+    let node_id = match Ulid::from_string(&node) {
         Ok(id) => id,
         Err(err) => {
-            warn!("invalid target id {target}: {err}");
+            warn!("invalid node id {node}: {err}");
             return;
         }
     };
 
     let tx = {
         let nodes = state.nodes.read().await;
-        nodes.get(&target_id).map(|info| info.tx.clone())
+        nodes.get(&node_id).map(|info| info.tx.clone())
     };
 
     let Some(tx) = tx else {
-        warn!("tx for target not found {target}");
+        warn!("tx for node not found {node_id}");
         return;
     };
 
@@ -223,7 +222,7 @@ async fn handle_resize(state: &AppState, cid: Ulid, target: String, cols: u32, r
         .await
         .is_err()
     {
-        warn!("failed to forward resize to node {target}");
+        warn!("failed to forward resize to node {node_id}");
     }
 }
 
@@ -231,30 +230,30 @@ async fn handle_open_tunnel(
     state: &AppState,
     cid: Ulid,
     protocol: u8,
-    target: String,
+    node: String,
     username: Option<String>,
     password: Option<String>,
 ) {
     info!(
         "received open tunnel message protocol={:?} target={:?}",
-        protocol, target
+        protocol, node
     );
 
-    let target_id = match Ulid::from_string(&target) {
+    let node_id = match Ulid::from_string(&node) {
         Ok(id) => id,
         Err(err) => {
-            warn!("invalid target id {target}: {err}");
+            warn!("invalid node id {node}: {err}");
             return;
         }
     };
 
     let tx = {
         let nodes = state.nodes.read().await;
-        nodes.get(&target_id).map(|info| info.tx.clone())
+        nodes.get(&node_id).map(|info| info.tx.clone())
     };
 
     let Some(tx) = tx else {
-        warn!("tx for target not found {target}");
+        warn!("tx for node not found {node_id}");
         return;
     };
 
@@ -280,10 +279,10 @@ async fn handle_open_tunnel(
         .await
         .is_err()
     {
-        warn!("failed to forward open tunnel to node {target}");
+        warn!("failed to forward open tunnel to node {node_id}");
     } else {
         info!(
-            "forwarded open tunnel to node {target} (protocol {})",
+            "forwarded open tunnel to node {node_id} (protocol {})",
             protocol
         );
     }

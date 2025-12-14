@@ -7,6 +7,9 @@ fn main() {
     let out_dir = env::var("OUT_DIR").unwrap();
     let dest_path = Path::new(&out_dir).join("version.rs");
 
-    fs::write(dest_path, format!("pub const VERSION: &str = \"{}\";\n", version))
-        .expect("Failed to write version file");
+    fs::write(
+        dest_path,
+        format!("pub const VERSION: &str = \"{}\";\n", version),
+    )
+    .expect("Failed to write version file");
 }

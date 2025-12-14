@@ -2,6 +2,8 @@
 name = "phirepass-server"
 version = { workspace = true }
 edition = { workspace = true }
+repository = { workspace = true }
+license-file = { workspace = true }
 
 [dependencies]
 ulid = { workspace = true }

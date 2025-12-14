@@ -2,6 +2,8 @@
 name = "phirepass-console"
 version = { workspace = true }
 edition = { workspace = true }
+repository = { workspace = true }
+license-file = { workspace = true }
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -10,6 +12,7 @@ crate-type = ["cdylib", "rlib"]
 serde = { workspace = true }
 serde_json = { workspace = true }
 wasm-bindgen = "0.2.106"
+serde-wasm-bindgen = "0.6.5"
 gloo-timers = "0.3.0"
 web-sys = { version = "0.3.83", features = [
     "BinaryType",
@@ -21,9 +24,6 @@ web-sys = { version = "0.3.83", features = [
     "CloseEvent",
     "WebSocket",
 ]}
-
-[dev-dependencies]
-wasm-bindgen-test = "0.3.34"
 
 [profile.release]
 opt-level = "s"

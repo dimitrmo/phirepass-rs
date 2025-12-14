@@ -2,6 +2,8 @@
 name = "phirepass"
 version = { workspace = true }
 edition = { workspace = true }
+repository = { workspace = true }
+license-file = { workspace = true }
 
 [workspace]
 members = ["daemon", "common", "server", "web", "console"]
@@ -9,6 +11,8 @@ members = ["daemon", "common", "server", "web", "console"]
 [workspace.package]
 version = "0.1.30"
 edition = "2024"
+repository = "https://github.com/dimitrmo/phirepass-rs"
+license-file = "LICENCE"
 
 [[bin]]
 name = "server"
