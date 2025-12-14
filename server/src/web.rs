@@ -30,7 +30,7 @@ async fn handle_web_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
     let (mut ws_tx, mut ws_rx) = socket.split();
 
     // Bounded channel so slow clients cannot grow memory unbounded.
-    let (tx, mut rx) = mpsc::channel::<Frame>(1024);
+    let (tx, mut rx) = mpsc::channel::<Frame>(256);
 
     {
         let mut connections = state.connections.write().await;
@@ -157,7 +157,7 @@ async fn handle_tunnel_data(
     target: String,
     data: Vec<u8>,
 ) {
-    info!("tunnel data received: {:?}", data);
+    info!("tunnel data received: {} bytes", data.len());
 
     let target_id = match Ulid::from_string(&target) {
         Ok(id) => id,

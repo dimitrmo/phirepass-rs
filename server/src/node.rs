@@ -30,7 +30,7 @@ async fn handle_node_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
     let (mut ws_tx, mut ws_rx) = socket.split();
 
     // Bounded channel to avoid unbounded memory growth if the node socket is back-pressured.
-    let (tx, mut rx) = mpsc::channel::<NodeControlMessage>(1024); // node can communicate only with node control messages
+    let (tx, mut rx) = mpsc::channel::<NodeControlMessage>(256); // node can communicate only with node control messages
 
     {
         let mut nodes = state.nodes.write().await;
@@ -141,12 +141,11 @@ async fn update_node_heartbeat(state: &AppState, id: Ulid, stats: Option<Stats>)
         let since_last = info.node.last_heartbeat.elapsed();
         info.node.last_heartbeat = SystemTime::now();
         if let Some(stats) = stats {
-            info.node.last_stats = Some(stats.clone());
+            let log_line = stats.log_line();
+            info.node.last_stats = Some(stats);
             info!(
                 "heartbeat from node {id} ({}) after {:.1?}; \n{}",
-                info.node.ip,
-                since_last,
-                stats.log_line()
+                info.node.ip, since_last, log_line
             );
         } else {
             info!(

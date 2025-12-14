@@ -1,11 +1,11 @@
-use comfy_table::Table;
 use get_if_addrs::{IfAddr, get_if_addrs};
 use mac_address::get_mac_address;
 use netstat2::{AddressFamilyFlags, ProtocolFlags, get_sockets_info};
 use os_info;
 use serde::{Deserialize, Serialize};
 use std::num::NonZeroUsize;
-use sysinfo::{ProcessStatus, System, get_current_pid};
+use std::sync::{Mutex, OnceLock};
+use sysinfo::{ProcessStatus, ProcessesToUpdate, System, get_current_pid};
 use thread_count::thread_count;
 
 pub fn format_mem(bytes: u64) -> String {
@@ -26,55 +26,72 @@ pub fn format_mem(bytes: u64) -> String {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Stats {
-    pub pid: String,
-    pub hostname: String,
-    pub host_ip: String,
-    pub host_mac: String,
+    // process
+    pub proc_id: String,
     pub proc_threads: usize,
     pub proc_cpu: f32,
     pub proc_mem_bytes: u64,
+    pub proc_uptime_secs: u64,
+    // host
+    pub host_name: String,
+    pub host_ip: String,
+    pub host_mac: String,
     pub host_cpu: f32,
     pub host_mem_used_bytes: u64,
     pub host_mem_total_bytes: u64,
     pub host_uptime_secs: u64,
-    pub proc_uptime_secs: u64,
     pub host_load_average: [f64; 3],
     pub host_os_info: String,
     pub host_connections: usize,
     pub host_processes: usize,
 }
 
+static HOST_IP: OnceLock<String> = OnceLock::new();
+static HOST_MAC: OnceLock<String> = OnceLock::new();
+static HOST_NAME: OnceLock<String> = OnceLock::new();
+static HOST_OS_INFO: OnceLock<String> = OnceLock::new();
+static SYS_INFO: OnceLock<Mutex<System>> = OnceLock::new();
+
 impl Stats {
     pub fn gather() -> Option<Self> {
-        let mut sys = System::new_all();
-        sys.refresh_all();
+        let sys = SYS_INFO.get_or_init(|| Mutex::new(System::new_all()));
+        let mut sys = sys.lock().ok()?;
+
+        sys.refresh_memory();
+        sys.refresh_cpu_all();
+        sys.refresh_processes(ProcessesToUpdate::All, true);
 
         let pid = get_current_pid().ok()?;
         let proc = sys.process(pid)?;
         let proc_threads = thread_count().map(NonZeroUsize::get).unwrap_or(0);
 
-        let hostname = std::env::var("HOSTNAME")
-            .ok()
-            .or_else(System::host_name)
-            .unwrap_or_else(|| "unknown".into());
+        let hostname = HOST_NAME
+            .get_or_init(|| {
+                std::env::var("HOSTNAME")
+                    .ok()
+                    .or_else(System::host_name)
+                    .unwrap_or_else(|| "unknown".into())
+            })
+            .to_string();
 
-        let host_ip = resolve_host_ip();
-        let host_os_info = os_info::get();
+        let host_ip = HOST_IP.get_or_init(|| resolve_host_ip()).to_string();
+        let host_os_info = HOST_OS_INFO
+            .get_or_init(|| format!("{}", os_info::get()))
+            .to_string();
+
         let host_load_average = Self::loadavg();
         let host_connections = Self::connections().unwrap_or(0);
+        let host_mac = Self::mac();
 
-        // let host_processes = sys.processes().len();
         let host_processes = sys
             .processes()
             .values()
             .filter(|p| p.status() == ProcessStatus::Run)
             .count();
 
-        let host_mac = Self::mac();
-
         Some(Self {
-            pid: pid.to_string(),
-            hostname,
+            proc_id: pid.to_string(),
+            host_name: hostname,
             host_ip,
             host_mac,
             proc_threads,
@@ -93,13 +110,15 @@ impl Stats {
     }
 
     fn mac() -> String {
-        match get_mac_address() {
-            Ok(mac) => match mac {
-                None => String::from("unknown"),
-                Some(addr) => addr.to_string(),
-            },
-            Err(_) => String::from("unknown"),
-        }
+        HOST_MAC
+            .get_or_init(|| match get_mac_address() {
+                Ok(mac) => match mac {
+                    None => String::from("unknown"),
+                    Some(addr) => addr.to_string(),
+                },
+                Err(_) => String::from("unknown"),
+            })
+            .clone()
     }
 
     fn connections() -> anyhow::Result<usize> {
@@ -126,58 +145,26 @@ impl Stats {
     }
 
     pub fn log_line(&self) -> String {
-        let mut table = Table::new();
-
-        table
-            .set_header(vec!["Stat name", "value"])
-            // process
-            .add_row(vec!["Proc pid", &self.pid])
-            .add_row(vec!["Proc threads", &self.proc_threads.to_string()])
-            .add_row(vec!["Proc CPU", format!("{:.1}%", self.proc_cpu).as_str()])
-            .add_row(vec!["Proc RAM", format_mem(self.proc_mem_bytes).as_str()])
-            .add_row(vec![
-                "Proc uptime",
-                format_duration(self.proc_uptime_secs).as_str(),
-            ])
-            // host
-            .add_row(vec!["Host OS", &self.host_os_info])
-            .add_row(vec!["Host name", &self.hostname])
-            .add_row(vec![
-                "Host CPU",
-                format!("{:.1}%", self.host_cpu.to_string()).as_str(),
-            ])
-            .add_row(vec![
-                "Host RAM",
-                format!(
-                    "{} / {}",
-                    format_mem(self.host_mem_used_bytes),
-                    format_mem(self.host_mem_total_bytes)
-                )
-                .as_str(),
-            ])
-            .add_row(vec!["Host connections", &self.host_connections.to_string()])
-            .add_row(vec![
-                "Host running processes",
-                &self.host_processes.to_string(),
-            ])
-            .add_row(vec![
-                "Host load",
-                format!(
-                    "{} / {} / {}",
-                    &self.host_load_average[0],
-                    &self.host_load_average[1],
-                    &self.host_load_average[2],
-                )
-                .as_str(),
-            ])
-            .add_row(vec!["Host IP", &self.host_ip])
-            .add_row(vec!["Host MAC", &self.host_mac])
-            .add_row(vec![
-                "Host uptime",
-                &*format_duration(self.host_uptime_secs),
-            ]);
-
-        table.to_string()
+        format!(
+            "pid={} threads={} cpu={:.1}% mem={} uptime={} | host={} ip={} os={} cpu={:.1}% mem={}/{} procs={} conns={} load={:.2}/{:.2}/{:.2} uptime={}",
+            self.proc_id,
+            self.proc_threads,
+            self.proc_cpu,
+            format_mem(self.proc_mem_bytes),
+            format_duration(self.proc_uptime_secs),
+            self.host_name,
+            self.host_ip,
+            self.host_os_info,
+            self.host_cpu,
+            format_mem(self.host_mem_used_bytes),
+            format_mem(self.host_mem_total_bytes),
+            self.host_processes,
+            self.host_connections,
+            self.host_load_average[0],
+            self.host_load_average[1],
+            self.host_load_average[2],
+            format_duration(self.host_uptime_secs),
+        )
     }
 
     pub fn encoded(&self) -> anyhow::Result<String> {

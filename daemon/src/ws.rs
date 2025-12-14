@@ -119,7 +119,7 @@ impl WSConnection {
             }
         });
 
-        info!("writer setup");
+        debug!("writer setup");
 
         let reader_task = tokio::spawn(async move {
             while let Some(msg) = read.next().await {
@@ -152,7 +152,7 @@ impl WSConnection {
             }
         });
 
-        info!("reader setup");
+        debug!("reader setup");
 
         let heartbeat_task = tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(15));
