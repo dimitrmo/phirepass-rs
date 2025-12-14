@@ -45,4 +45,17 @@ docker-daemon:
 		--push \
 		.
 
-.PHONY: server deamon client web build arm format db docker-server docker-daemon
+wasm:
+	cd console && \
+        RUST_LOG=info wasm-pack build --target web \
+            --out-name phirepass-console \
+            --out-dir pkg/debug
+
+wasm-prod:
+	cd console && \
+        RUST_LOG=info wasm-pack build --target web \
+            --out-name phirepass-console \
+            --out-dir pkg/release \
+            --release
+
+.PHONY: server deamon client web build arm format db docker-server docker-daemon wasm wasm-prod
