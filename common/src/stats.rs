@@ -5,6 +5,7 @@ use os_info;
 use serde::{Deserialize, Serialize};
 use std::num::NonZeroUsize;
 use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 use sysinfo::{ProcessStatus, ProcessesToUpdate, System, get_current_pid};
 use thread_count::thread_count;
 
@@ -51,18 +52,39 @@ static HOST_MAC: OnceLock<String> = OnceLock::new();
 static HOST_NAME: OnceLock<String> = OnceLock::new();
 static HOST_OS_INFO: OnceLock<String> = OnceLock::new();
 static SYS_INFO: OnceLock<Mutex<System>> = OnceLock::new();
+static CONNECTIONS_CACHE: OnceLock<Mutex<ConnectionCache>> = OnceLock::new();
+static PROCESS_COUNT_CACHE: OnceLock<Mutex<ProcessCountCache>> = OnceLock::new();
+
+const SOCKETS_CACHE_TTL: Duration = Duration::from_secs(30);
+const PROCESS_COUNT_TTL: Duration = Duration::from_secs(60);
+
+#[derive(Debug, Clone)]
+struct ConnectionCache {
+    last_refresh: Instant,
+    value: usize,
+}
+
+#[derive(Debug, Clone)]
+struct ProcessCountCache {
+    last_refresh: Instant,
+    total: usize,
+}
 
 impl Stats {
     pub fn gather() -> Option<Self> {
+        // Keep a single System instance and refresh only the data we need to reduce overhead.
         let sys = SYS_INFO.get_or_init(|| Mutex::new(System::new_all()));
         let mut sys = sys.lock().ok()?;
 
         sys.refresh_memory();
         sys.refresh_cpu_all();
-        sys.refresh_processes(ProcessesToUpdate::All, true);
 
         let pid = get_current_pid().ok()?;
-        let proc = sys.process(pid)?;
+        sys.refresh_processes(ProcessesToUpdate::Some(&[pid]), true);
+        let (proc_cpu, proc_mem_bytes, proc_uptime_secs) = {
+            let proc = sys.process(pid)?;
+            (proc.cpu_usage(), proc.memory(), proc.run_time())
+        };
         let proc_threads = thread_count().map(NonZeroUsize::get).unwrap_or(0);
 
         let hostname = HOST_NAME
@@ -83,11 +105,7 @@ impl Stats {
         let host_connections = Self::connections().unwrap_or(0);
         let host_mac = Self::mac();
 
-        let host_processes = sys
-            .processes()
-            .values()
-            .filter(|p| p.status() == ProcessStatus::Run)
-            .count();
+        let host_processes = Self::process_count(&mut sys);
 
         Some(Self {
             proc_id: pid.to_string(),
@@ -95,9 +113,9 @@ impl Stats {
             host_ip,
             host_mac,
             proc_threads,
-            proc_cpu: proc.cpu_usage(),
-            proc_mem_bytes: proc.memory(),
-            proc_uptime_secs: proc.run_time(),
+            proc_cpu,
+            proc_mem_bytes,
+            proc_uptime_secs,
             host_cpu: sys.global_cpu_usage(),
             host_mem_used_bytes: sys.used_memory(),
             host_mem_total_bytes: sys.total_memory(),
@@ -122,10 +140,56 @@ impl Stats {
     }
 
     fn connections() -> anyhow::Result<usize> {
+        let cache = CONNECTIONS_CACHE.get_or_init(|| {
+            Mutex::new(ConnectionCache {
+                last_refresh: Instant::now() - SOCKETS_CACHE_TTL,
+                value: 0,
+            })
+        });
+
+        let mut cache = cache.lock().map_err(|err| anyhow::anyhow!("{err}"))?;
+
+        if cache.last_refresh.elapsed() < SOCKETS_CACHE_TTL {
+            return Ok(cache.value);
+        }
+
         let af_flags = AddressFamilyFlags::IPV4 | AddressFamilyFlags::IPV6;
         let proto_flags = ProtocolFlags::TCP | ProtocolFlags::UDP;
         let sockets = get_sockets_info(af_flags, proto_flags)?;
-        Ok(sockets.len())
+
+        cache.value = sockets.len();
+        cache.last_refresh = Instant::now();
+
+        Ok(cache.value)
+    }
+
+    fn process_count(sys: &mut System) -> usize {
+        let cache = PROCESS_COUNT_CACHE.get_or_init(|| {
+            Mutex::new(ProcessCountCache {
+                last_refresh: Instant::now() - PROCESS_COUNT_TTL,
+                total: 0,
+            })
+        });
+
+        let mut cache = match cache.lock() {
+            Ok(lock) => lock,
+            Err(_) => return 0,
+        };
+
+        if cache.last_refresh.elapsed() < PROCESS_COUNT_TTL {
+            return cache.total;
+        }
+
+        sys.refresh_processes(ProcessesToUpdate::All, false);
+
+        cache.total = sys
+            .processes()
+            .values()
+            .filter(|p| p.status() == ProcessStatus::Run)
+            .count();
+        cache.last_refresh = Instant::now();
+
+        cache.total
     }
 
     #[cfg(unix)]

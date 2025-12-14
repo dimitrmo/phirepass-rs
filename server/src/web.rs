@@ -177,21 +177,18 @@ async fn handle_tunnel_data(
         return;
     };
 
-    if tx
-        .send(NodeControlMessage::TunnelData {
-            protocol,
-            cid: cid.to_string(),
-            data,
-        })
-        .await
-        .is_err()
-    {
-        warn!("failed to forward open tunnel to node {target}");
-    } else {
-        info!(
-            "forwarded open tunnel to node {target} (protocol {})",
-            protocol
-        );
+    match tx.try_send(NodeControlMessage::TunnelData {
+        protocol,
+        cid: cid.to_string(),
+        data,
+    }) {
+        Ok(_) => {
+            info!(
+                "forwarded open tunnel to node {target} (protocol {})",
+                protocol
+            );
+        }
+        Err(err) => warn!("dropping tunnel data for target {target}: {err}"),
     }
 }
 
@@ -214,16 +211,12 @@ async fn handle_resize(state: &AppState, cid: Ulid, target: String, cols: u32, r
         return;
     };
 
-    if tx
-        .send(NodeControlMessage::Resize {
-            cid: cid.to_string(),
-            cols,
-            rows,
-        })
-        .await
-        .is_err()
-    {
-        warn!("failed to forward resize to node {target}");
+    if let Err(err) = tx.try_send(NodeControlMessage::Resize {
+        cid: cid.to_string(),
+        cols,
+        rows,
+    }) {
+        warn!("dropping resize for node {target}: {err}");
     }
 }
 
@@ -270,17 +263,13 @@ async fn handle_open_tunnel(
         return;
     };
 
-    if tx
-        .send(NodeControlMessage::OpenTunnel {
-            protocol,
-            cid: cid.to_string(),
-            username,
-            password,
-        })
-        .await
-        .is_err()
-    {
-        warn!("failed to forward open tunnel to node {target}");
+    if let Err(err) = tx.try_send(NodeControlMessage::OpenTunnel {
+        protocol,
+        cid: cid.to_string(),
+        username,
+        password,
+    }) {
+        warn!("dropping open tunnel to node {target}: {err}");
     } else {
         info!(
             "forwarded open tunnel to node {target} (protocol {})",

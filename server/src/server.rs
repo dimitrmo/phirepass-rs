@@ -21,7 +21,14 @@ pub async fn start(config: Env) -> anyhow::Result<()> {
     let stats_refresh_interval = config.stats_refresh_interval;
     let (shutdown_tx, _shutdown_rx) = broadcast::channel(1);
 
-    let http_task = start_http_server(config, shutdown_tx.subscribe());
+    let state = AppState {
+        env: Arc::new(config),
+        nodes: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
+        connections: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
+    };
+
+    let conns_task = spawn_stats_connections_logger(&state, stats_refresh_interval);
+    let http_task = start_http_server(state, shutdown_tx.subscribe());
     let stats_task = spawn_stats_logger(stats_refresh_interval, shutdown_tx.subscribe());
 
     let shutdown_signal = async {
@@ -35,6 +42,7 @@ pub async fn start(config: Env) -> anyhow::Result<()> {
     tokio::select! {
         _ = http_task => warn!("http task ended"),
         _ = stats_task => warn!("stats logger task ended"),
+        _ = conns_task => warn!("connections stats task ended"),
         _ = shutdown_signal => info!("shutdown signal received"),
     }
 
@@ -45,19 +53,13 @@ pub async fn start(config: Env) -> anyhow::Result<()> {
 }
 
 fn start_http_server(
-    config: Env,
+    state: AppState,
     mut shutdown: broadcast::Receiver<()>,
 ) -> tokio::task::JoinHandle<()> {
-    let ip_source = config.ip_source.clone();
-    let host = format!("{}:{}", config.host, config.port);
+    let ip_source = state.env.ip_source.clone();
+    let host = format!("{}:{}", state.env.host, state.env.port);
 
     tokio::spawn(async move {
-        let state = AppState {
-            env: Arc::new(config),
-            nodes: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
-            connections: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
-        };
-
         let cors = build_cors(&state);
 
         let app = Router::new()
@@ -83,6 +85,25 @@ fn start_http_server(
         })
         .await
         .unwrap();
+    })
+}
+
+fn spawn_stats_connections_logger(
+    state: &AppState,
+    stats_refresh_interval: u16,
+) -> tokio::task::JoinHandle<()> {
+    let connections = state.connections.clone();
+    let nodes = state.nodes.clone();
+    tokio::spawn(async move {
+        let mut interval =
+            tokio::time::interval(Duration::from_secs(stats_refresh_interval as u64));
+        loop {
+            interval.tick().await;
+            let conns = connections.read().await;
+            info!("active web connections: {}", conns.len());
+            let nodes = nodes.read().await;
+            info!("active nodes connections: {}", nodes.len());
+        }
     })
 }
 

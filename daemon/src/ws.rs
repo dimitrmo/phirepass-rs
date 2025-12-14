@@ -165,12 +165,16 @@ impl WSConnection {
                 };
 
                 match encode_node_control(&NodeControlMessage::Heartbeat { stats }) {
-                    Ok(raw) => {
-                        if hb_tx.send(raw).await.is_err() {
+                    Ok(raw) => match hb_tx.try_send(raw) {
+                        Ok(_) => {}
+                        Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
                             warn!("failed to queue heartbeat: channel closed");
                             break;
                         }
-                    }
+                        Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                            warn!("failed to queue heartbeat: channel full");
+                        }
+                    },
                     Err(err) => warn!("failed to encode heartbeat: {}", err),
                 }
             }
@@ -184,13 +188,16 @@ impl WSConnection {
 
                 let sent_at = now_millis();
                 match encode_node_control(&NodeControlMessage::Ping { sent_at }) {
-                    Ok(raw) => {
-                        if ping_tx.send(raw).await.is_err() {
+                    Ok(raw) => match ping_tx.try_send(raw) {
+                        Ok(_) => info!("ping sent at {sent_at}"),
+                        Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
                             warn!("failed to queue ping: channel closed");
                             break;
                         }
-                        info!("ping sent at {sent_at}");
-                    }
+                        Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                            warn!("failed to queue ping: channel full");
+                        }
+                    },
                     Err(err) => warn!("failed to encode ping: {err}"),
                 }
             }
@@ -261,11 +268,10 @@ async fn handle_control_from_server(
 
             let pong = NodeControlMessage::Pong { sent_at: now };
             match encode_node_control(&pong) {
-                Ok(raw) => {
-                    if tx.send(raw).await.is_err() {
-                        warn!("failed to queue pong: channel closed");
-                    }
-                }
+                Ok(raw) => match tx.try_send(raw) {
+                    Ok(_) => {}
+                    Err(err) => warn!("failed to queue pong: {err}"),
+                },
                 Err(err) => warn!("failed to encode pong: {err}"),
             }
         }
@@ -464,8 +470,7 @@ async fn send_data_to_connection(
     };
 
     let raw = encode_node_control(&node_msg)?;
-    tx.send(raw)
-        .await
+    tx.try_send(raw)
         .map_err(|err| anyhow!("failed to send data to connection: {err}"))
 }
 
