@@ -165,16 +165,12 @@ impl WSConnection {
                 };
 
                 match encode_node_control(&NodeControlMessage::Heartbeat { stats }) {
-                    Ok(raw) => match hb_tx.try_send(raw) {
-                        Ok(_) => {}
-                        Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                    Ok(raw) => {
+                        if hb_tx.send(raw).await.is_err() {
                             warn!("failed to queue heartbeat: channel closed");
                             break;
                         }
-                        Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
-                            warn!("failed to queue heartbeat: channel full");
-                        }
-                    },
+                    }
                     Err(err) => warn!("failed to encode heartbeat: {}", err),
                 }
             }
@@ -188,16 +184,13 @@ impl WSConnection {
 
                 let sent_at = now_millis();
                 match encode_node_control(&NodeControlMessage::Ping { sent_at }) {
-                    Ok(raw) => match ping_tx.try_send(raw) {
-                        Ok(_) => info!("ping sent at {sent_at}"),
-                        Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                    Ok(raw) => {
+                        if ping_tx.send(raw).await.is_err() {
                             warn!("failed to queue ping: channel closed");
                             break;
                         }
-                        Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
-                            warn!("failed to queue ping: channel full");
-                        }
-                    },
+                        info!("ping sent at {sent_at}");
+                    }
                     Err(err) => warn!("failed to encode ping: {err}"),
                 }
             }
@@ -268,10 +261,11 @@ async fn handle_control_from_server(
 
             let pong = NodeControlMessage::Pong { sent_at: now };
             match encode_node_control(&pong) {
-                Ok(raw) => match tx.try_send(raw) {
-                    Ok(_) => {}
-                    Err(err) => warn!("failed to queue pong: {err}"),
-                },
+                Ok(raw) => {
+                    if tx.send(raw).await.is_err() {
+                        warn!("failed to queue pong: channel closed");
+                    }
+                }
                 Err(err) => warn!("failed to encode pong: {err}"),
             }
         }
@@ -433,7 +427,8 @@ async fn tunnel_data(
     };
 
     stdin
-        .try_send(SSHCommand::Data(data))
+        .send(SSHCommand::Data(data))
+        .await
         .map_err(|err| format!("failed to queue data to ssh tunnel for {cid}: {err}"))
 }
 
@@ -453,7 +448,8 @@ async fn forward_resize(
     };
 
     stdin
-        .try_send(SSHCommand::Resize { cols, rows })
+        .send(SSHCommand::Resize { cols, rows })
+        .await
         .map_err(|err| format!("failed to queue resize to ssh tunnel for {cid}: {err}"))
 }
 
@@ -470,7 +466,8 @@ async fn send_data_to_connection(
     };
 
     let raw = encode_node_control(&node_msg)?;
-    tx.try_send(raw)
+    tx.send(raw)
+        .await
         .map_err(|err| anyhow!("failed to send data to connection: {err}"))
 }
 
