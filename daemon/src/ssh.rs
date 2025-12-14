@@ -152,7 +152,10 @@ impl SSHConnection {
                             match encode_node_control(&message) {
                                 Ok(result) => match sender.send(result).await {
                                     Ok(_) => debug!("ssh response sent back to {connection_id}"),
-                                    Err(err) => warn!("failed to send: {err}"),
+                                    Err(err) => {
+                                        warn!("failed to send: {err}; closing ssh channel");
+                                        break;
+                                    }
                                 },
                                 Err(err) => warn!("failed to encode node control: {}", err),
                             }

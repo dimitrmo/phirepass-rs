@@ -63,10 +63,10 @@ fn start_http_server(
         let cors = build_cors(&state);
 
         let app = Router::new()
-            .route("/web/ws", get(ws_web_handler))
-            .route("/nodes/ws", get(ws_node_handler))
-            .route("/nodes", get(list_nodes))
-            .route("/connections", get(list_connections))
+            .route("/api/web/ws", get(ws_web_handler))
+            .route("/api/nodes/ws", get(ws_node_handler))
+            .route("/api/nodes", get(list_nodes))
+            .route("/api/connections", get(list_connections))
             .route("/stats", get(get_stats))
             .route("/version", get(get_version))
             .layer(ip_source.into_extension())

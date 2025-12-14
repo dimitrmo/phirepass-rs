@@ -86,7 +86,7 @@ impl WSConnection {
 
         let ping_interval = config.ping_interval;
         let endpoint = format!(
-            "{}/nodes/ws",
+            "{}/api/nodes/ws",
             generate_server_endpoint(
                 config.mode.clone(),
                 config.server_host.to_string(),
@@ -316,6 +316,7 @@ async fn start_ssh_tunnel(
     let cid_for_task = cid.clone();
     let cid_for_connection = cid.clone();
     let session_id = SESSION_ID.fetch_add(1, Ordering::Relaxed);
+    let ssh_sessions_for_task = ssh_sessions.clone();
     let ssh_task = tokio::spawn(async move {
         info!("ssh task started for connection {cid_for_task}");
 
@@ -334,6 +335,7 @@ async fn start_ssh_tunnel(
 
                 if let Err(err) = send_data_to_connection(
                     &sender,
+                    ssh_sessions_for_task.clone(),
                     cid.as_str(),
                     &WebControlMessage::TunnelClosed {
                         protocol: Protocol::SSH as u8,
@@ -348,6 +350,7 @@ async fn start_ssh_tunnel(
                 warn!("ssh connection error for {cid_for_task}: {err}");
                 if let Err(err) = send_data_to_connection(
                     &sender,
+                    ssh_sessions_for_task.clone(),
                     cid.as_str(),
                     &generic_web_error("SSH authentication failed. Please check your password."),
                 )
@@ -455,6 +458,7 @@ async fn forward_resize(
 
 async fn send_data_to_connection(
     tx: &Sender<Vec<u8>>,
+    ssh_sessions: Arc<Mutex<HashMap<String, SSHSessionHandle>>>,
     cid: &str,
     data: &WebControlMessage,
 ) -> anyhow::Result<()> {
@@ -466,9 +470,11 @@ async fn send_data_to_connection(
     };
 
     let raw = encode_node_control(&node_msg)?;
-    tx.send(raw)
-        .await
-        .map_err(|err| anyhow!("failed to send data to connection: {err}"))
+    tx.send(raw).await.map_err(|err| {
+        // Send failures here imply the channel is closed; clean up the SSH tunnel for this cid.
+        tokio::spawn(close_ssh_tunnel(ssh_sessions, cid.to_string()));
+        anyhow!("failed to send data to connection: {err}")
+    })
 }
 
 fn now_millis() -> u64 {
