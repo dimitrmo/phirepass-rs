@@ -45,6 +45,15 @@ docker-daemon:
 		--push \
 		.
 
+docker-sandbox:
+	docker buildx build \
+        -t dimitrmok/phirepass-daemon-sandbox:latest \
+        --platform linux/amd64 \
+        -f daemon/Dockerfile.sandbox \
+        --progress=plain \
+        --push \
+        .
+
 wasm-dev:
 	cd channel && \
         RUST_LOG=info wasm-pack build --target web \
