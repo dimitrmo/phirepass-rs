@@ -1,5 +1,5 @@
 [package]
-name = "phirepass-console"
+name = "phirepass-channel"
 version = { workspace = true }
 edition = { workspace = true }
 repository = { workspace = true }

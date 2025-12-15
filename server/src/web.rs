@@ -5,7 +5,7 @@ use axum::extract::{State, WebSocketUpgrade};
 use axum::http::HeaderMap;
 use axum_client_ip::ClientIp;
 use futures_util::{SinkExt, StreamExt};
-use log::{info, warn};
+use log::{debug, info, warn};
 use phirepass_common::protocol::{
     Frame, NodeControlMessage, Protocol, WebControlErrorType, WebControlMessage,
     decode_web_control, encode_web_control_to_frame,
@@ -156,7 +156,7 @@ async fn handle_tunnel_data(
     node_id: String,
     data: Vec<u8>,
 ) {
-    info!("tunnel data received: {} bytes", data.len());
+    debug!("tunnel data received: {} bytes", data.len());
 
     let target_id = match Ulid::from_string(&node_id) {
         Ok(id) => id,
@@ -187,7 +187,7 @@ async fn handle_tunnel_data(
     {
         warn!("failed to forward open tunnel to node {node_id}");
     } else {
-        info!(
+        debug!(
             "forwarded open tunnel to node {node_id} (protocol {})",
             protocol
         );
@@ -281,7 +281,7 @@ async fn handle_open_tunnel(
     {
         warn!("failed to forward open tunnel to node {node_id}");
     } else {
-        info!(
+        debug!(
             "forwarded open tunnel to node {node_id} (protocol {})",
             protocol
         );

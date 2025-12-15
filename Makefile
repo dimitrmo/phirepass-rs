@@ -46,15 +46,15 @@ docker-daemon:
 		.
 
 wasm-dev:
-	cd console && \
+	cd channel && \
         RUST_LOG=info wasm-pack build --target web \
-            --out-name phirepass-console \
+            --out-name phirepass-channel \
             --out-dir pkg/debug
 
 wasm-prod:
-	cd console && \
+	cd channel && \
         RUST_LOG=info wasm-pack build --target web \
-            --out-name phirepass-console \
+            --out-name phirepass-channel \
             --out-dir pkg/release \
             --release
 

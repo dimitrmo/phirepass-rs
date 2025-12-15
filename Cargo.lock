@@ -2078,6 +2078,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "phirepass-channel"
+version = "0.1.31"
+dependencies = [
+ "gloo-timers",
+ "serde",
+ "serde-wasm-bindgen",
+ "serde_json",
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
 name = "phirepass-common"
 version = "0.1.31"
 dependencies = [
@@ -2094,18 +2106,6 @@ dependencies = [
  "serde_json",
  "sysinfo",
  "thread-count",
-]
-
-[[package]]
-name = "phirepass-console"
-version = "0.1.31"
-dependencies = [
- "gloo-timers",
- "serde",
- "serde-wasm-bindgen",
- "serde_json",
- "wasm-bindgen",
- "web-sys",
 ]
 
 [[package]]

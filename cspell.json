@@ -1,0 +1,15 @@
+{
+    "language": "en",
+    "ignorePaths": [
+        "target",
+        "**/node_modules/**",
+        "**/dist/**",
+        "Cargo.lock"
+    ],
+    "words": [
+        "rustls",
+        "phire",
+        "phirepass",
+        "xterm"
+    ]
+}

@@ -5,7 +5,7 @@ use axum::extract::{State, WebSocketUpgrade};
 use axum::http::HeaderMap;
 use axum_client_ip::ClientIp;
 use futures_util::{SinkExt, StreamExt};
-use log::{info, warn};
+use log::{debug, info, warn};
 use phirepass_common::protocol::{
     Frame, NodeControlMessage, decode_node_control, encode_node_control,
 };
@@ -106,7 +106,7 @@ async fn handle_node_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
 }
 
 async fn handle_frame_response(state: &AppState, frame: Frame, nid: String, cid: String) {
-    info!("node {nid} is asking to send a frame directly to user {cid}");
+    debug!("node {nid} is asking to send a frame directly to user {cid}");
 
     let Ok(cid_as_str) = Ulid::from_string(cid.as_str()) else {
         warn!("{cid} is not a valid format");
@@ -116,7 +116,7 @@ async fn handle_frame_response(state: &AppState, frame: Frame, nid: String, cid:
     let connections = state.connections.read().await;
     if let Some(conn) = connections.get(&cid_as_str) {
         match conn.tx.send(frame).await {
-            Ok(..) => info!("frame response sent to connection {cid_as_str}"),
+            Ok(..) => debug!("frame response sent to connection {cid_as_str}"),
             Err(err) => warn!("failed to send frame to user({}): {}", cid_as_str, err),
         }
     }

@@ -6,7 +6,7 @@ repository = { workspace = true }
 license-file = { workspace = true }
 
 [workspace]
-members = ["daemon", "common", "server", "web", "console"]
+members = ["daemon", "common", "server", "web", "channel"]
 
 [workspace.package]
 version = "0.1.31"

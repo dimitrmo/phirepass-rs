@@ -471,7 +471,7 @@
 
                     setStatus("Authenticating...", "info");
                     log(
-                        `Credentials submitted for ${sessionUsername}, attempting SSH connection...`
+                        `Credentials submitted for user, attempting SSH connection...`
                     );
                     requestSshTunnel(selectedNodeId, sessionUsername, password);
                     sendResize(term.cols, term.rows);

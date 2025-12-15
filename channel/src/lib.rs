@@ -19,13 +19,13 @@ extern "C" {
 }
 
 #[derive(Default)]
-struct ConsoleTerminalState {
+struct ChannelState {
     socket: Option<WebSocket>,
     heartbeat: Option<Interval>,
 }
 
 #[derive(Default)]
-struct ConsoleTerminalClosures {
+struct ChannelClosures {
     on_open: Option<Closure<dyn FnMut()>>,
     on_message: Option<Closure<dyn FnMut(MessageEvent)>>,
     on_close: Option<Closure<dyn FnMut(CloseEvent)>>,
@@ -33,7 +33,7 @@ struct ConsoleTerminalClosures {
 }
 
 #[derive(Default)]
-struct ConsoleTerminalCallbacks {
+struct ChannelCallbacks {
     on_connection_open: Option<Function>,
     on_connection_error: Option<Function>,
     on_connection_close: Option<Function>,
@@ -42,22 +42,33 @@ struct ConsoleTerminalCallbacks {
 }
 
 #[wasm_bindgen]
-pub struct ConsoleTerminal {
+pub struct Channel {
     endpoint: String,
-    state: Rc<RefCell<ConsoleTerminalState>>,
-    closures: Rc<RefCell<ConsoleTerminalClosures>>,
-    callbacks: Rc<RefCell<ConsoleTerminalCallbacks>>,
+    state: Rc<RefCell<ChannelState>>,
+    closures: Rc<RefCell<ChannelClosures>>,
+    callbacks: Rc<RefCell<ChannelCallbacks>>,
+}
+
+impl Clone for Channel {
+    fn clone(&self) -> Self {
+        Self {
+            endpoint: self.endpoint.clone(),
+            state: self.state.clone(),
+            closures: self.closures.clone(),
+            callbacks: self.callbacks.clone(),
+        }
+    }
 }
 
 #[wasm_bindgen]
-impl ConsoleTerminal {
+impl Channel {
     #[wasm_bindgen(constructor)]
     pub fn new(endpoint: String) -> Self {
         Self {
             endpoint,
-            state: Rc::new(RefCell::new(ConsoleTerminalState::default())),
-            closures: Rc::new(RefCell::new(ConsoleTerminalClosures::default())),
-            callbacks: Rc::new(RefCell::new(ConsoleTerminalCallbacks::default())),
+            state: Rc::new(RefCell::new(ChannelState::default())),
+            closures: Rc::new(RefCell::new(ChannelClosures::default())),
+            callbacks: Rc::new(RefCell::new(ChannelCallbacks::default())),
         }
     }
 
@@ -174,16 +185,17 @@ impl ConsoleTerminal {
             interval_as_millis = 15_000;
         }
 
-        let state_handle = self.state.clone();
-
         if let Ok(raw) = serde_json::to_vec(&HeartbeatMessage::new()) {
-            send_raw(&state_handle, Protocol::Control as u8, raw);
+            self.send_raw(Protocol::Control as u8, raw);
         }
 
+        let Ok(raw) = serde_json::to_vec(&HeartbeatMessage::new()) else {
+            return;
+        };
+
+        let channel = self.clone();
         let interval = Interval::new(interval_as_millis, move || {
-            if let Ok(raw) = serde_json::to_vec(&HeartbeatMessage::new()) {
-                send_raw(&state_handle, Protocol::Control as u8, raw);
-            }
+            channel.send_raw(Protocol::Control as u8, raw.clone());
         });
 
         self.state.borrow_mut().heartbeat = Some(interval);
@@ -191,17 +203,71 @@ impl ConsoleTerminal {
 
     pub fn open_ssh_tunnel(
         &self,
-        target: String,
+        node_id: String,
         username: Option<String>,
         password: Option<String>,
     ) {
+        if !self.is_open() {
+            return;
+        }
+
         if let Ok(raw) = serde_json::to_vec(&OpenTunnelMessage::new(
             Protocol::SSH as u8,
-            target,
+            node_id,
             username,
             password,
         )) {
-            send_raw(&self.state, Protocol::Control as u8, raw);
+            self.send_raw(Protocol::Control as u8, raw);
+        }
+    }
+
+    pub fn send_terminal_resize(&self, node_id: String, cols: u32, rows: u32) {
+        if !self.is_open() {
+            return;
+        }
+
+        if let Ok(raw) = serde_json::to_vec(&ResizeTerminal::new(node_id, cols, rows)) {
+            self.send_raw(Protocol::Control as u8, raw);
+        }
+    }
+
+    pub fn send_tunnel_data(&self, node_id: String, data: String) {
+        if !self.is_open() {
+            return;
+        }
+
+        if let Ok(raw) = serde_json::to_vec(&TunnelData::new(
+            Protocol::SSH as u8,
+            node_id,
+            data.into_bytes(),
+        )) {
+            // console_warn!("tunnel data sent");
+            // Tunnel data must travel inside a control frame; the server will
+            // unwrap and forward the payload to the SSH tunnel.
+            self.send_raw(Protocol::Control as u8, raw);
+        }
+    }
+
+    pub fn is_open(&self) -> bool {
+        if let Some(socket) = self.state.borrow().socket.as_ref() {
+            socket.ready_state() == WebSocket::OPEN
+        } else {
+            false
+        }
+    }
+
+    fn send_raw(&self, protocol: u8, message: Vec<u8>) {
+        let frame = encode_frame(protocol, &message);
+
+        if !self.is_open() {
+            console_warn!("Cannot send raw message: socket not open");
+            return;
+        }
+
+        if let Some(socket) = self.state.borrow().socket.as_ref() {
+            if let Err(err) = socket.send_with_u8_array(&frame) {
+                console_warn!("{}", format!("Failed to send raw frame: {err:?}"));
+            }
         }
     }
 
@@ -256,6 +322,56 @@ impl OpenTunnelMessage {
     }
 }
 
+#[derive(Serialize)]
+struct ResizeTerminal {
+    #[serde(rename = "type")]
+    msg_type: String,
+    target: String,
+    cols: u32,
+    rows: u32,
+}
+
+impl ResizeTerminal {
+    fn new(target: String, cols: u32, rows: u32) -> Self {
+        ResizeTerminal {
+            msg_type: "Resize".to_string(),
+            target,
+            cols,
+            rows,
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct TunnelData {
+    #[serde(rename = "type")]
+    msg_type: String,
+    protocol: u8,
+    target: String,
+    data: Vec<u8>,
+}
+
+impl TunnelData {
+    fn new(protocol: u8, target: String, data: Vec<u8>) -> Self {
+        TunnelData {
+            msg_type: "TunnelData".to_string(),
+            protocol,
+            target,
+            data,
+        }
+    }
+}
+
+#[repr(u8)]
+#[wasm_bindgen]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ErrorType {
+    Generic = 0,
+    RequiresPassword = 100,
+    RequiresUsernamePassword = 110,
+}
+
+#[wasm_bindgen]
 #[derive(Serialize, Deserialize)]
 pub enum Protocol {
     Control = 0,
@@ -293,32 +409,6 @@ fn decode_frame(bytes: &[u8]) -> Option<(u8, Vec<u8>)> {
     }
 
     Some((protocol, bytes[5..5 + length].to_vec()))
-}
-
-fn send_raw(state: &Rc<RefCell<ConsoleTerminalState>>, protocol: u8, message: Vec<u8>) {
-    let frame = encode_frame(protocol, &message);
-
-    let ready = {
-        let inner = state.borrow();
-        match inner.socket.as_ref() {
-            Some(ws) => ws.ready_state(),
-            None => {
-                console_warn!("Cannot send control message: socket closed");
-                return;
-            }
-        }
-    };
-
-    if ready != WebSocket::OPEN {
-        console_warn!("Cannot send control message: socket not open");
-        return;
-    }
-
-    if let Some(socket) = state.borrow().socket.as_ref() {
-        if let Err(err) = socket.send_with_u8_array(&frame) {
-            console_warn!("{}", format!("Failed to send control frame: {err:?}"));
-        }
-    }
 }
 
 fn handle_message(cb: &Function, event: &MessageEvent) {
@@ -390,12 +480,12 @@ fn handle_control_frame(cb: &Function, payload: &[u8]) {
         }
     };
 
-    let _ = cb.call1(&JsValue::NULL, &js_value);
+    let _ = cb.call2(&JsValue::NULL, &JsValue::from(Protocol::Control), &js_value);
 }
 
 fn handle_ssh_frame(cb: &Function, payload: &[u8]) {
     let data = Uint8Array::from(payload);
-    let _ = cb.call1(&JsValue::NULL, &data.into());
+    let _ = cb.call2(&JsValue::NULL, &JsValue::from(Protocol::SSH), &data.into());
 }
 
 #[wasm_bindgen]

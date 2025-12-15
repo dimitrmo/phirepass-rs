@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <link rel="shortcut icon" type="image/x-icon" href="favicon.ico" />
+        <link rel="stylesheet" href="xterm.css" />
+        <link rel="stylesheet" href="phirepass.css" />
+        <title>WASM Example</title>
+    </head>
+    <body>
+        <main>
+            <header>
+                <div>
+                    <h1>Phirepass Console</h1>
+                    <div style="color: #94a3b8; font-size: 14px">
+                        xterm.js websocket bridge to /web/ws
+                    </div>
+                </div>
+                <div
+                    style="display: inline-flex; align-items: center; gap: 8px"
+                >
+                    <div id="status">Idle</div>
+                    <button id="connect" disabled>Connect</button>
+                    <button id="fullscreen">Fullscreen</button>
+                </div>
+            </header>
+            <div
+                style="
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    margin-bottom: 6px;
+                    gap: 12px;
+                "
+            >
+                <div style="font-weight: 600; color: #cbd5e1">Nodes</div>
+                <button id="refresh-nodes">Refresh</button>
+            </div>
+            <div id="nodes"></div>
+            <div id="log" aria-live="polite"></div>
+            <div id="terminal"></div>
+        </main>
+        <script src="xterm.min.js"></script>
+        <script src="xterm-addon-fit.js"></script>
+        <script type="module" src="phirepass.js"></script>
+    </body>
+</html>
