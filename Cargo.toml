@@ -6,7 +6,7 @@ repository = { workspace = true }
 license-file = { workspace = true }
 
 [workspace]
-members = ["daemon", "common", "server", "web", "channel"]
+members = ["daemon", "common", "server", "channel"]
 
 [workspace.package]
 version = "0.1.31"
@@ -21,10 +21,6 @@ path = "server/src/main.rs"
 [[bin]]
 name = "daemon"
 path = "daemon/src/main.rs"
-
-[[bin]]
-name = "web"
-path = "web/src/main.rs"
 
 [dependencies]
 tokio = { workspace = true }

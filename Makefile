@@ -10,7 +10,7 @@ client:
 daemon: client
 
 web:
-	cargo run --bin web
+	npx http-server -c-1 -p 8083 channel
 
 build:
 	cargo build --all
