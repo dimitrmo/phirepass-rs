@@ -95,11 +95,11 @@ impl SSHConnection {
         mut cmd_rx: Receiver<SSHCommand>,
         mut shutdown_rx: oneshot::Receiver<()>,
     ) -> anyhow::Result<()> {
-        info!("connecting ssh...");
+        debug!("connecting ssh...");
 
         let mut connection = Connection::connect(self.config).await?;
 
-        info!("ssh connected");
+        debug!("ssh connected");
 
         let mut channel = connection.session.channel_open_session().await?;
 
@@ -111,7 +111,7 @@ impl SSHConnection {
 
         let connection_id = cid.clone();
         let sender = tx.clone();
-        info!("ssh ready");
+        debug!("ssh ready");
 
         loop {
             tokio::select! {

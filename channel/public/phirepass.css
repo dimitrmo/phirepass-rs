@@ -121,6 +121,16 @@ h1 {
     background: #0b1021;
 }
 
+/* Hide xterm scrollbars while preserving scroll input */
+#terminal .xterm-viewport {
+    scrollbar-width: none;
+}
+
+#terminal .xterm-viewport::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+}
+
 button {
     appearance: none;
     border: none;
