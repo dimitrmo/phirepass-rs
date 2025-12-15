@@ -2114,6 +2114,7 @@ version = "0.1.32"
 dependencies = [
  "anyhow",
  "axum",
+ "axum-client-ip",
  "clap",
  "env_logger",
  "envconfig",
@@ -2122,6 +2123,8 @@ dependencies = [
  "phirepass-common",
  "russh",
  "rustls",
+ "serde",
+ "serde_json",
  "tokio",
  "tokio-tungstenite",
 ]

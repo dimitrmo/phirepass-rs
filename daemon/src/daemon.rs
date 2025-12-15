@@ -1,7 +1,12 @@
 use crate::env::Env;
+use crate::http::get_version;
+use crate::state::AppState;
 use crate::ws;
+use axum::Router;
+use axum::routing::get;
 use log::{info, warn};
 use phirepass_common::stats::Stats;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::signal;
@@ -13,7 +18,12 @@ pub(crate) async fn start(config: Env) -> anyhow::Result<()> {
     let stats_refresh_interval = config.stats_refresh_interval;
     let (shutdown_tx, _) = broadcast::channel(1);
 
-    let ws_task = start_ws_connection(config, shutdown_tx.subscribe());
+    let state = AppState {
+        env: Arc::new(config),
+    };
+
+    let ws_task = start_ws_connection(&state, shutdown_tx.subscribe());
+    let http_task = start_http_server(state, shutdown_tx.subscribe());
     let stats_task = spawn_stats_logger(stats_refresh_interval, shutdown_tx.subscribe());
 
     let shutdown_signal = async {
@@ -26,6 +36,7 @@ pub(crate) async fn start(config: Env) -> anyhow::Result<()> {
 
     tokio::select! {
         _ = ws_task => warn!("ws task ended"),
+        _ = http_task => warn!("http task ended"),
         _ = stats_task => warn!("stats logger task ended"),
         _ = shutdown_signal => info!("shutdown signal received"),
     }
@@ -35,12 +46,37 @@ pub(crate) async fn start(config: Env) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn start_ws_connection(
-    config: Env,
+fn start_http_server(
+    state: AppState,
     mut shutdown: broadcast::Receiver<()>,
 ) -> tokio::task::JoinHandle<()> {
-    let env = Arc::new(config);
+    let host = format!("{}:{}", state.env.host, state.env.port);
 
+    tokio::spawn(async move {
+        let app = Router::new()
+            .route("/version", get(get_version))
+            .with_state(state);
+
+        let listener = tokio::net::TcpListener::bind(host).await.unwrap();
+        info!("listening on: {}", listener.local_addr().unwrap());
+
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .with_graceful_shutdown(async move {
+            let _ = shutdown.recv().await;
+        })
+        .await
+        .unwrap();
+    })
+}
+
+fn start_ws_connection(
+    state: &AppState,
+    mut shutdown: broadcast::Receiver<()>,
+) -> tokio::task::JoinHandle<()> {
+    let env = state.env.clone();
     tokio::spawn(async move {
         let mut attempt: u32 = 0;
 
