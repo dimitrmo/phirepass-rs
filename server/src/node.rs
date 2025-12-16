@@ -14,6 +14,7 @@ use std::net::IpAddr;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
 use ulid::Ulid;
+use crate::env;
 
 pub(crate) async fn ws_node_handler(
     State(state): State<AppState>,
@@ -64,18 +65,33 @@ async fn handle_node_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
                 Ok(msg) => match msg {
                     NodeControlMessage::Auth { .. } => {
                         info!("node {id} is asking to be authenticated");
+
+                        let resp = NodeControlMessage::AuthResponse {
+                            cid: id.to_string(),
+                            success: true, // TODO: Implement proper authentication
+                            version: env::version().to_string(),
+                        };
+
+                        if let Err(err) = tx.send(resp).await {
+                            warn!("failed to respond to node {id}: {err}");
+                        } else {
+                            info!("auth response sent {id}");
+                        }
                     }
                     NodeControlMessage::Heartbeat { stats } => {
+                        // heartbeats are send to server only after daemon has been authenticated
+                        // TODO: check if the heartbeat comes from authenticated daemons
                         update_node_heartbeat(&state, id, Some(stats)).await;
                     }
                     NodeControlMessage::Frame { frame, cid } => {
+                        // frames are sent by daemon directly to connections via server
+                        // TODO: check if frame comes from authenticated daemons
                         handle_frame_response(&state, frame, id.to_string(), cid).await;
                     }
                     NodeControlMessage::Ping { sent_at } => {
                         let now = now_millis();
                         let latency = now.saturating_sub(sent_at);
                         info!("ping from node {id}; latency={}ms", latency);
-
                         let pong = NodeControlMessage::Pong { sent_at: now };
                         if let Err(err) = tx.send(pong).await {
                             warn!("failed to queue pong for node {id}: {err}");

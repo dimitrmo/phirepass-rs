@@ -9,10 +9,10 @@ pub(crate) struct Cli {
 
 #[derive(Subcommand)]
 pub(crate) enum Commands {
-    /// Print version information
-    Version,
     /// Start the daemon
     Start,
+    /// Print version information
+    Version,
 }
 
 pub(crate) fn parse() -> Cli {

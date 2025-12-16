@@ -99,8 +99,8 @@ fn spawn_stats_connections_logger(
             tokio::time::interval(Duration::from_secs(stats_refresh_interval as u64));
         loop {
             interval.tick().await;
-            let conns = connections.read().await;
-            info!("active web connections: {}", conns.len());
+            let connections = connections.read().await;
+            info!("active web connections: {}", connections.len());
             let nodes = nodes.read().await;
             info!("active nodes connections: {}", nodes.len());
         }

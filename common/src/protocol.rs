@@ -84,6 +84,11 @@ pub enum NodeControlMessage {
     Auth {
         token: String,
     },
+    AuthResponse {
+        cid: String,
+        success: bool,
+        version: String,
+    },
     Heartbeat {
         stats: Stats,
     },

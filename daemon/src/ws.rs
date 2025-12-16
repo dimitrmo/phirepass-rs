@@ -1,6 +1,7 @@
 use crate::env::Env;
 use crate::ssh::{SSHConfig, SSHConfigAuth, SSHConnection};
 use anyhow::anyhow;
+use futures_util::stream::SplitStream;
 use futures_util::{SinkExt, StreamExt};
 use log::{debug, info, warn};
 use phirepass_common::env::Mode;
@@ -13,11 +14,16 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::{Receiver, Sender, channel};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
-use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
+use tokio_tungstenite::{
+    MaybeTlsStream, WebSocketStream, connect_async, tungstenite::protocol::Message,
+};
+
+type WebSocketReader = SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>;
 
 #[derive(Clone, Debug)]
 pub(crate) enum SSHCommand {
@@ -83,6 +89,7 @@ impl WSConnection {
 
     pub async fn connect(self, config: Arc<Env>) -> anyhow::Result<()> {
         info!("connecting ws...");
+        // let mut connection_id: Option<String> = None;
 
         let ping_interval = config.ping_interval;
         let endpoint = format!(
@@ -104,6 +111,9 @@ impl WSConnection {
         })?;
 
         write.send(Message::Binary(auth_frame.into())).await?;
+
+        let (cid, version) = read_next_auth_response(&mut read).await?;
+        info!("daemon authenticated successfully {cid} with server version {version}");
 
         let tx_writer = self.writer.clone();
         let hb_tx = self.writer.clone();
@@ -209,6 +219,42 @@ impl WSConnection {
     }
 }
 
+async fn read_next_auth_response(read: &mut WebSocketReader) -> anyhow::Result<(String, String)> {
+    if let Some(msg) = read_next_control(read).await? {
+        if let NodeControlMessage::AuthResponse { cid, version, success } = msg {
+            if success {
+                Ok((cid, version))
+            } else {
+                anyhow::bail!("daemon failed to authenticated")
+            }
+        } else {
+            anyhow::bail!("unexpected authentication response")
+        }
+    } else {
+        anyhow::bail!("failed to read next control message")
+    }
+}
+
+async fn read_next_control(
+    read: &mut WebSocketReader,
+) -> anyhow::Result<Option<NodeControlMessage>> {
+    while let Some(msg) = read.next().await {
+        match msg {
+            Ok(Message::Binary(data)) => match decode_node_control(&data) {
+                Ok(msg) => return Ok(Some(msg)),
+                Err(err) => warn!("failed to decode node control: {err}"),
+            },
+            Ok(Message::Close(reason)) => {
+                return Err(anyhow!("connection closed: {:?}", reason));
+            }
+            Ok(other) => warn!("received unexpected message: {:?}", other),
+            Err(err) => return Err(anyhow!("failed to read frame: {}", err)),
+        }
+    }
+
+    Ok(None)
+}
+
 async fn handle_control_from_server(
     msg: NodeControlMessage,
     tx: &Sender<Vec<u8>>,
@@ -258,7 +304,6 @@ async fn handle_control_from_server(
             let now = now_millis();
             let latency = now.saturating_sub(sent_at);
             info!("received ping from server; latency={}ms", latency);
-
             let pong = NodeControlMessage::Pong { sent_at: now };
             match encode_node_control(&pong) {
                 Ok(raw) => {
