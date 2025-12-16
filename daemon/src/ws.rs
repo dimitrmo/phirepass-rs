@@ -221,7 +221,12 @@ impl WSConnection {
 
 async fn read_next_auth_response(read: &mut WebSocketReader) -> anyhow::Result<(String, String)> {
     if let Some(msg) = read_next_control(read).await? {
-        if let NodeControlMessage::AuthResponse { cid, version, success } = msg {
+        if let NodeControlMessage::AuthResponse {
+            cid,
+            version,
+            success,
+        } = msg
+        {
             if success {
                 Ok((cid, version))
             } else {

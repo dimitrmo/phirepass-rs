@@ -5,6 +5,9 @@ edition = { workspace = true }
 repository = { workspace = true }
 license-file = { workspace = true }
 
+[badges]
+maintenance = { status = "experimental" }
+
 [workspace]
 members = ["daemon", "common", "server", "channel"]
 
@@ -61,7 +64,9 @@ rustls = { version = "0.23.35", features = ["ring"] }
 tower-http = { version = "0.6.8", features = ["cors"]}
 
 [profile.release]
+lto = "fat"
 panic = "abort"
-lto = true
 codegen-units = 1
+opt-level = 3
+debug = 0
 strip = "symbols"
