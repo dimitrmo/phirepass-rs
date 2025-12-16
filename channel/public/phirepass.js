@@ -1,5 +1,4 @@
 import init, {
-    version,
     Protocol,
     ErrorType,
     Channel as PhirepassChannel,
@@ -18,7 +17,8 @@ const refreshBtn = document.getElementById("refresh-nodes");
 const fullscreenBtn = document.getElementById("fullscreen");
 
 const wsScheme = window.location.protocol === "https:" ? "wss" : "ws";
-const wsEndpoint = `${wsScheme}://${window.location.hostname}:8080/api/web/ws`;
+
+const wsEndpoint = `${wsScheme}://${window.location.hostname}:8080`;
 const httpEndpoint = `${window.location.protocol}//${window.location.hostname}:8080`;
 
 let term, fitAddon;
@@ -110,7 +110,7 @@ const renderNodes = (list) => {
             `uptime: ${formatNumber(node.connected_for_secs / 60, 1)} min`,
             `last hb: ${formatNumber(node.since_last_heartbeat_secs, 1)}s`,
             `cpu: ${formatNumber(stats.host_cpu, 1)}%`,
-            `mem: ${formatBytes(stats.host_mem_used_bytes)} / ${formatBytes(
+            `host_mem: ${formatBytes(stats.host_mem_used_bytes)} / ${formatBytes(
                 stats.host_mem_total_bytes
             )}`,
         ]
@@ -310,7 +310,7 @@ function connect() {
     fitAddon.fit();
     setStatus("Connecting...");
 
-    const channel = new PhirepassChannel(wsEndpoint);
+    const channel = new PhirepassChannel(`${wsEndpoint}/api/web/ws`);
 
     channel.on_connection_open(() => {
         channel.start_heartbeat();

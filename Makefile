@@ -47,7 +47,7 @@ docker-daemon:
 
 docker-sandbox:
 	docker buildx build \
-        -t dimitrmok/phirepass-daemon-sandbox:latest \
+        -t dimitrmok/phirepass-daemon-sandbox:0.0.4 \
         --platform linux/amd64 \
         -f daemon/Dockerfile.sandbox \
         --progress=plain \
