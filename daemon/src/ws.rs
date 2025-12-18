@@ -1,7 +1,7 @@
 use crate::env::Env;
 use crate::ssh::{SSHConfig, SSHConfigAuth, SSHConnection};
 use anyhow::anyhow;
-use futures_util::stream::SplitStream;
+use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use log::{debug, info, warn};
 use phirepass_common::env::Mode;
@@ -25,6 +25,8 @@ use tokio_tungstenite::{
 
 type WebSocketReader = SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>;
 
+type WebSocketWriter = SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>;
+
 #[derive(Clone, Debug)]
 pub(crate) enum SSHCommand {
     Data(Vec<u8>),
@@ -35,9 +37,9 @@ static SESSION_ID: AtomicU64 = AtomicU64::new(1);
 
 struct SSHSessionHandle {
     id: u64,
-    stop: Option<oneshot::Sender<()>>,
     join: JoinHandle<()>,
     stdin: Sender<SSHCommand>,
+    stop: Option<oneshot::Sender<()>>,
 }
 
 impl SSHSessionHandle {
@@ -104,15 +106,12 @@ impl WSConnection {
         info!("trying {endpoint}");
 
         let (stream, _) = connect_async(endpoint).await?;
-        let (mut write, mut read) = stream.split();
+        let (mut writer, mut reader) = stream.split();
 
-        let auth_frame = encode_node_control(&NodeControlMessage::Auth {
-            token: config.token.clone(),
-        })?;
+        let _ = write_next_auth(&mut writer, config.token.clone()).await?;
+        info!("daemon sent auth request with token");
 
-        write.send(Message::Binary(auth_frame.into())).await?;
-
-        let (cid, version) = read_next_auth_response(&mut read).await?;
+        let (cid, version) = read_next_auth_response(&mut reader).await?;
         info!("daemon authenticated successfully {cid} with server version {version}");
 
         let tx_writer = self.writer.clone();
@@ -122,7 +121,7 @@ impl WSConnection {
 
         let write_task = tokio::spawn(async move {
             while let Some(frame) = rx.recv().await {
-                if let Err(err) = write.send(Message::Binary(frame.into())).await {
+                if let Err(err) = writer.send(Message::Binary(frame.into())).await {
                     warn!("failed to send frame: {}", err);
                     break;
                 }
@@ -132,7 +131,7 @@ impl WSConnection {
         debug!("writer setup");
 
         let reader_task = tokio::spawn(async move {
-            while let Some(msg) = read.next().await {
+            while let Some(msg) = reader.next().await {
                 match msg {
                     Ok(Message::Binary(data)) => match decode_node_control(&data) {
                         Ok(msg) => {
@@ -219,8 +218,17 @@ impl WSConnection {
     }
 }
 
-async fn read_next_auth_response(read: &mut WebSocketReader) -> anyhow::Result<(String, String)> {
-    if let Some(msg) = read_next_control(read).await? {
+async fn write_next_auth(writer: &mut WebSocketWriter, token: String) -> anyhow::Result<()> {
+    let auth_frame = encode_node_control(&NodeControlMessage::Auth { token })?;
+
+    writer
+        .send(Message::Binary(auth_frame.into()))
+        .await
+        .map_err(Into::into)
+}
+
+async fn read_next_auth_response(reader: &mut WebSocketReader) -> anyhow::Result<(String, String)> {
+    if let Some(msg) = read_next_control(reader).await? {
         if let NodeControlMessage::AuthResponse {
             cid,
             version,
@@ -241,9 +249,9 @@ async fn read_next_auth_response(read: &mut WebSocketReader) -> anyhow::Result<(
 }
 
 async fn read_next_control(
-    read: &mut WebSocketReader,
+    reader: &mut WebSocketReader,
 ) -> anyhow::Result<Option<NodeControlMessage>> {
-    while let Some(msg) = read.next().await {
+    while let Some(msg) = reader.next().await {
         match msg {
             Ok(Message::Binary(data)) => match decode_node_control(&data) {
                 Ok(msg) => return Ok(Some(msg)),
@@ -402,7 +410,10 @@ async fn start_ssh_tunnel(
                     &sender,
                     ssh_sessions_for_task.clone(),
                     cid.as_str(),
-                    &generic_web_error("SSH authentication failed. Please check your password."),
+                    &generic_web_error(
+                        Protocol::SSH as u8,
+                        "SSH authentication failed. Please check your password.",
+                    ),
                 )
                 .await
                 {

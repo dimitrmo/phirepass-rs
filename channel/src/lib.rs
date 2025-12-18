@@ -376,12 +376,14 @@ pub enum ErrorType {
 pub enum Protocol {
     Control = 0,
     SSH = 1,
+    SFTP = 2,
 }
 
 impl From<u8> for Protocol {
     fn from(val: u8) -> Self {
         match val {
             1 => Protocol::SSH,
+            2 => Protocol::SFTP,
             _ => Protocol::Control,
         }
     }
@@ -389,9 +391,9 @@ impl From<u8> for Protocol {
 
 fn encode_frame(protocol: u8, payload: &[u8]) -> Vec<u8> {
     let mut buffer = Vec::with_capacity(5 + payload.len());
-    buffer.push(protocol);
-    buffer.extend_from_slice(&(payload.len() as u32).to_be_bytes());
-    buffer.extend_from_slice(payload);
+    buffer.push(protocol); // 1
+    buffer.extend_from_slice(&(payload.len() as u32).to_be_bytes()); // 4
+    buffer.extend_from_slice(payload); // ...
     buffer
 }
 
@@ -443,6 +445,9 @@ fn handle_message(cb: &Function, event: &MessageEvent) {
         }
         Protocol::SSH => {
             handle_ssh_frame(cb, &payload);
+        }
+        Protocol::SFTP => {
+            //
         }
     }
 }

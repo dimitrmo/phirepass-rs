@@ -144,18 +144,13 @@ impl SSHConnection {
 
                     match msg {
                         ChannelMsg::Data { ref data } => {
-                            let message = NodeControlMessage::Frame {
+                            match encode_node_control(&NodeControlMessage::Frame {
                                 frame: Frame::new(Protocol::SSH, data.to_vec()),
                                 cid: connection_id.clone(),
-                            };
-
-                            match encode_node_control(&message) {
+                            }) {
                                 Ok(result) => match sender.send(result).await {
                                     Ok(_) => debug!("ssh response sent back to {connection_id}"),
-                                    Err(err) => {
-                                        warn!("failed to send: {err}; closing ssh channel");
-                                        break;
-                                    }
+                                    Err(err) => warn!("failed to send: {err}"),
                                 },
                                 Err(err) => warn!("failed to encode node control: {}", err),
                             }

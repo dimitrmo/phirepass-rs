@@ -259,13 +259,13 @@ async fn handle_open_tunnel(
 
     let Some(username) = username else {
         warn!("username not found");
-        let _ = send_requires_username_password_error(&state, cid).await;
+        let _ = send_requires_username_password_error(&state, protocol, cid).await;
         return;
     };
 
     let Some(password) = password else {
         warn!("password not found");
-        let _ = send_requires_password_error(&state, cid).await;
+        let _ = send_requires_password_error(&state, protocol, cid).await;
         return;
     };
 
@@ -288,12 +288,17 @@ async fn handle_open_tunnel(
     }
 }
 
-async fn send_requires_username_password_error(state: &AppState, cid: Ulid) -> anyhow::Result<()> {
+async fn send_requires_username_password_error(
+    state: &AppState,
+    protocol: u8,
+    cid: Ulid,
+) -> anyhow::Result<()> {
     let connections = state.connections.read().await;
     if let Some(info) = connections.get(&cid) {
         let error = WebControlMessage::Error {
             kind: WebControlErrorType::RequiresUsernamePassword,
             message: "Credentials are required".to_string(),
+            protocol,
         };
 
         let frame = encode_web_control_to_frame(&error)?;
@@ -305,12 +310,17 @@ async fn send_requires_username_password_error(state: &AppState, cid: Ulid) -> a
     Ok(())
 }
 
-async fn send_requires_password_error(state: &AppState, cid: Ulid) -> anyhow::Result<()> {
+async fn send_requires_password_error(
+    state: &AppState,
+    protocol: u8,
+    cid: Ulid,
+) -> anyhow::Result<()> {
     let connections = state.connections.read().await;
     if let Some(info) = connections.get(&cid) {
         let error = WebControlMessage::Error {
             kind: WebControlErrorType::RequiresPassword,
             message: "Password is required".to_string(),
+            protocol,
         };
 
         let frame = encode_web_control_to_frame(&error)?;
