@@ -1,5 +1,6 @@
 use crate::env::Env;
-use crate::ssh::{SSHConfig, SSHConfigAuth, SSHConnection};
+use crate::sftp::{SFTPCommand, SFTPConfig, SFTPConfigAuth, SFTPConnection, SFTPSessionHandle};
+use crate::ssh::{SSHCommand, SSHConfig, SSHConfigAuth, SSHConnection, SSHSessionHandle};
 use anyhow::anyhow;
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
@@ -18,7 +19,6 @@ use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::{Receiver, Sender, channel};
 use tokio::sync::oneshot;
-use tokio::task::JoinHandle;
 use tokio_tungstenite::{
     MaybeTlsStream, WebSocketStream, connect_async, tungstenite::protocol::Message,
 };
@@ -27,36 +27,13 @@ type WebSocketReader = SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>;
 
 type WebSocketWriter = SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>;
 
-#[derive(Clone, Debug)]
-pub(crate) enum SSHCommand {
-    Data(Vec<u8>),
-    Resize { cols: u32, rows: u32 },
-}
-
 static SESSION_ID: AtomicU64 = AtomicU64::new(1);
 
-struct SSHSessionHandle {
-    id: u64,
-    join: JoinHandle<()>,
-    stdin: Sender<SSHCommand>,
-    stop: Option<oneshot::Sender<()>>,
-}
-
-impl SSHSessionHandle {
-    async fn shutdown(mut self) {
-        if let Some(stop) = self.stop.take() {
-            let _ = stop.send(());
-        }
-        if let Err(err) = self.join.await {
-            warn!("ssh session join error: {err}");
-        }
-    }
-}
-
-pub(crate) struct WSConnection {
+pub(crate) struct WebSocketConnection {
     writer: Sender<Vec<u8>>,
     reader: Receiver<Vec<u8>>,
     ssh_sessions: Arc<Mutex<HashMap<String, SSHSessionHandle>>>,
+    sftp_sessions: Arc<Mutex<HashMap<String, SFTPSessionHandle>>>,
 }
 
 fn generate_server_endpoint(mode: Mode, server_host: String, server_port: u16) -> String {
@@ -78,7 +55,7 @@ fn generate_server_endpoint(mode: Mode, server_host: String, server_port: u16) -
     }
 }
 
-impl WSConnection {
+impl WebSocketConnection {
     pub fn new() -> Self {
         // Cap the outbound queue to avoid unbounded memory use when the socket is back-pressured.
         let (tx, rx) = channel::<Vec<u8>>(1024);
@@ -86,6 +63,7 @@ impl WSConnection {
             reader: rx,
             writer: tx,
             ssh_sessions: Arc::new(Mutex::new(HashMap::new())),
+            sftp_sessions: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -115,9 +93,10 @@ impl WSConnection {
         info!("daemon authenticated successfully {cid} with server version {version}");
 
         let tx_writer = self.writer.clone();
-        let hb_tx = self.writer.clone();
+        let hb_writer = self.writer.clone();
         let mut rx = self.reader;
         let ssh_sessions = self.ssh_sessions.clone();
+        let sftp_sessions = self.sftp_sessions.clone();
 
         let write_task = tokio::spawn(async move {
             while let Some(frame) = rx.recv().await {
@@ -139,6 +118,7 @@ impl WSConnection {
                                 msg,
                                 &tx_writer,
                                 ssh_sessions.clone(),
+                                sftp_sessions.clone(),
                                 config.clone(),
                             )
                             .await
@@ -175,7 +155,7 @@ impl WSConnection {
 
                 match encode_node_control(&NodeControlMessage::Heartbeat { stats }) {
                     Ok(raw) => {
-                        if hb_tx.send(raw).await.is_err() {
+                        if hb_writer.send(raw).await.is_err() {
                             warn!("failed to queue heartbeat: channel closed");
                             break;
                         }
@@ -272,6 +252,7 @@ async fn handle_control_from_server(
     msg: NodeControlMessage,
     tx: &Sender<Vec<u8>>,
     ssh_sessions: Arc<Mutex<HashMap<String, SSHSessionHandle>>>,
+    sftp_sessions: Arc<Mutex<HashMap<String, SFTPSessionHandle>>>,
     config: Arc<Env>,
 ) {
     debug!("received control message from server");
@@ -287,6 +268,10 @@ async fn handle_control_from_server(
             match Protocol::try_from(protocol) {
                 Ok(Protocol::SSH) => {
                     open_ssh_tunnel(tx, cid, ssh_sessions.clone(), config, username, password).await
+                }
+                Ok(Protocol::SFTP) => {
+                    open_sftp_tunnel(tx, cid, sftp_sessions.clone(), config, username, password)
+                        .await
                 }
                 Ok(protocol) => warn!("unsupported protocol for tunnel: {}", protocol),
                 Err(err) => warn!("invalid protocol value {}: {:?}", protocol, err),
@@ -336,6 +321,30 @@ async fn handle_control_from_server(
     }
 }
 
+async fn open_sftp_tunnel(
+    tx: &Sender<Vec<u8>>,
+    cid: String,
+    sftp_sessions: Arc<Mutex<HashMap<String, SFTPSessionHandle>>>,
+    config: Arc<Env>,
+    username: String,
+    password: String,
+) {
+    info!("opening sftp tunnel for connection {cid}...");
+
+    match &config.ssh_auth_mode {
+        crate::env::SSHAuthMethod::CredentialsPrompt => {
+            start_sftp_tunnel(
+                tx,
+                cid,
+                sftp_sessions,
+                config,
+                SFTPConfigAuth::UsernamePassword(username, password),
+            )
+            .await;
+        }
+    }
+}
+
 async fn open_ssh_tunnel(
     tx: &Sender<Vec<u8>>,
     cid: String,
@@ -346,7 +355,6 @@ async fn open_ssh_tunnel(
 ) {
     info!("opening ssh tunnel for connection {cid}...");
 
-    // Check if authentication mode requires password
     match &config.ssh_auth_mode {
         crate::env::SSHAuthMethod::CredentialsPrompt => {
             start_ssh_tunnel(
@@ -358,6 +366,106 @@ async fn open_ssh_tunnel(
             )
             .await;
         }
+    }
+}
+
+async fn start_sftp_tunnel(
+    tx: &Sender<Vec<u8>>,
+    cid: String,
+    sftp_sessions: Arc<Mutex<HashMap<String, SFTPSessionHandle>>>,
+    config: Arc<Env>,
+    credentials: SFTPConfigAuth,
+) {
+    let (stdin_tx, stdin_rx) = channel::<SFTPCommand>(512);
+    let (stop_tx, stop_rx) = oneshot::channel();
+    let sender = tx.clone();
+    let cid_for_task = cid.clone();
+    let cid_for_connection = cid.clone();
+    let session_id = SESSION_ID.fetch_add(1, Ordering::Relaxed);
+    let sftp_sessions_for_task = sftp_sessions.clone();
+
+    let sftp_task = tokio::spawn(async move {
+        info!("sftp task started for connection {cid_for_task}");
+
+        let conn = SFTPConnection::new(
+            cid_for_task.clone(),
+            sender,
+            SFTPConfig {
+                host: config.ssh_host.clone(),
+                port: config.ssh_port,
+                credentials,
+            },
+        );
+
+        match conn.connect(stdin_rx, stop_rx).await {
+            Ok(()) => {
+                info!("sftp connection {cid_for_task} ended");
+
+                if let Err(err) = send_sftp_data_to_connection(
+                    &sender,
+                    sftp_sessions_for_task.clone(),
+                    cid.as_str(),
+                    &WebControlMessage::TunnelClosed {
+                        protocol: Protocol::SFTP as u8,
+                    },
+                )
+                .await
+                {
+                    warn!("failed to notify cid {cid_for_task} for ssh connection closure: {err}");
+                }
+            }
+            Err(err) => {
+                warn!("sftp connection error for {cid_for_task}: {err}");
+
+                if let Err(err) = send_sftp_data_to_connection(
+                    &sender,
+                    sftp_sessions_for_task.clone(),
+                    cid.as_str(),
+                    &generic_web_error(
+                        Protocol::SFTP as u8,
+                        "SFTP authentication failed. Please check your password.",
+                    ),
+                )
+                .await
+                {
+                    warn!("failed to notify connection {cid} about authentication failure: {err}");
+                }
+            }
+        }
+    });
+
+    let sessions_for_cleanup = sftp_sessions.clone();
+    let cid_for_cleanup = cid_for_connection.clone();
+    let cleanup_task = tokio::spawn(async move {
+        if let Err(err) = sftp_task.await {
+            warn!("sftp session join error for {cid_for_cleanup}: {err}");
+        }
+
+        let mut sessions = sessions_for_cleanup.lock().await;
+        let should_remove = sessions
+            .get(&cid_for_cleanup)
+            .map(|handle| handle.id == session_id)
+            .unwrap_or(false);
+
+        if should_remove {
+            sessions.remove(&cid_for_cleanup);
+        }
+    });
+
+    let handle = SFTPSessionHandle {
+        id: session_id,
+        stop: Some(stop_tx),
+        join: cleanup_task,
+        stdin: stdin_tx,
+    };
+
+    let previous = {
+        let mut sessions = sftp_sessions.lock().await;
+        sessions.insert(cid_for_connection, handle)
+    };
+
+    if let Some(prev) = previous {
+        prev.shutdown().await;
     }
 }
 
@@ -375,6 +483,7 @@ async fn start_ssh_tunnel(
     let cid_for_connection = cid.clone();
     let session_id = SESSION_ID.fetch_add(1, Ordering::Relaxed);
     let ssh_sessions_for_task = ssh_sessions.clone();
+
     let ssh_task = tokio::spawn(async move {
         info!("ssh task started for connection {cid_for_task}");
 
@@ -391,7 +500,7 @@ async fn start_ssh_tunnel(
             Ok(()) => {
                 info!("ssh connection {cid_for_task} ended");
 
-                if let Err(err) = send_data_to_connection(
+                if let Err(err) = send_ssh_data_to_connection(
                     &sender,
                     ssh_sessions_for_task.clone(),
                     cid.as_str(),
@@ -406,7 +515,7 @@ async fn start_ssh_tunnel(
             }
             Err(err) => {
                 warn!("ssh connection error for {cid_for_task}: {err}");
-                if let Err(err) = send_data_to_connection(
+                if let Err(err) = send_ssh_data_to_connection(
                     &sender,
                     ssh_sessions_for_task.clone(),
                     cid.as_str(),
@@ -455,6 +564,24 @@ async fn start_ssh_tunnel(
 
     if let Some(prev) = previous {
         prev.shutdown().await;
+    }
+}
+
+async fn close_sftp_tunnel(
+    sftp_sessions: Arc<Mutex<HashMap<String, SFTPSessionHandle>>>,
+    cid: String,
+) {
+    let handle = {
+        let mut sessions = sftp_sessions.lock().await;
+        sessions.remove(&cid)
+    };
+
+    match handle {
+        Some(handle) => {
+            info!("closing sftp tunnel for connection {cid}");
+            handle.shutdown().await;
+        }
+        None => info!("no sftp tunnel to close for connection {cid}"),
     }
 }
 
@@ -517,7 +644,28 @@ async fn forward_resize(
         .map_err(|err| format!("failed to queue resize to ssh tunnel for {cid}: {err}"))
 }
 
-async fn send_data_to_connection(
+async fn send_sftp_data_to_connection(
+    tx: &Sender<Vec<u8>>,
+    sftp_sessions: Arc<Mutex<HashMap<String, SFTPSessionHandle>>>,
+    cid: &str,
+    data: &WebControlMessage,
+) -> anyhow::Result<()> {
+    let frame = encode_web_control_to_frame(data)?;
+
+    let node_msg = NodeControlMessage::Frame {
+        frame,
+        cid: cid.to_string(),
+    };
+
+    let raw = encode_node_control(&node_msg)?;
+    tx.send(raw).await.map_err(|err| {
+        // Send failures here imply the channel is closed; clean up the SSH tunnel for this cid.
+        tokio::spawn(close_sftp_tunnel(sftp_sessions, cid.to_string()));
+        anyhow!("failed to send data to connection: {err}")
+    })
+}
+
+async fn send_ssh_data_to_connection(
     tx: &Sender<Vec<u8>>,
     ssh_sessions: Arc<Mutex<HashMap<String, SSHSessionHandle>>>,
     cid: &str,

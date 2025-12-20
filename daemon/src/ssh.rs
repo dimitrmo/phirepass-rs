@@ -1,6 +1,5 @@
 // Handle connection to local SSH
 
-use crate::ws::SSHCommand;
 use log::{debug, info, warn};
 use phirepass_common::protocol::{Frame, NodeControlMessage, Protocol, encode_node_control};
 use russh::keys::*;
@@ -10,8 +9,35 @@ use std::io::Cursor;
 use std::sync::Arc;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::oneshot;
+use tokio::task::JoinHandle;
 
-struct SSHClient {}
+#[derive(Clone, Debug)]
+pub(crate) enum SSHCommand {
+    Data(Vec<u8>),
+    Resize { cols: u32, rows: u32 },
+}
+
+pub(crate) struct SSHSessionHandle {
+    pub(crate) id: u64,
+    pub(crate) join: JoinHandle<()>,
+    pub(crate) stdin: Sender<SSHCommand>,
+    pub(crate) stop: Option<oneshot::Sender<()>>,
+}
+
+impl SSHSessionHandle {
+    pub(crate) async fn shutdown(mut self) {
+        if let Some(stop) = self.stop.take() {
+            let _ = stop.send(());
+        }
+        if let Err(err) = self.join.await {
+            warn!("ssh session join error: {err}");
+        }
+    }
+}
+
+struct SSHClient {
+    //
+}
 
 impl client::Handler for SSHClient {
     type Error = russh::Error;
@@ -51,7 +77,6 @@ impl Connection {
 
         let config = Arc::new(config);
         let sh = SSHClient {};
-
         let mut session = client::connect(config, (ssh_config.host, ssh_config.port), sh).await?;
 
         let auth_res = match ssh_config.credentials {
@@ -121,6 +146,7 @@ impl SSHConnection {
                     break;
                 }
                 Some(cmd) = cmd_rx.recv() => {
+                    // commands coming from user
                     match cmd {
                         SSHCommand::Data(buf) => {
                             let bytes = Cursor::new(buf);
@@ -136,7 +162,7 @@ impl SSHConnection {
                         }
                     }
                 }
-                msg = channel.wait() => {
+                msg = channel.wait() => { // commands coming from daemon
                     let Some(msg) = msg else {
                         info!("ssh channel closed for {connection_id}");
                         break;
@@ -144,16 +170,7 @@ impl SSHConnection {
 
                     match msg {
                         ChannelMsg::Data { ref data } => {
-                            match encode_node_control(&NodeControlMessage::Frame {
-                                frame: Frame::new(Protocol::SSH, data.to_vec()),
-                                cid: connection_id.clone(),
-                            }) {
-                                Ok(result) => match sender.send(result).await {
-                                    Ok(_) => debug!("ssh response sent back to {connection_id}"),
-                                    Err(err) => warn!("failed to send: {err}"),
-                                },
-                                Err(err) => warn!("failed to encode node control: {}", err),
-                            }
+                            send_user_raw_data(&sender, connection_id.clone(), data.to_vec()).await;
                         }
                         ChannelMsg::Eof => {
                             debug!("ssh channel received EOF");
@@ -161,9 +178,11 @@ impl SSHConnection {
                         }
                         ChannelMsg::ExitStatus { exit_status } => {
                             warn!("ssh channel exited with status {}", exit_status);
+
                             if let Err(err) = channel.eof().await {
                                 warn!("failed to send EOF to ssh channel: {err}");
                             }
+
                             break;
                         }
                         ChannelMsg::Close { .. } => {
@@ -183,5 +202,18 @@ impl SSHConnection {
         connection.close().await?;
 
         Ok(())
+    }
+}
+
+async fn send_user_raw_data(sender: &Sender<Vec<u8>>, cid: String, data: Vec<u8>) {
+    match encode_node_control(&NodeControlMessage::Frame {
+        frame: Frame::new(Protocol::SSH, data.to_vec()),
+        cid: cid.clone(),
+    }) {
+        Ok(result) => match sender.send(result).await {
+            Ok(_) => debug!("ssh response sent back to {cid}"),
+            Err(err) => warn!("failed to send: {err}"),
+        },
+        Err(err) => warn!("failed to encode node control: {}", err),
     }
 }
