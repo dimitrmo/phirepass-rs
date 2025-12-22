@@ -17,9 +17,10 @@ const refreshBtn = document.getElementById("refresh-nodes");
 const fullscreenBtn = document.getElementById("fullscreen");
 
 const wsScheme = window.location.protocol === "https:" ? "wss" : "ws";
-
-const wsEndpoint = `${wsScheme}://${window.location.hostname}:8080`;
-const httpEndpoint = `${window.location.protocol}//${window.location.hostname}:8080`;
+// const wsEndpoint = `${wsScheme}://${window.location.hostname}:8080`;
+// const httpEndpoint = `${window.location.protocol}//${window.location.hostname}:8080`;
+const wsEndpoint = `wss://special-space-lamp-x4995657p6wf69x6-8080.app.github.dev`;
+const httpEndpoint = `https://special-space-lamp-x4995657p6wf69x6-8080.app.github.dev`;
 
 let term, fitAddon;
 let socket;
@@ -253,6 +254,7 @@ const submitPassword = () => {
     );
 
     if (socket_healthy()) {
+        // socket.open_sftp_tunnel(selectedNodeId, sessionUsername, password);
         socket.open_ssh_tunnel(selectedNodeId, sessionUsername, password);
         socket.send_terminal_resize(selectedNodeId, term.cols, term.rows);
     }

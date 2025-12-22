@@ -1,4 +1,5 @@
 export RUST_LOG=info
+export ACCESS_CONTROL_ALLOW_ORIGIN=*
 
 server:
 	cargo run --bin server -- start

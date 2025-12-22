@@ -115,8 +115,8 @@ impl SSHConnection {
 
     pub async fn connect(
         self,
-        tx: &Sender<Vec<u8>>,
         cid: String,
+        tx: &Sender<Vec<u8>>,
         mut cmd_rx: Receiver<SSHCommand>,
         mut shutdown_rx: oneshot::Receiver<()>,
     ) -> anyhow::Result<()> {

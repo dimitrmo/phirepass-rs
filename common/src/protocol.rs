@@ -145,6 +145,7 @@ impl Protocol {
         match n {
             0 => Some(Self::Control),
             1 => Some(Self::SSH),
+            2 => Some(Self::SFTP),
             _ => None,
         }
     }

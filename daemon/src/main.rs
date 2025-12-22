@@ -2,7 +2,7 @@ mod cli;
 mod daemon;
 mod env;
 mod http;
-mod sftp;
+mod sftp2;
 mod ssh;
 mod state;
 mod ws;

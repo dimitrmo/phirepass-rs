@@ -231,6 +231,26 @@ impl Channel {
         }
     }
 
+    pub fn open_sftp_tunnel(
+        &self,
+        node_id: String,
+        username: Option<String>,
+        password: Option<String>,
+    ) {
+        if !self.is_open() {
+            return;
+        }
+
+        if let Ok(raw) = serde_json::to_vec(&OpenTunnelMessage::new(
+            Protocol::SFTP as u8,
+            node_id,
+            username,
+            password,
+        )) {
+            self.send_raw(Protocol::Control as u8, raw);
+        }
+    }
+
     pub fn send_tunnel_data(&self, node_id: String, data: String) {
         if !self.is_open() {
             return;
@@ -447,7 +467,7 @@ fn handle_message(cb: &Function, event: &MessageEvent) {
             handle_ssh_frame(cb, &payload);
         }
         Protocol::SFTP => {
-            //
+            console_warn!("SFTP protocol not implemented in wasm client: size={}", payload.len());
         }
     }
 }
