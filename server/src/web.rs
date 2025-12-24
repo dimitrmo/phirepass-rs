@@ -94,6 +94,7 @@ async fn handle_web_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
                                 handle_resize(&state, id, target, cols, rows).await;
                             }
                             WebControlMessage::TunnelClosed { .. } => {}
+                            WebControlMessage::TunnelOpened { .. } => {}
                             WebControlMessage::Error { .. } => {}
                             WebControlMessage::Ok => {}
                         },
@@ -122,6 +123,7 @@ async fn handle_web_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
 
 async fn disconnect_web_client(state: &AppState, id: Ulid) {
     let mut connections = state.connections.write().await;
+
     if let Some(info) = connections.remove(&id) {
         let alive = info.node.connected_at.elapsed();
         info!(
@@ -140,7 +142,7 @@ async fn update_web_heartbeat(state: &AppState, id: Ulid) {
     if let Some(info) = connections.get_mut(&id) {
         let since_last = info.node.last_heartbeat.elapsed();
         info.node.last_heartbeat = SystemTime::now();
-        info!(
+        debug!(
             "heartbeat from web {id} ({}) after {:.1?}",
             info.node.ip, since_last
         );
@@ -166,6 +168,8 @@ async fn handle_tunnel_data(
         }
     };
 
+    debug!("target id acquired: {target_id}");
+
     let tx = {
         let nodes = state.nodes.read().await;
         nodes.get(&target_id).map(|info| info.tx.clone())
@@ -176,6 +180,8 @@ async fn handle_tunnel_data(
         return;
     };
 
+    debug!("node {node_id} sender found");
+
     if tx
         .send(NodeControlMessage::TunnelData {
             protocol,
@@ -185,10 +191,10 @@ async fn handle_tunnel_data(
         .await
         .is_err()
     {
-        warn!("failed to forward open tunnel to node {node_id}");
+        warn!("failed to forward tunnel data to node {node_id}");
     } else {
-        debug!(
-            "forwarded open tunnel to node {node_id} (protocol {})",
+        info!(
+            "forwarded tunnel data to node {node_id} (protocol {})",
             protocol
         );
     }
@@ -247,6 +253,8 @@ async fn handle_open_tunnel(
         }
     };
 
+    debug!("node {node_id} found");
+
     let tx = {
         let nodes = state.nodes.read().await;
         nodes.get(&node_id).map(|info| info.tx.clone())
@@ -257,17 +265,23 @@ async fn handle_open_tunnel(
         return;
     };
 
+    debug!("node {node_id} transmitter found");
+
     let Some(username) = username else {
         warn!("username not found");
         let _ = send_requires_username_password_error(&state, protocol, cid).await;
         return;
     };
 
+    debug!("username found");
+
     let Some(password) = password else {
         warn!("password not found");
         let _ = send_requires_password_error(&state, protocol, cid).await;
         return;
     };
+
+    debug!("password found");
 
     if tx
         .send(NodeControlMessage::OpenTunnel {
@@ -281,7 +295,7 @@ async fn handle_open_tunnel(
     {
         warn!("failed to forward open tunnel to node {node_id}");
     } else {
-        debug!(
+        info!(
             "forwarded open tunnel to node {node_id} (protocol {})",
             protocol
         );

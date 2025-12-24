@@ -4,6 +4,11 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use log::{debug, info, warn};
+use phirepass_common::protocol::{
+    NodeControlMessage, Protocol, WebControlMessage, encode_node_control,
+    encode_web_control_to_frame,
+};
+use anyhow::anyhow;
 use russh::client::Session;
 use russh::keys::PublicKey;
 use russh::{ChannelId, Preferred, client, kex};
@@ -21,17 +26,27 @@ static SESSION_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Debug)]
 pub enum SFTPCommand {
-    Hello,
+    Data(Vec<u8>),
 }
 
 // ======= SessionHandle =======
 
 pub(crate) struct SessionHandle {
     pub(crate) id: u64,
+    pub(crate) conn_id: String,
     // pub(crate) join: JoinHandle<()>,
     pub(crate) stdin: Sender<SFTPCommand>,
     stop: Option<oneshot::Sender<()>>,
     session: SftpSession,
+}
+
+impl std::fmt::Debug for SessionHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SessionHandle")
+            .field("session_id", &self.id)
+            .field("connection_id", &self.conn_id)
+            .finish()
+    }
 }
 
 impl SessionHandle {
@@ -45,7 +60,10 @@ impl SessionHandle {
                 debug!("sftp session for session {} closed successfully", self.id);
             }
             Err(err) => {
-                warn!("sftp session for session {} closed with error: {err}", self.id);
+                warn!(
+                    "sftp session for session {} closed with error: {err}",
+                    self.id
+                );
             }
         }
     }
@@ -89,11 +107,29 @@ impl russh::client::Handler for Client {
 
 pub(crate) async fn close_sftp_tunnel(
     cid: String,
+    session_id: Option<u64>,
     sftp_sessions: Arc<Mutex<HashMap<String, SessionHandle>>>,
 ) {
     let mut sessions = sftp_sessions.lock().await;
-    if let Some(session_handle) = sessions.get_mut(&cid) {
-        session_handle.shutdown().await;
+
+    if let Some(session_id) = session_id {
+        let key = format!("{}-{}", cid, session_id);
+        if let Some(session_handle) = sessions.get_mut(&key) {
+            session_handle.shutdown().await;
+        }
+    } else {
+        let keys: Vec<String> = sessions
+            .keys()
+            .filter(|k| k.starts_with(&cid))
+            .cloned()
+            .collect();
+
+        for key in keys {
+            if let Some(mut handle) = sessions.remove(key.as_str()) {
+                info!("closing ssh tunnel for connection {cid} (key: {key})");
+                handle.shutdown().await;
+            }
+        }
     }
 }
 
@@ -104,13 +140,14 @@ pub(crate) async fn open_sftp_tunnel(
     auth_config: Arc<AuthConfig>,
     sftp_sessions: Arc<Mutex<HashMap<String, SessionHandle>>>,
 ) {
-    info!("A");
     tokio::spawn(async move {
-        info!("B");
-        let _ = start_sftp_tunnel(cid, tx, env_config, auth_config, sftp_sessions).await;
-        info!("C");
+        match start_sftp_tunnel(cid, tx, env_config, auth_config, sftp_sessions).await {
+            Ok(session_id) => {
+                info!("sftp tunnel terminated successfully for session_id={session_id}")
+            }
+            Err(err) => warn!("sftp tunnel crashed with error: {err}"),
+        }
     });
-    info!("D");
 }
 
 pub(crate) async fn start_sftp_tunnel(
@@ -119,65 +156,101 @@ pub(crate) async fn start_sftp_tunnel(
     env_config: Arc<Env>,
     auth_config: Arc<AuthConfig>,
     sftp_sessions: Arc<Mutex<HashMap<String, SessionHandle>>>,
-) -> anyhow::Result<()> {
-    info!("D1");
-
+) -> anyhow::Result<u64> {
     let (stop_tx, stop_rx) = oneshot::channel::<()>();
     let mut stop_rx = stop_rx;
-    // tokio::pin!(stop_rx);
 
     let connection_id = cid.clone();
-
-    let addrs = (env_config.ssh_host.clone(), env_config.ssh_port);
-    info!("D1.1");
+    let tx_user = tx.clone();
+    let addrs = (env_config.sftp_host.clone(), env_config.sftp_port);
     let sftp = connect(cid.clone(), tx, addrs, auth_config.as_ref()).await?;
-    info!("D1.2");
     let (stdin_tx, mut stdin_rx) = channel::<SFTPCommand>(512);
 
     let session_id = SESSION_ID.fetch_add(1, Ordering::Relaxed);
-    let handle = SessionHandle { id: session_id, stdin: stdin_tx, session: sftp, stop: Some(stop_tx) };
-
-    info!("D2");
+    let handle = SessionHandle {
+        id: session_id,
+        conn_id: connection_id.clone(),
+        stdin: stdin_tx,
+        session: sftp,
+        stop: Some(stop_tx),
+    };
 
     {
         let mut sessions = sftp_sessions.lock().await;
-        sessions.insert(cid.clone(), handle);
+        let key = format!("{}-{}", cid, session_id);
+        sessions.insert(key, handle);
     }
 
-    info!("E");
+    let _ = send_sftp_data_to_connection(
+        &tx_user,
+        sftp_sessions.clone(),
+        &cid,
+        session_id,
+        &WebControlMessage::TunnelOpened {
+            protocol: Protocol::SFTP as u8,
+            session_id: session_id,
+        },
+    )
+    .await;
 
     loop {
         tokio::select! {
             biased;
 
             _ = &mut stop_rx => {
-                debug!("sftp tunnel stop signal received for connection {connection_id}");
+                warn!("sftp tunnel stop signal received for connection {connection_id}");
                 break;
             }
 
             Some(cmd) = stdin_rx.recv() => {
+                info!("message received ====== ");
                 match cmd {
-                    SFTPCommand::Hello => {
-                        info!("hello has arrived");
+                    SFTPCommand::Data(data) => {
+                        info!("hello has arrived {:?}", data);
                     },
                 }
             }
         }
     }
 
-    info!("F");
-
     // cleanup
 
     {
-        if let Some(mut session_handle) = sftp_sessions.lock().await.remove(&cid) {
+        let key = format!("{}-{}", cid, session_id);
+        if let Some(mut session_handle) = sftp_sessions.lock().await.remove(&key) {
+            info!("sftp connection for {key} removed");
             session_handle.shutdown().await;
         }
     }
 
-    info!("G");
+    Ok(session_id)
+}
 
-    Ok(())
+async fn send_sftp_data_to_connection(
+    tx: &Sender<Vec<u8>>,
+    sftp_sessions: Arc<Mutex<HashMap<String, SessionHandle>>>,
+    cid: &str,
+    session_id: u64,
+    data: &WebControlMessage,
+) -> anyhow::Result<()> {
+    let frame = encode_web_control_to_frame(data)?;
+
+    let node_msg = NodeControlMessage::Frame {
+        frame,
+        cid: cid.to_string(),
+    };
+
+    let raw = encode_node_control(&node_msg)?;
+    tx.send(raw).await.map_err(|err| {
+        // Send failures here imply the channel is closed; clean up the SSH tunnel for this cid.
+        tokio::spawn(close_sftp_tunnel(
+            cid.to_string(),
+            Some(session_id),
+            sftp_sessions,
+        ));
+
+        anyhow!("failed to send data to connection: {err}")
+    })
 }
 
 pub(crate) async fn connect(
@@ -197,17 +270,18 @@ pub(crate) async fn connect(
         },
         ..<_>::default()
     };
-    let client = Client {
-        cid,
-        sender,
-    };
+    let client = Client { cid, sender };
     let config = Arc::new(config);
-    info!("D1.1.0.0 {addrs:?} - {config:?}");
+
     let mut session = match client::connect(config, addrs, client).await {
-        Ok(s) => s,
-        Err(e) => anyhow::bail!("failed to connect to SFTP server: {e}")
+        Ok(client) => client,
+        Err(err) => {
+            anyhow::bail!("failed to connect to SFTP server: {err}")
+        }
     };
-    info!("D1.1.0.1");
+
+    info!("XXXX");
+
     let auth_res = match auth_config {
         AuthConfig::UsernamePassword(username, password) => {
             session.authenticate_password(username, password)
@@ -215,30 +289,21 @@ pub(crate) async fn connect(
     }
     .await?;
 
-    info!("D1.1.1");
-
     if !auth_res.success() {
         anyhow::bail!("SFTP authentication failed. Please check your password.");
     }
 
-    info!("D1.1.2");
+    info!("XYZ");
 
     let channel = session.channel_open_session().await?;
     debug!("channel opened");
 
-    info!("D1.1.3");
-
     channel.request_subsystem(true, "sftp").await?;
     debug!("channel ftp subsystem acquired");
 
-    info!("D1.1.4");
-
     let stream = channel.into_stream();
-    info!("D1.1.5");
     let sftp = SftpSession::new(stream).await?;
     debug!("sftp session established");
-
-    info!("D1.1.6");
 
     Ok(sftp)
 }

@@ -70,4 +70,11 @@ wasm-prod:
 
 wasm: wasm-dev wasm-prod
 
+.PHONY: sftp
+sftp:
+	cd daemon && \
+        RUST_LOG=info \
+        PORT=12222 \
+            cargo run --bin sftp-server
+
 .PHONY: server deamon client web build arm format db docker-server docker-daemon wasm-dev wasm-prod

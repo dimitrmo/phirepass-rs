@@ -4,7 +4,7 @@ use crate::state::AppState;
 use crate::ws;
 use axum::Router;
 use axum::routing::get;
-use log::{info, warn};
+use log::{debug, info, warn};
 use phirepass_common::stats::Stats;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -120,7 +120,7 @@ fn spawn_stats_logger(
             tokio::select! {
                 _ = interval.tick() => {
                     match Stats::gather() {
-                        Some(stats) => info!("daemon stats\n{}", stats.log_line()),
+                        Some(stats) => debug!("daemon stats\n{}", stats.log_line()),
                         None => warn!("stats: unable to read process metrics"),
                     }
                 }

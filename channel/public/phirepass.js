@@ -254,9 +254,9 @@ const submitPassword = () => {
     );
 
     if (socket_healthy()) {
-        // socket.open_sftp_tunnel(selectedNodeId, sessionUsername, password);
-        socket.open_ssh_tunnel(selectedNodeId, sessionUsername, password);
-        socket.send_terminal_resize(selectedNodeId, term.cols, term.rows);
+        socket.open_sftp_tunnel(selectedNodeId, sessionUsername, password);
+        // socket.open_ssh_tunnel(selectedNodeId, sessionUsername, password);
+        // socket.send_terminal_resize(selectedNodeId, term.cols, term.rows);
     }
 };
 
@@ -316,7 +316,7 @@ function connect() {
 
     channel.on_connection_open(() => {
         channel.start_heartbeat();
-        channel.open_ssh_tunnel(selectedNodeId);
+        channel.open_sftp_tunnel(selectedNodeId);
         log("WebSocket connected");
         setStatus("Connecting to node...", "info");
     });
@@ -357,12 +357,21 @@ function connect() {
             return;
         }
 
+        if (protocol === Protocol.SFTP) {
+            //
+        }
+
         if (msg && !msg.type) {
             console.error("Wrong control message format", msg);
             return;
         }
 
         switch (msg.type) {
+            case "TunnelOpened":
+                log(`Tunnel opened (id=${msg.session_id})`);
+                setStatus(`Tunnel opened (id=${msg.session_id})`, "ok");
+                socket.send_sftp_tunnel_data(selectedNodeId, "Hello moto");
+                break;
             case "TunnelClosed":
                 log(`Tunnel closed by remote host`);
                 setStatus("Tunnel closed", "warn");

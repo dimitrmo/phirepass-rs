@@ -56,6 +56,10 @@ pub enum WebControlMessage {
         target: String,
         data: Vec<u8>,
     },
+    TunnelOpened {
+        protocol: u8,
+        session_id: u64,
+    },
     TunnelClosed {
         protocol: u8,
     },
