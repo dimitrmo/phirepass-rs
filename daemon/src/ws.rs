@@ -346,15 +346,18 @@ async fn start_ssh_tunnel(
     let ssh_task = tokio::spawn(async move {
         info!("ssh task started for connection {cid_for_task}");
 
-        let conn = SSHConnection::new(SSHConfig {
-            host: config.ssh_host.clone(),
-            port: config.ssh_port,
-            credentials,
-        });
-
-        match conn
-            .connect(cid_for_task.clone(), &sender, stdin_rx, stop_rx)
-            .await
+        match SSHConnection::connect(
+            cid_for_task.clone(),
+            SSHConfig {
+                host: config.ssh_host.clone(),
+                port: config.ssh_port,
+                credentials,
+            },
+            &sender,
+            stdin_rx,
+            stop_rx,
+        )
+        .await
         {
             Ok(()) => {
                 info!("ssh connection {cid_for_task} ended");

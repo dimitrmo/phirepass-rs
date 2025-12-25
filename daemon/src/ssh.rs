@@ -34,19 +34,6 @@ impl SSHSessionHandle {
     }
 }
 
-struct SSHClient {}
-
-impl client::Handler for SSHClient {
-    type Error = russh::Error;
-
-    async fn check_server_key(
-        &mut self,
-        _server_public_key: &PublicKey,
-    ) -> anyhow::Result<bool, Self::Error> {
-        Ok(true)
-    }
-}
-
 #[derive(Clone)]
 pub(crate) enum SSHConfigAuth {
     UsernamePassword(String, String),
@@ -60,16 +47,55 @@ pub(crate) struct SSHConfig {
 }
 
 pub(crate) struct SSHConnection {
+    cid: String,
     config: SSHConfig,
+    sender: Sender<Vec<u8>>,
+}
+
+impl client::Handler for SSHConnection {
+    type Error = russh::Error;
+
+    async fn check_server_key(
+        &mut self,
+        _server_public_key: &PublicKey,
+    ) -> anyhow::Result<bool, Self::Error> {
+        Ok(true)
+    }
+
+    async fn data(
+        &mut self,
+        _channel: ChannelId,
+        data: &[u8],
+        _session: &mut client::Session,
+    ) -> Result<(), Self::Error> {
+        info!("ssh data received");
+
+        let message = NodeControlMessage::Frame {
+            frame: Frame::new(Protocol::SSH, data.to_vec()),
+            cid: self.cid.clone(),
+        };
+
+        match encode_node_control(&message) {
+            Ok(result) => match self.sender.send(result).await {
+                Ok(_) => info!("ssh response sent back to {}", self.cid),
+                Err(err) => {
+                    warn!("failed to send: {err}; closing ssh channel");
+                }
+            },
+            Err(err) => warn!("failed to encode node control: {}", err),
+        }
+
+        Ok(())
+    }
 }
 
 impl SSHConnection {
-    pub fn new(config: SSHConfig) -> Self {
-        Self { config }
-    }
-
-    async fn create_client(&self) -> anyhow::Result<Handle<SSHClient>> {
-        let ssh_config: SSHConfig = self.config.clone();
+    async fn create_client(
+        cid: String,
+        config: SSHConfig,
+        sender: Sender<Vec<u8>>,
+    ) -> anyhow::Result<Handle<Self>> {
+        let ssh_config: SSHConfig = config.clone();
 
         let config = Arc::new(client::Config {
             inactivity_timeout: None,
@@ -83,7 +109,11 @@ impl SSHConnection {
             ..<_>::default()
         });
 
-        let sh = SSHClient {};
+        let sh = Self {
+            cid,
+            config: ssh_config.clone(),
+            sender,
+        };
 
         let mut client_handler =
             client::connect(config, (ssh_config.host, ssh_config.port), sh).await?;
@@ -103,15 +133,15 @@ impl SSHConnection {
     }
 
     pub async fn connect(
-        &self,
         cid: String,
+        config: SSHConfig,
         tx: &Sender<Vec<u8>>,
         mut cmd_rx: Receiver<SSHCommand>,
         mut shutdown_rx: oneshot::Receiver<()>,
     ) -> anyhow::Result<()> {
         debug!("connecting ssh...");
 
-        let session = self.create_client().await?;
+        let session = Self::create_client(cid.clone(), config, tx.clone()).await?;
 
         debug!("ssh connected");
 
@@ -158,21 +188,7 @@ impl SSHConnection {
 
                     match msg {
                         ChannelMsg::Data { ref data } => {
-                            let message = NodeControlMessage::Frame {
-                                frame: Frame::new(Protocol::SSH, data.to_vec()),
-                                cid: connection_id.clone(),
-                            };
-
-                            match encode_node_control(&message) {
-                                Ok(result) => match sender.send(result).await {
-                                    Ok(_) => debug!("ssh response sent back to {connection_id}"),
-                                    Err(err) => {
-                                        warn!("failed to send: {err}; closing ssh channel");
-                                        break;
-                                    }
-                                },
-                                Err(err) => warn!("failed to encode node control: {}", err),
-                            }
+                            //
                         }
                         ChannelMsg::Eof => {
                             debug!("ssh channel received EOF");
