@@ -56,9 +56,14 @@ pub enum WebControlMessage {
         target: String,
         data: Vec<u8>,
     },
+    TunnelOpened {
+        protocol: u8,
+        session_id: u64,
+    },
     TunnelClosed {
         protocol: u8,
     },
+    // ssh only
     Resize {
         target: String,
         cols: u32,
@@ -67,14 +72,16 @@ pub enum WebControlMessage {
     Error {
         kind: WebControlErrorType,
         message: String,
+        protocol: u8,
     }, // error message
     Ok, // ack
 }
 
-pub fn generic_web_error(msg: impl Into<String>) -> WebControlMessage {
+pub fn generic_web_error(protocol: u8, msg: impl Into<String>) -> WebControlMessage {
     WebControlMessage::Error {
         kind: WebControlErrorType::Generic,
         message: msg.into(),
+        protocol,
     }
 }
 
@@ -134,6 +141,7 @@ pub const HEADER_LEN: usize = 5; // 1 + sizeof(u32)
 pub enum Protocol {
     Control = 0,
     SSH = 1,
+    SFTP = 2,
 }
 
 impl Protocol {
@@ -141,6 +149,7 @@ impl Protocol {
         match n {
             0 => Some(Self::Control),
             1 => Some(Self::SSH),
+            2 => Some(Self::SFTP),
             _ => None,
         }
     }
@@ -159,6 +168,7 @@ impl Display for Protocol {
         match self {
             Protocol::Control => write!(f, "Control"),
             Protocol::SSH => write!(f, "SSH"),
+            Protocol::SFTP => write!(f, "SFTP"),
         }
     }
 }

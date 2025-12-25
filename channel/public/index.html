@@ -6,6 +6,135 @@
         <link rel="shortcut icon" type="image/x-icon" href="favicon.ico" />
         <link rel="stylesheet" href="xterm.css" />
         <link rel="stylesheet" href="phirepass.css" />
+        <style>
+            /* Minimal styling for the SFTP panel without touching the shared stylesheet */
+            #sftp-panel {
+                margin-top: 22px;
+                padding-top: 12px;
+                border-top: 1px solid rgba(255, 255, 255, 0.06);
+            }
+
+            #sftp-head {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                gap: 12px;
+                margin-bottom: 8px;
+            }
+
+            #sftp-head h2 {
+                margin: 0;
+                font-size: 18px;
+            }
+
+            .pill {
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+                padding: 8px 12px;
+                border-radius: 999px;
+                background: rgba(59, 130, 246, 0.12);
+                color: #bfdbfe;
+                font-weight: 600;
+                font-size: 13px;
+            }
+
+            .pill.ok {
+                background: rgba(34, 197, 94, 0.18);
+                color: #bbf7d0;
+            }
+
+            .pill.warn {
+                background: rgba(234, 179, 8, 0.16);
+                color: #fde68a;
+            }
+
+            .pill.error {
+                background: rgba(239, 68, 68, 0.18);
+                color: #fecdd3;
+            }
+
+            #sftp-nodes {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+                gap: 10px;
+                margin: 10px 0;
+            }
+
+            .sftp-meta {
+                color: #cbd5e1;
+                font-size: 12px;
+            }
+
+            #sftp-log,
+            #sftp-output {
+                background: rgba(15, 23, 42, 0.72);
+                border: 1px solid rgba(255, 255, 255, 0.06);
+                border-radius: 10px;
+                padding: 10px;
+                font-family: "JetBrains Mono", "SFMono-Regular", Consolas,
+                    monospace;
+                font-size: 13px;
+            }
+
+            #sftp-log {
+                max-height: 120px;
+                overflow-y: auto;
+                margin-bottom: 10px;
+            }
+
+            #sftp-output {
+                min-height: 180px;
+                max-height: 360px;
+                overflow-y: auto;
+                white-space: pre-wrap;
+            }
+
+            #sftp-controls {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                margin: 8px 0;
+            }
+
+            #sftp-credentials {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+                gap: 8px;
+                margin: 10px 0;
+            }
+
+            #sftp-credentials label {
+                display: flex;
+                flex-direction: column;
+                gap: 4px;
+                font-size: 13px;
+                color: #cbd5e1;
+            }
+
+            #sftp-credentials input {
+                padding: 8px;
+                border-radius: 8px;
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                background: rgba(255, 255, 255, 0.04);
+                color: #e5e7eb;
+            }
+
+            #sftp-command-row {
+                display: flex;
+                gap: 8px;
+                margin: 10px 0;
+            }
+
+            #sftp-command {
+                flex: 1;
+                padding: 9px 10px;
+                border-radius: 10px;
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                background: rgba(255, 255, 255, 0.04);
+                color: #e5e7eb;
+            }
+        </style>
         <title>WASM Example</title>
     </head>
     <body>
@@ -40,6 +169,88 @@
             <div id="nodes"></div>
             <div id="log" aria-live="polite"></div>
             <div id="terminal"></div>
+            <section id="sftp-panel" aria-labelledby="sftp-title">
+                <div id="sftp-head">
+                    <div>
+                        <h2 id="sftp-title">Web SFTP</h2>
+                        <div style="color: #94a3b8; font-size: 14px">
+                            Connect to a node and browse files over SFTP
+                        </div>
+                    </div>
+                    <div style="display: inline-flex; gap: 8px; align-items: center">
+                        <div id="sftp-status" class="pill">Idle</div>
+                        <button id="sftp-refresh">Refresh</button>
+                        <button id="sftp-disconnect" disabled>Disconnect</button>
+                    </div>
+                </div>
+                <div
+                    style="
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                        margin: 6px 0 4px 0;
+                        gap: 10px;
+                    "
+                >
+                    <div style="font-weight: 600; color: #cbd5e1">
+                        Nodes
+                    </div>
+                    <div style="color: #94a3b8; font-size: 13px">
+                        Click a node to open an SFTP tunnel
+                    </div>
+                </div>
+                <div id="sftp-nodes"></div>
+                <div id="sftp-controls" aria-live="polite">
+                    <div style="color: #94a3b8; font-size: 13px">
+                        Provide credentials if requested.
+                    </div>
+                </div>
+                <div id="sftp-credentials" hidden>
+                    <label>
+                        Username
+                        <input id="sftp-username" autocomplete="username" />
+                    </label>
+                    <label>
+                        Password
+                        <input
+                            id="sftp-password"
+                            type="password"
+                            autocomplete="current-password"
+                        />
+                    </label>
+                    <div style="display: flex; gap: 8px; align-items: flex-end">
+                        <button id="sftp-submit">Submit</button>
+                        <button id="sftp-cancel" type="button">Cancel</button>
+                    </div>
+                </div>
+                <div id="sftp-log" aria-live="polite"></div>
+                <div id="sftp-client" hidden>
+                    <div
+                        style="
+                            display: flex;
+                            justify-content: space-between;
+                            align-items: center;
+                            gap: 8px;
+                        "
+                    >
+                        <div style="color: #cbd5e1; font-weight: 600">
+                            SFTP session
+                        </div>
+                        <div style="color: #94a3b8; font-size: 13px">
+                            Send SFTP commands (e.g. ls, pwd, get, put).
+                        </div>
+                    </div>
+                    <div id="sftp-command-row">
+                        <input
+                            id="sftp-command"
+                            placeholder="Type an SFTP command..."
+                            aria-label="SFTP command"
+                        />
+                        <button id="sftp-send">Send</button>
+                    </div>
+                    <div id="sftp-output" aria-live="polite"></div>
+                </div>
+            </section>
         </main>
         <script src="xterm.min.js"></script>
         <script src="xterm-addon-fit.js"></script>

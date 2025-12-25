@@ -1,7 +1,9 @@
 use crate::env::Env;
-use crate::ssh::{SSHConfig, SSHConfigAuth, SSHConnection};
+use crate::sftp2::{self, SFTPCommand, close_sftp_tunnel};
+// use crate::sftp::{SFTPCommand, SFTPConfig, SFTPConfigAuth, SFTPConnection, SFTPSessionHandle};
+use crate::ssh::{SSHCommand, SSHConfig, SSHConfigAuth, SSHConnection, SSHSessionHandle};
 use anyhow::anyhow;
-use futures_util::stream::SplitStream;
+use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use log::{debug, info, warn};
 use phirepass_common::env::Mode;
@@ -18,43 +20,21 @@ use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::{Receiver, Sender, channel};
 use tokio::sync::oneshot;
-use tokio::task::JoinHandle;
 use tokio_tungstenite::{
     MaybeTlsStream, WebSocketStream, connect_async, tungstenite::protocol::Message,
 };
 
 type WebSocketReader = SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>;
 
-#[derive(Clone, Debug)]
-pub(crate) enum SSHCommand {
-    Data(Vec<u8>),
-    Resize { cols: u32, rows: u32 },
-}
+type WebSocketWriter = SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>;
 
 static SESSION_ID: AtomicU64 = AtomicU64::new(1);
 
-struct SSHSessionHandle {
-    id: u64,
-    stop: Option<oneshot::Sender<()>>,
-    join: JoinHandle<()>,
-    stdin: Sender<SSHCommand>,
-}
-
-impl SSHSessionHandle {
-    async fn shutdown(mut self) {
-        if let Some(stop) = self.stop.take() {
-            let _ = stop.send(());
-        }
-        if let Err(err) = self.join.await {
-            warn!("ssh session join error: {err}");
-        }
-    }
-}
-
-pub(crate) struct WSConnection {
+pub(crate) struct WebSocketConnection {
     writer: Sender<Vec<u8>>,
     reader: Receiver<Vec<u8>>,
     ssh_sessions: Arc<Mutex<HashMap<String, SSHSessionHandle>>>,
+    sftp_sessions: Arc<Mutex<HashMap<String, sftp2::SessionHandle>>>,
 }
 
 fn generate_server_endpoint(mode: Mode, server_host: String, server_port: u16) -> String {
@@ -76,7 +56,7 @@ fn generate_server_endpoint(mode: Mode, server_host: String, server_port: u16) -
     }
 }
 
-impl WSConnection {
+impl WebSocketConnection {
     pub fn new() -> Self {
         // Cap the outbound queue to avoid unbounded memory use when the socket is back-pressured.
         let (tx, rx) = channel::<Vec<u8>>(1024);
@@ -84,6 +64,7 @@ impl WSConnection {
             reader: rx,
             writer: tx,
             ssh_sessions: Arc::new(Mutex::new(HashMap::new())),
+            sftp_sessions: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -104,25 +85,23 @@ impl WSConnection {
         info!("trying {endpoint}");
 
         let (stream, _) = connect_async(endpoint).await?;
-        let (mut write, mut read) = stream.split();
+        let (mut writer, mut reader) = stream.split();
 
-        let auth_frame = encode_node_control(&NodeControlMessage::Auth {
-            token: config.token.clone(),
-        })?;
+        let _ = write_next_auth(&mut writer, config.token.clone()).await?;
+        info!("daemon sent auth request with token");
 
-        write.send(Message::Binary(auth_frame.into())).await?;
-
-        let (cid, version) = read_next_auth_response(&mut read).await?;
+        let (cid, version) = read_next_auth_response(&mut reader).await?;
         info!("daemon authenticated successfully {cid} with server version {version}");
 
         let tx_writer = self.writer.clone();
-        let hb_tx = self.writer.clone();
+        let hb_writer = self.writer.clone();
         let mut rx = self.reader;
         let ssh_sessions = self.ssh_sessions.clone();
+        let sftp_sessions = self.sftp_sessions.clone();
 
         let write_task = tokio::spawn(async move {
             while let Some(frame) = rx.recv().await {
-                if let Err(err) = write.send(Message::Binary(frame.into())).await {
+                if let Err(err) = writer.send(Message::Binary(frame.into())).await {
                     warn!("failed to send frame: {}", err);
                     break;
                 }
@@ -132,7 +111,7 @@ impl WSConnection {
         debug!("writer setup");
 
         let reader_task = tokio::spawn(async move {
-            while let Some(msg) = read.next().await {
+            while let Some(msg) = reader.next().await {
                 match msg {
                     Ok(Message::Binary(data)) => match decode_node_control(&data) {
                         Ok(msg) => {
@@ -140,6 +119,7 @@ impl WSConnection {
                                 msg,
                                 &tx_writer,
                                 ssh_sessions.clone(),
+                                sftp_sessions.clone(),
                                 config.clone(),
                             )
                             .await
@@ -176,7 +156,7 @@ impl WSConnection {
 
                 match encode_node_control(&NodeControlMessage::Heartbeat { stats }) {
                     Ok(raw) => {
-                        if hb_tx.send(raw).await.is_err() {
+                        if hb_writer.send(raw).await.is_err() {
                             warn!("failed to queue heartbeat: channel closed");
                             break;
                         }
@@ -199,7 +179,7 @@ impl WSConnection {
                             warn!("failed to queue ping: channel closed");
                             break;
                         }
-                        info!("ping sent at {sent_at}");
+                        debug!("ping sent at {sent_at}");
                     }
                     Err(err) => warn!("failed to encode ping: {err}"),
                 }
@@ -219,8 +199,17 @@ impl WSConnection {
     }
 }
 
-async fn read_next_auth_response(read: &mut WebSocketReader) -> anyhow::Result<(String, String)> {
-    if let Some(msg) = read_next_control(read).await? {
+async fn write_next_auth(writer: &mut WebSocketWriter, token: String) -> anyhow::Result<()> {
+    let auth_frame = encode_node_control(&NodeControlMessage::Auth { token })?;
+
+    writer
+        .send(Message::Binary(auth_frame.into()))
+        .await
+        .map_err(Into::into)
+}
+
+async fn read_next_auth_response(reader: &mut WebSocketReader) -> anyhow::Result<(String, String)> {
+    if let Some(msg) = read_next_control(reader).await? {
         if let NodeControlMessage::AuthResponse {
             cid,
             version,
@@ -241,9 +230,9 @@ async fn read_next_auth_response(read: &mut WebSocketReader) -> anyhow::Result<(
 }
 
 async fn read_next_control(
-    read: &mut WebSocketReader,
+    reader: &mut WebSocketReader,
 ) -> anyhow::Result<Option<NodeControlMessage>> {
-    while let Some(msg) = read.next().await {
+    while let Some(msg) = reader.next().await {
         match msg {
             Ok(Message::Binary(data)) => match decode_node_control(&data) {
                 Ok(msg) => return Ok(Some(msg)),
@@ -264,6 +253,7 @@ async fn handle_control_from_server(
     msg: NodeControlMessage,
     tx: &Sender<Vec<u8>>,
     ssh_sessions: Arc<Mutex<HashMap<String, SSHSessionHandle>>>,
+    sftp_sessions: Arc<Mutex<HashMap<String, sftp2::SessionHandle>>>,
     config: Arc<Env>,
 ) {
     debug!("received control message from server");
@@ -280,12 +270,17 @@ async fn handle_control_from_server(
                 Ok(Protocol::SSH) => {
                     open_ssh_tunnel(tx, cid, ssh_sessions.clone(), config, username, password).await
                 }
+                Ok(Protocol::SFTP) => {
+                    open_sftp_tunnel(tx, cid, sftp_sessions.clone(), config, username, password)
+                        .await
+                }
                 Ok(protocol) => warn!("unsupported protocol for tunnel: {}", protocol),
                 Err(err) => warn!("invalid protocol value {}: {:?}", protocol, err),
             }
         }
         NodeControlMessage::ConnectionDisconnect { cid } => {
-            close_ssh_tunnel(ssh_sessions.clone(), cid).await;
+            close_ssh_tunnel(cid.clone(), None, ssh_sessions.clone()).await;
+            close_sftp_tunnel(cid, None, sftp_sessions.clone()).await;
         }
         NodeControlMessage::Resize { cid, cols, rows } => {
             if let Err(err) = forward_resize(ssh_sessions.clone(), cid, cols, rows).await {
@@ -298,8 +293,14 @@ async fn handle_control_from_server(
             data,
         } => {
             if protocol == Protocol::SSH as u8 {
-                if let Err(err) = tunnel_data(ssh_sessions.clone(), cid, data).await {
-                    warn!("{err}");
+                // a message from user -> server -> daemon
+                // we need to handle this and respond
+                if let Err(err) = handle_ssh_tunnel_data(cid, data, ssh_sessions.clone()).await {
+                    warn!("fail to handle ssh tunnel data: {err}");
+                }
+            } else if protocol == Protocol::SFTP as u8 {
+                if let Err(err) = handle_sftp_tunnel_data(cid, data, sftp_sessions.clone()).await {
+                    warn!("fail to handle sftp tunnel data: {err}")
                 }
             } else {
                 warn!("unsupported tunnel protocol {protocol} for connection {cid}");
@@ -322,9 +323,33 @@ async fn handle_control_from_server(
         NodeControlMessage::Pong { sent_at } => {
             let now = now_millis();
             let rtt = now.saturating_sub(sent_at);
-            info!("received pong; round-trip={}ms (sent_at={sent_at})", rtt);
+            debug!("received pong; round-trip={}ms (sent_at={sent_at})", rtt);
         }
         o => warn!("received unsupported control message: {:?}", o),
+    }
+}
+
+async fn open_sftp_tunnel(
+    tx: &Sender<Vec<u8>>,
+    cid: String,
+    sftp_sessions: Arc<Mutex<HashMap<String, sftp2::SessionHandle>>>,
+    config: Arc<Env>,
+    username: String,
+    password: String,
+) {
+    info!("opening sftp tunnel for connection {cid}...");
+
+    match &config.ssh_auth_mode {
+        crate::env::SSHAuthMethod::CredentialsPrompt => {
+            sftp2::open_sftp_tunnel(
+                cid,
+                tx.clone(),
+                config,
+                Arc::new(sftp2::AuthConfig::UsernamePassword(username, password)),
+                sftp_sessions,
+            )
+            .await;
+        }
     }
 }
 
@@ -338,7 +363,6 @@ async fn open_ssh_tunnel(
 ) {
     info!("opening ssh tunnel for connection {cid}...");
 
-    // Check if authentication mode requires password
     match &config.ssh_auth_mode {
         crate::env::SSHAuthMethod::CredentialsPrompt => {
             start_ssh_tunnel(
@@ -367,26 +391,28 @@ async fn start_ssh_tunnel(
     let cid_for_connection = cid.clone();
     let session_id = SESSION_ID.fetch_add(1, Ordering::Relaxed);
     let ssh_sessions_for_task = ssh_sessions.clone();
+
     let ssh_task = tokio::spawn(async move {
         info!("ssh task started for connection {cid_for_task}");
 
         let conn = SSHConnection::new(SSHConfig {
-            host: config.ssh_host.clone(),
-            port: config.ssh_port,
+            host: config.sftp_host.clone(),
+            port: config.sftp_port,
             credentials,
         });
 
         match conn
-            .connect(&sender, cid_for_task.clone(), stdin_rx, stop_rx)
+            .connect(cid_for_task.clone(), &sender, stdin_rx, stop_rx)
             .await
         {
             Ok(()) => {
                 info!("ssh connection {cid_for_task} ended");
 
-                if let Err(err) = send_data_to_connection(
+                if let Err(err) = send_ssh_data_to_connection(
                     &sender,
                     ssh_sessions_for_task.clone(),
                     cid.as_str(),
+                    session_id,
                     &WebControlMessage::TunnelClosed {
                         protocol: Protocol::SSH as u8,
                     },
@@ -398,11 +424,15 @@ async fn start_ssh_tunnel(
             }
             Err(err) => {
                 warn!("ssh connection error for {cid_for_task}: {err}");
-                if let Err(err) = send_data_to_connection(
+                if let Err(err) = send_ssh_data_to_connection(
                     &sender,
                     ssh_sessions_for_task.clone(),
                     cid.as_str(),
-                    &generic_web_error("SSH authentication failed. Please check your password."),
+                    session_id,
+                    &generic_web_error(
+                        Protocol::SSH as u8,
+                        "SSH authentication failed. Please check your password.",
+                    ),
                 )
                 .await
                 {
@@ -419,14 +449,16 @@ async fn start_ssh_tunnel(
             warn!("ssh session join error for {cid_for_cleanup}: {err}");
         }
 
+        let key = format!("{}-{}", cid_for_cleanup, session_id);
+
         let mut sessions = sessions_for_cleanup.lock().await;
         let should_remove = sessions
-            .get(&cid_for_cleanup)
+            .get(key.as_str())
             .map(|handle| handle.id == session_id)
             .unwrap_or(false);
 
         if should_remove {
-            sessions.remove(&cid_for_cleanup);
+            sessions.remove(key.as_str());
         }
     });
 
@@ -439,7 +471,8 @@ async fn start_ssh_tunnel(
 
     let previous = {
         let mut sessions = ssh_sessions.lock().await;
-        sessions.insert(cid_for_connection, handle)
+        let key = format!("{}-{}", cid_for_connection, session_id);
+        sessions.insert(key, handle)
     };
 
     if let Some(prev) = previous {
@@ -448,37 +481,76 @@ async fn start_ssh_tunnel(
 }
 
 async fn close_ssh_tunnel(
-    ssh_sessions: Arc<Mutex<HashMap<String, SSHSessionHandle>>>,
     cid: String,
+    session_id: Option<u64>,
+    ssh_sessions: Arc<Mutex<HashMap<String, SSHSessionHandle>>>,
 ) {
-    let handle = {
-        let mut sessions = ssh_sessions.lock().await;
-        sessions.remove(&cid)
-    };
+    let mut sessions = ssh_sessions.lock().await;
 
-    match handle {
-        Some(handle) => {
+    if let Some(sid) = session_id {
+        let key = format!("{}-{}", cid, sid);
+        let handle = sessions.remove(key.as_str());
+        if let Some(handle) = handle {
             info!("closing ssh tunnel for connection {cid}");
             handle.shutdown().await;
         }
-        None => info!("no ssh tunnel to close for connection {cid}"),
+    } else {
+        let keys: Vec<String> = sessions
+            .keys()
+            .filter(|k| k.starts_with(&cid))
+            .cloned()
+            .collect();
+
+        for key in keys {
+            if let Some(handle) = sessions.remove(key.as_str()) {
+                info!("closing ssh tunnel for connection {cid} (key: {key})");
+                handle.shutdown().await;
+            }
+        }
     }
 }
 
-async fn tunnel_data(
-    ssh_sessions: Arc<Mutex<HashMap<String, SSHSessionHandle>>>,
+async fn handle_sftp_tunnel_data(
     cid: String,
     data: Vec<u8>,
+    sftp_sessions: Arc<Mutex<HashMap<String, sftp2::SessionHandle>>>,
 ) -> anyhow::Result<(), String> {
+    // find the correct handle
+    let stdin = {
+        let sessions = sftp_sessions.lock().await;
+        debug!("All active SFTP sessions {:?}", sessions.values());
+        sessions.get(&cid).map(|s| s.stdin.clone())
+    };
+
+    // unwrap found handle
+    let Some(stdin) = stdin else {
+        return Err(format!("no sftp tunnel found for connection {cid}"));
+    };
+
+    // forward data to handle
+    stdin
+        .send(SFTPCommand::Data(data))
+        .await
+        .map_err(|err| format!("failed to queue data to sftp tunnel for {cid}: {err}"))
+}
+
+async fn handle_ssh_tunnel_data(
+    cid: String,
+    data: Vec<u8>,
+    ssh_sessions: Arc<Mutex<HashMap<String, SSHSessionHandle>>>,
+) -> anyhow::Result<(), String> {
+    // find the correct handle
     let stdin = {
         let sessions = ssh_sessions.lock().await;
         sessions.get(&cid).map(|s| s.stdin.clone())
     };
 
+    // unwrap found handle
     let Some(stdin) = stdin else {
         return Err(format!("no ssh tunnel found for connection {cid}"));
     };
 
+    // forward data to handle
     stdin
         .send(SSHCommand::Data(data))
         .await
@@ -506,10 +578,11 @@ async fn forward_resize(
         .map_err(|err| format!("failed to queue resize to ssh tunnel for {cid}: {err}"))
 }
 
-async fn send_data_to_connection(
+async fn send_ssh_data_to_connection(
     tx: &Sender<Vec<u8>>,
     ssh_sessions: Arc<Mutex<HashMap<String, SSHSessionHandle>>>,
     cid: &str,
+    session_id: u64,
     data: &WebControlMessage,
 ) -> anyhow::Result<()> {
     let frame = encode_web_control_to_frame(data)?;
@@ -522,7 +595,11 @@ async fn send_data_to_connection(
     let raw = encode_node_control(&node_msg)?;
     tx.send(raw).await.map_err(|err| {
         // Send failures here imply the channel is closed; clean up the SSH tunnel for this cid.
-        tokio::spawn(close_ssh_tunnel(ssh_sessions, cid.to_string()));
+        tokio::spawn(close_ssh_tunnel(
+            cid.to_string(),
+            Some(session_id),
+            ssh_sessions,
+        ));
         anyhow!("failed to send data to connection: {err}")
     })
 }

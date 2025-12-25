@@ -75,7 +75,7 @@ async fn handle_node_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
                         if let Err(err) = tx.send(resp).await {
                             warn!("failed to respond to node {id}: {err}");
                         } else {
-                            info!("auth response sent {id}");
+                            info!("node {id} authenticated successfully");
                         }
                     }
                     NodeControlMessage::Heartbeat { stats } => {
@@ -91,12 +91,12 @@ async fn handle_node_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
                     NodeControlMessage::Ping { sent_at } => {
                         let now = now_millis();
                         let latency = now.saturating_sub(sent_at);
-                        info!("ping from node {id}; latency={}ms", latency);
+                        debug!("ping from node {id}; latency={}ms", latency);
                         let pong = NodeControlMessage::Pong { sent_at: now };
                         if let Err(err) = tx.send(pong).await {
                             warn!("failed to queue pong for node {id}: {err}");
                         } else {
-                            info!("pong response to node {id} sent");
+                            debug!("pong response to node {id} sent");
                         }
                     }
                     _ => {}
@@ -159,12 +159,12 @@ async fn update_node_heartbeat(state: &AppState, id: Ulid, stats: Option<Stats>)
         if let Some(stats) = stats {
             let log_line = stats.log_line();
             info.node.last_stats = Some(stats);
-            info!(
+            debug!(
                 "heartbeat from node {id} ({}) after {:.1?}; \n{}",
                 info.node.ip, since_last, log_line
             );
         } else {
-            info!(
+            debug!(
                 "heartbeat from node {id} ({}) after {:.1?}",
                 info.node.ip, since_last
             );

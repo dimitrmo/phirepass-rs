@@ -231,13 +231,50 @@ impl Channel {
         }
     }
 
-    pub fn send_tunnel_data(&self, node_id: String, data: String) {
+    pub fn open_sftp_tunnel(
+        &self,
+        node_id: String,
+        username: Option<String>,
+        password: Option<String>,
+    ) {
+        if !self.is_open() {
+            return;
+        }
+
+        if let Ok(raw) = serde_json::to_vec(&OpenTunnelMessage::new(
+            Protocol::SFTP as u8,
+            node_id,
+            username,
+            password,
+        )) {
+            self.send_raw(Protocol::Control as u8, raw);
+        }
+    }
+
+    pub fn send_sftp_tunnel_data(&self, node_id: String, data: String) {
         if !self.is_open() {
             return;
         }
 
         if let Ok(raw) = serde_json::to_vec(&TunnelData::new(
-            Protocol::SSH as u8,
+            Protocol::SFTP as u8,
+            node_id,
+            data.into_bytes(),
+        )) {
+            // console_warn!("tunnel data sent");
+            // Tunnel data must travel inside a control frame; the server will
+            // unwrap and forward the payload to the SSH tunnel.
+            self.send_raw(Protocol::Control as u8, raw);
+        }
+    }
+
+    pub fn send_ssh_tunnel_data(&self, node_id: String, data: String) {
+        if !self.is_open() {
+            return;
+        }
+
+        if let Ok(raw) = serde_json::to_vec(&TunnelData::new(
+            Protocol::SFTP as u8,
             node_id,
             data.into_bytes(),
         )) {
@@ -376,12 +413,16 @@ pub enum ErrorType {
 pub enum Protocol {
     Control = 0,
     SSH = 1,
+    SFTP = 2,
 }
 
 impl From<u8> for Protocol {
     fn from(val: u8) -> Self {
         match val {
+            0 => Protocol::Control,
             1 => Protocol::SSH,
+            2 => Protocol::SFTP,
+            // fallback
             _ => Protocol::Control,
         }
     }
@@ -389,9 +430,9 @@ impl From<u8> for Protocol {
 
 fn encode_frame(protocol: u8, payload: &[u8]) -> Vec<u8> {
     let mut buffer = Vec::with_capacity(5 + payload.len());
-    buffer.push(protocol);
-    buffer.extend_from_slice(&(payload.len() as u32).to_be_bytes());
-    buffer.extend_from_slice(payload);
+    buffer.push(protocol); // 1
+    buffer.extend_from_slice(&(payload.len() as u32).to_be_bytes()); // 4
+    buffer.extend_from_slice(payload); // ...
     buffer
 }
 
@@ -444,6 +485,9 @@ fn handle_message(cb: &Function, event: &MessageEvent) {
         Protocol::SSH => {
             handle_ssh_frame(cb, &payload);
         }
+        Protocol::SFTP => {
+            handle_sftp_frame(cb, &payload);
+        }
     }
 }
 
@@ -464,7 +508,7 @@ fn handle_control_frame(cb: &Function, payload: &[u8]) {
         }
     };
 
-    let control: IncomingControl = match serde_json::from_str(&message) {
+    let control: serde_json::Value = match serde_json::from_str(&message) {
         Ok(msg) => msg,
         Err(err) => {
             console_warn!("{}", err);
@@ -472,7 +516,10 @@ fn handle_control_frame(cb: &Function, payload: &[u8]) {
         }
     };
 
-    let js_value = match serde_wasm_bindgen::to_value(&control) {
+    let serializer = serde_wasm_bindgen::Serializer::new()
+        .serialize_maps_as_objects(true);
+
+    let js_value = match control.serialize(&serializer) {
         Ok(msg) => msg,
         Err(err) => {
             console_warn!("{}", err);
@@ -481,6 +528,11 @@ fn handle_control_frame(cb: &Function, payload: &[u8]) {
     };
 
     let _ = cb.call2(&JsValue::NULL, &JsValue::from(Protocol::Control), &js_value);
+}
+
+fn handle_sftp_frame(cb: &Function, payload: &[u8]) {
+    let data: Uint8Array = Uint8Array::from(payload);
+    let _ = cb.call2(&JsValue::NULL, &JsValue::from(Protocol::SFTP), &data.into());
 }
 
 fn handle_ssh_frame(cb: &Function, payload: &[u8]) {

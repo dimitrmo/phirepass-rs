@@ -6,12 +6,28 @@ pub enum SSHAuthMethod {
     CredentialsPrompt,
 }
 
+#[derive(Clone, Debug)]
+pub enum SFTPAuthMethod {
+    CredentialsPrompt,
+}
+
 impl std::str::FromStr for SSHAuthMethod {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "credentials_prompt" => Ok(SSHAuthMethod::CredentialsPrompt),
+            _ => Err(format!("invalid authentication method: {}", s)),
+        }
+    }
+}
+
+impl std::str::FromStr for SFTPAuthMethod {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "credentials_prompt" => Ok(SFTPAuthMethod::CredentialsPrompt),
             _ => Err(format!("invalid authentication method: {}", s)),
         }
     }
@@ -59,6 +75,15 @@ pub(crate) struct Env {
 
     #[envconfig(from = "SSH_AUTH_METHOD", default = "credentials_prompt")]
     pub ssh_auth_mode: SSHAuthMethod,
+
+    #[envconfig(from = "SFTP_HOST", default = "0.0.0.0")]
+    pub sftp_host: String,
+
+    #[envconfig(from = "SFTP_PORT", default = "22")]
+    pub sftp_port: u16,
+
+    #[envconfig(from = "SFTP_AUTH_METHOD", default = "credentials_prompt")]
+    pub sftp_auth_mode: SFTPAuthMethod,
 }
 
 pub(crate) fn init() -> anyhow::Result<Env> {
