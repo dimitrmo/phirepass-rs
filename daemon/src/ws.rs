@@ -1,5 +1,5 @@
 use crate::env::Env;
-use crate::ssh::{SSHConfig, SSHConfigAuth, SSHConnection};
+use crate::ssh::{SSHCommand, SSHConfig, SSHConfigAuth, SSHConnection, SSHSessionHandle};
 use anyhow::anyhow;
 use futures_util::stream::SplitStream;
 use futures_util::{SinkExt, StreamExt};
@@ -18,38 +18,13 @@ use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::{Receiver, Sender, channel};
 use tokio::sync::oneshot;
-use tokio::task::JoinHandle;
 use tokio_tungstenite::{
     MaybeTlsStream, WebSocketStream, connect_async, tungstenite::protocol::Message,
 };
 
 type WebSocketReader = SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>;
 
-#[derive(Clone, Debug)]
-pub(crate) enum SSHCommand {
-    Data(Vec<u8>),
-    Resize { cols: u32, rows: u32 },
-}
-
 static SESSION_ID: AtomicU64 = AtomicU64::new(1);
-
-struct SSHSessionHandle {
-    id: u64,
-    stop: Option<oneshot::Sender<()>>,
-    join: JoinHandle<()>,
-    stdin: Sender<SSHCommand>,
-}
-
-impl SSHSessionHandle {
-    async fn shutdown(mut self) {
-        if let Some(stop) = self.stop.take() {
-            let _ = stop.send(());
-        }
-        if let Err(err) = self.join.await {
-            warn!("ssh session join error: {err}");
-        }
-    }
-}
 
 pub(crate) struct WSConnection {
     writer: Sender<Vec<u8>>,

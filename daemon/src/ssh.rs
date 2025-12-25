@@ -1,6 +1,5 @@
 // Handle connection to local SSH
 
-use crate::ws::SSHCommand;
 use log::{debug, info, warn};
 use phirepass_common::protocol::{Frame, NodeControlMessage, Protocol, encode_node_control};
 use russh::keys::*;
@@ -10,6 +9,31 @@ use std::io::Cursor;
 use std::sync::Arc;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::oneshot;
+use tokio::task::JoinHandle;
+
+#[derive(Clone, Debug)]
+pub(crate) enum SSHCommand {
+    Data(Vec<u8>),
+    Resize { cols: u32, rows: u32 },
+}
+
+pub(crate) struct SSHSessionHandle {
+    pub id: u64,
+    pub stop: Option<oneshot::Sender<()>>,
+    pub join: JoinHandle<()>,
+    pub stdin: Sender<SSHCommand>,
+}
+
+impl SSHSessionHandle {
+    pub async fn shutdown(mut self) {
+        if let Some(stop) = self.stop.take() {
+            let _ = stop.send(());
+        }
+        if let Err(err) = self.join.await {
+            warn!("ssh session join error: {err}");
+        }
+    }
+}
 
 struct SSHClient {}
 
