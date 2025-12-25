@@ -1,6 +1,6 @@
 use log::{debug, info, warn};
 use phirepass_common::protocol::{Frame, NodeControlMessage, Protocol, encode_node_control};
-use russh::client::Handle;
+use russh::client::{Handle, Msg};
 use russh::keys::*;
 use russh::*;
 use std::borrow::Cow;
@@ -129,12 +129,47 @@ impl SSHConnection {
         Ok(client_handler)
     }
 
+    async fn listen(
+        cid: String,
+        channel: &Channel<Msg>,
+        mut cmd_rx: Receiver<SSHCommand>,
+        mut shutdown_rx: oneshot::Receiver<()>,
+    ) {
+        loop {
+            tokio::select! {
+                biased;
+                _ = &mut shutdown_rx => {
+                    info!("shutdown signal received for ssh tunnel {cid}");
+                    break;
+                }
+                Some(cmd) = cmd_rx.recv() => {
+                    match cmd {
+                        SSHCommand::Data(buf) => {
+                            // any SSHCommand::Data received from the web user is forwared to the SSH channel
+                            let bytes = Cursor::new(buf);
+                            if let Err(err) = channel.data(bytes).await {
+                                warn!("failed to send data to ssh channel {cid}: {err}");
+                                break;
+                            }
+                        }
+                        SSHCommand::Resize { cols, rows } => {
+                            // web user sends a resize request
+                            if let Err(err) = channel.window_change(cols, rows, 0, 0).await {
+                                warn!("failed to resize ssh channel {cid}: {err}");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     pub async fn connect(
         cid: String,
         config: SSHConfig,
         tx: &Sender<Vec<u8>>,
-        mut cmd_rx: Receiver<SSHCommand>,
-        mut shutdown_rx: oneshot::Receiver<()>,
+        cmd_rx: Receiver<SSHCommand>,
+        shutdown_rx: oneshot::Receiver<()>,
     ) -> anyhow::Result<()> {
         debug!("connecting ssh...");
 
@@ -153,31 +188,7 @@ impl SSHConnection {
         let connection_id = cid.clone();
         debug!("ssh ready");
 
-        loop {
-            tokio::select! {
-                biased;
-                _ = &mut shutdown_rx => {
-                    info!("shutdown signal received for ssh tunnel {connection_id}");
-                    break;
-                }
-                Some(cmd) = cmd_rx.recv() => {
-                    match cmd {
-                        SSHCommand::Data(buf) => {
-                            let bytes = Cursor::new(buf);
-                            if let Err(err) = channel.data(bytes).await {
-                                warn!("failed to send data to ssh channel {connection_id}: {err}");
-                                break;
-                            }
-                        }
-                        SSHCommand::Resize { cols, rows } => {
-                            if let Err(err) = channel.window_change(cols, rows, 0, 0).await {
-                                warn!("failed to resize ssh channel {connection_id}: {err}");
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        Self::listen(cid, &channel, cmd_rx, shutdown_rx).await;
 
         if let Err(err) = channel.close().await {
             warn!("failed to close ssh channel for {connection_id}: {err}");
