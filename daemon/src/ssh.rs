@@ -48,7 +48,6 @@ pub(crate) struct SSHConfig {
 
 pub(crate) struct SSHConnection {
     cid: String,
-    config: SSHConfig,
     sender: Sender<Vec<u8>>,
 }
 
@@ -68,8 +67,6 @@ impl client::Handler for SSHConnection {
         data: &[u8],
         _session: &mut client::Session,
     ) -> Result<(), Self::Error> {
-        info!("ssh data received");
-
         let message = NodeControlMessage::Frame {
             frame: Frame::new(Protocol::SSH, data.to_vec()),
             cid: self.cid.clone(),
@@ -77,7 +74,7 @@ impl client::Handler for SSHConnection {
 
         match encode_node_control(&message) {
             Ok(result) => match self.sender.send(result).await {
-                Ok(_) => info!("ssh response sent back to {}", self.cid),
+                Ok(_) => debug!("ssh response sent back to {}", self.cid),
                 Err(err) => {
                     warn!("failed to send: {err}; closing ssh channel");
                 }
@@ -111,7 +108,7 @@ impl SSHConnection {
 
         let sh = Self {
             cid,
-            config: ssh_config.clone(),
+            // config: ssh_config.clone(),
             sender,
         };
 
@@ -145,7 +142,7 @@ impl SSHConnection {
 
         debug!("ssh connected");
 
-        let mut channel = session.channel_open_session().await?;
+        let channel = session.channel_open_session().await?;
 
         // Allocate a PTY so bash runs in interactive mode and emits a prompt.
         channel
@@ -154,7 +151,6 @@ impl SSHConnection {
         channel.request_shell(true).await?;
 
         let connection_id = cid.clone();
-        let sender = tx.clone();
         debug!("ssh ready");
 
         loop {
@@ -178,34 +174,6 @@ impl SSHConnection {
                                 warn!("failed to resize ssh channel {connection_id}: {err}");
                             }
                         }
-                    }
-                }
-                msg = channel.wait() => {
-                    let Some(msg) = msg else {
-                        info!("ssh channel closed for {connection_id}");
-                        break;
-                    };
-
-                    match msg {
-                        ChannelMsg::Data { ref data } => {
-                            //
-                        }
-                        ChannelMsg::Eof => {
-                            debug!("ssh channel received EOF");
-                            break;
-                        }
-                        ChannelMsg::ExitStatus { exit_status } => {
-                            warn!("ssh channel exited with status {}", exit_status);
-                            if let Err(err) = channel.eof().await {
-                                warn!("failed to send EOF to ssh channel: {err}");
-                            }
-                            break;
-                        }
-                        ChannelMsg::Close { .. } => {
-                            debug!("ssh channel closed");
-                            break;
-                        }
-                        _ => {}
                     }
                 }
             }
