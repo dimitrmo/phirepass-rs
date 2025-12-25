@@ -10,10 +10,11 @@ use phirepass_common::protocol::{
     encode_web_control_to_frame, generic_web_error,
 };
 use phirepass_common::stats::Stats;
+use phirepass_common::time::now_millis;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::{Receiver, Sender, channel};
@@ -500,11 +501,4 @@ async fn send_data_to_connection(
         tokio::spawn(close_ssh_tunnel(ssh_sessions, cid.to_string()));
         anyhow!("failed to send data to connection: {err}")
     })
-}
-
-fn now_millis() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
 }
