@@ -1,6 +1,7 @@
 use crate::env::Env;
 use crate::ssh::{SSHCommand, SSHConfig, SSHConfigAuth, SSHConnection, SSHSessionHandle};
 use anyhow::anyhow;
+use futures_util::stream::SplitSink;
 use futures_util::stream::SplitStream;
 use futures_util::{SinkExt, StreamExt};
 use log::{debug, info, warn};
@@ -24,6 +25,10 @@ use tokio_tungstenite::{
 };
 
 type WebSocketReader = SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>;
+type WebSocketWriter = SplitSink<
+    WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+    tokio_tungstenite::tungstenite::Message,
+>;
 
 static SESSION_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -92,20 +97,9 @@ impl WebSocketConnection {
         info!("daemon authenticated successfully {cid} with server version {version}");
 
         let tx_writer = self.writer.clone();
-        let hb_tx = self.writer.clone();
-        let mut rx = self.reader;
         let ssh_sessions = self.ssh_sessions.clone();
 
-        let write_task = tokio::spawn(async move {
-            while let Some(frame) = rx.recv().await {
-                if let Err(err) = write.send(Message::Binary(frame.into())).await {
-                    warn!("failed to send frame: {}", err);
-                    break;
-                }
-            }
-        });
-
-        debug!("writer setup");
+        let write_task = setup_writer_task(self.reader, write).await;
 
         let reader_task = tokio::spawn(async move {
             while let Some(msg) = read.next().await {
@@ -115,8 +109,8 @@ impl WebSocketConnection {
                             handle_control_from_server(
                                 msg,
                                 &tx_writer,
-                                ssh_sessions.clone(),
                                 config.clone(),
+                                ssh_sessions.clone(),
                             )
                             .await
                         }
@@ -138,51 +132,9 @@ impl WebSocketConnection {
             }
         });
 
-        debug!("reader setup");
+        let heartbeat_task = setup_heartbeat_task(15, self.writer.clone()).await;
 
-        let heartbeat_task = tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(15));
-            loop {
-                interval.tick().await;
-
-                let Some(stats) = Stats::gather() else {
-                    warn!("failed to gather stats for heartbeat");
-                    continue;
-                };
-
-                match encode_node_control(&NodeControlMessage::Heartbeat { stats }) {
-                    Ok(raw) => {
-                        if hb_tx.send(raw).await.is_err() {
-                            warn!("failed to queue heartbeat: channel closed");
-                            break;
-                        }
-                    }
-                    Err(err) => warn!("failed to encode heartbeat: {}", err),
-                }
-            }
-        });
-
-        let ping_tx = self.writer.clone();
-        let ping_task = tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(ping_interval as u64));
-            loop {
-                interval.tick().await;
-
-                let sent_at = now_millis();
-                match encode_node_control(&NodeControlMessage::Ping { sent_at }) {
-                    Ok(raw) => {
-                        if ping_tx.send(raw).await.is_err() {
-                            warn!("failed to queue ping: channel closed");
-                            break;
-                        }
-                        info!("ping sent at {sent_at}");
-                    }
-                    Err(err) => warn!("failed to encode ping: {err}"),
-                }
-            }
-        });
-
-        info!("connected");
+        let ping_task = setup_ping_task(ping_interval as u64, self.writer.clone()).await;
 
         tokio::select! {
             _ = ping_task => warn!("ping task ended"),
@@ -193,6 +145,71 @@ impl WebSocketConnection {
 
         Ok(())
     }
+}
+
+async fn setup_writer_task(
+    mut reader: Receiver<Vec<u8>>,
+    mut writer: WebSocketWriter,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        while let Some(frame) = reader.recv().await {
+            if let Err(err) = writer.send(Message::Binary(frame.into())).await {
+                warn!("failed to send frame: {}", err);
+                break;
+            }
+        }
+    })
+}
+
+async fn setup_heartbeat_task(
+    interval_secs: u64,
+    sender: Sender<Vec<u8>>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(interval_secs));
+        loop {
+            interval.tick().await;
+
+            let Some(stats) = Stats::gather() else {
+                warn!("failed to gather stats for heartbeat");
+                continue;
+            };
+
+            match encode_node_control(&NodeControlMessage::Heartbeat { stats }) {
+                Ok(raw) => {
+                    if sender.send(raw).await.is_err() {
+                        warn!("failed to queue heartbeat: channel closed");
+                        break;
+                    }
+                }
+                Err(err) => warn!("failed to encode heartbeat: {}", err),
+            }
+        }
+    })
+}
+
+async fn setup_ping_task(
+    interval_secs: u64,
+    sender: Sender<Vec<u8>>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(interval_secs));
+        loop {
+            interval.tick().await;
+
+            let sent_at = now_millis();
+            match encode_node_control(&NodeControlMessage::Ping { sent_at }) {
+                Ok(raw) => {
+                    if sender.send(raw).await.is_err() {
+                        warn!("failed to queue ping: channel closed");
+                        break;
+                    }
+                    info!("ping sent at {sent_at}");
+                }
+                Err(err) => warn!("failed to encode ping: {err}"),
+            }
+        }
+    })
 }
 
 async fn read_next_auth_response(read: &mut WebSocketReader) -> anyhow::Result<(String, String)> {
@@ -239,8 +256,8 @@ async fn read_next_control(
 async fn handle_control_from_server(
     msg: NodeControlMessage,
     tx: &Sender<Vec<u8>>,
-    ssh_sessions: Arc<Mutex<HashMap<String, SSHSessionHandle>>>,
     config: Arc<Env>,
+    ssh_sessions: Arc<Mutex<HashMap<String, SSHSessionHandle>>>,
 ) {
     debug!("received control message from server");
 
