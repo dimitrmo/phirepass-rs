@@ -27,7 +27,7 @@ type WebSocketReader = SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>;
 
 static SESSION_ID: AtomicU64 = AtomicU64::new(1);
 
-pub(crate) struct WSConnection {
+pub(crate) struct WebSocketConnection {
     writer: Sender<Vec<u8>>,
     reader: Receiver<Vec<u8>>,
     ssh_sessions: Arc<Mutex<HashMap<String, SSHSessionHandle>>>,
@@ -52,7 +52,7 @@ fn generate_server_endpoint(mode: Mode, server_host: String, server_port: u16) -
     }
 }
 
-impl WSConnection {
+impl WebSocketConnection {
     pub fn new() -> Self {
         // Cap the outbound queue to avoid unbounded memory use when the socket is back-pressured.
         let (tx, rx) = channel::<Vec<u8>>(1024);
@@ -254,17 +254,17 @@ async fn handle_control_from_server(
             info!("received open tunnel with protocol {:?}", protocol);
             match Protocol::try_from(protocol) {
                 Ok(Protocol::SSH) => {
-                    open_ssh_tunnel(tx, cid, ssh_sessions.clone(), config, username, password).await
+                    open_ssh_tunnel(cid, tx, config, username, password, ssh_sessions.clone()).await
                 }
                 Ok(protocol) => warn!("unsupported protocol for tunnel: {}", protocol),
                 Err(err) => warn!("invalid protocol value {}: {:?}", protocol, err),
             }
         }
         NodeControlMessage::ConnectionDisconnect { cid } => {
-            close_ssh_tunnel(ssh_sessions.clone(), cid).await;
+            close_ssh_tunnel(cid, ssh_sessions.clone()).await;
         }
         NodeControlMessage::Resize { cid, cols, rows } => {
-            if let Err(err) = forward_resize(ssh_sessions.clone(), cid, cols, rows).await {
+            if let Err(err) = send_ssh_forward_resize(cid, cols, rows, ssh_sessions.clone()).await {
                 warn!("failed to forward resize: {err}");
             }
         }
@@ -274,7 +274,7 @@ async fn handle_control_from_server(
             data,
         } => {
             if protocol == Protocol::SSH as u8 {
-                if let Err(err) = tunnel_data(ssh_sessions.clone(), cid, data).await {
+                if let Err(err) = send_ssh_tunnel_data(cid, data, ssh_sessions.clone()).await {
                     warn!("{err}");
                 }
             } else {
@@ -305,12 +305,12 @@ async fn handle_control_from_server(
 }
 
 async fn open_ssh_tunnel(
-    tx: &Sender<Vec<u8>>,
     cid: String,
-    ssh_sessions: Arc<Mutex<HashMap<String, SSHSessionHandle>>>,
+    tx: &Sender<Vec<u8>>,
     config: Arc<Env>,
     username: String,
     password: String,
+    ssh_sessions: Arc<Mutex<HashMap<String, SSHSessionHandle>>>,
 ) {
     info!("opening ssh tunnel for connection {cid}...");
 
@@ -353,19 +353,19 @@ async fn start_ssh_tunnel(
         });
 
         match conn
-            .connect(&sender, cid_for_task.clone(), stdin_rx, stop_rx)
+            .connect(cid_for_task.clone(), &sender, stdin_rx, stop_rx)
             .await
         {
             Ok(()) => {
                 info!("ssh connection {cid_for_task} ended");
 
-                if let Err(err) = send_data_to_connection(
-                    &sender,
-                    ssh_sessions_for_task.clone(),
+                if let Err(err) = send_ssh_data_to_connection(
                     cid.as_str(),
+                    &sender,
                     &WebControlMessage::TunnelClosed {
                         protocol: Protocol::SSH as u8,
                     },
+                    ssh_sessions_for_task.clone(),
                 )
                 .await
                 {
@@ -374,11 +374,11 @@ async fn start_ssh_tunnel(
             }
             Err(err) => {
                 warn!("ssh connection error for {cid_for_task}: {err}");
-                if let Err(err) = send_data_to_connection(
-                    &sender,
-                    ssh_sessions_for_task.clone(),
+                if let Err(err) = send_ssh_data_to_connection(
                     cid.as_str(),
+                    &sender,
                     &generic_web_error("SSH authentication failed. Please check your password."),
+                    ssh_sessions_for_task.clone(),
                 )
                 .await
                 {
@@ -424,8 +424,8 @@ async fn start_ssh_tunnel(
 }
 
 async fn close_ssh_tunnel(
-    ssh_sessions: Arc<Mutex<HashMap<String, SSHSessionHandle>>>,
     cid: String,
+    ssh_sessions: Arc<Mutex<HashMap<String, SSHSessionHandle>>>,
 ) {
     let handle = {
         let mut sessions = ssh_sessions.lock().await;
@@ -441,10 +441,10 @@ async fn close_ssh_tunnel(
     }
 }
 
-async fn tunnel_data(
-    ssh_sessions: Arc<Mutex<HashMap<String, SSHSessionHandle>>>,
+async fn send_ssh_tunnel_data(
     cid: String,
     data: Vec<u8>,
+    ssh_sessions: Arc<Mutex<HashMap<String, SSHSessionHandle>>>,
 ) -> anyhow::Result<(), String> {
     let stdin = {
         let sessions = ssh_sessions.lock().await;
@@ -461,11 +461,11 @@ async fn tunnel_data(
         .map_err(|err| format!("failed to queue data to ssh tunnel for {cid}: {err}"))
 }
 
-async fn forward_resize(
-    ssh_sessions: Arc<Mutex<HashMap<String, SSHSessionHandle>>>,
+async fn send_ssh_forward_resize(
     cid: String,
     cols: u32,
     rows: u32,
+    ssh_sessions: Arc<Mutex<HashMap<String, SSHSessionHandle>>>,
 ) -> anyhow::Result<(), String> {
     let stdin = {
         let sessions = ssh_sessions.lock().await;
@@ -482,11 +482,11 @@ async fn forward_resize(
         .map_err(|err| format!("failed to queue resize to ssh tunnel for {cid}: {err}"))
 }
 
-async fn send_data_to_connection(
-    tx: &Sender<Vec<u8>>,
-    ssh_sessions: Arc<Mutex<HashMap<String, SSHSessionHandle>>>,
+async fn send_ssh_data_to_connection(
     cid: &str,
+    tx: &Sender<Vec<u8>>,
     data: &WebControlMessage,
+    ssh_sessions: Arc<Mutex<HashMap<String, SSHSessionHandle>>>,
 ) -> anyhow::Result<()> {
     let frame = encode_web_control_to_frame(data)?;
 
@@ -497,8 +497,7 @@ async fn send_data_to_connection(
 
     let raw = encode_node_control(&node_msg)?;
     tx.send(raw).await.map_err(|err| {
-        // Send failures here imply the channel is closed; clean up the SSH tunnel for this cid.
-        tokio::spawn(close_ssh_tunnel(ssh_sessions, cid.to_string()));
+        tokio::spawn(close_ssh_tunnel(cid.to_string(), ssh_sessions));
         anyhow!("failed to send data to connection: {err}")
     })
 }

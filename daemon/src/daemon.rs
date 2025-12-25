@@ -81,7 +81,7 @@ fn start_ws_connection(
         let mut attempt: u32 = 0;
 
         loop {
-            let conn = ws::WSConnection::new();
+            let conn = ws::WebSocketConnection::new();
 
             tokio::select! {
                 res = conn.connect(env.clone()) => {

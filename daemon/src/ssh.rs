@@ -1,7 +1,6 @@
-// Handle connection to local SSH
-
 use log::{debug, info, warn};
 use phirepass_common::protocol::{Frame, NodeControlMessage, Protocol, encode_node_control};
+use russh::client::Handle;
 use russh::keys::*;
 use russh::*;
 use std::borrow::Cow;
@@ -48,55 +47,12 @@ impl client::Handler for SSHClient {
     }
 }
 
-struct Connection {
-    session: client::Handle<SSHClient>,
-}
-
-impl Connection {
-    async fn close(&mut self) -> anyhow::Result<()> {
-        self.session
-            .disconnect(Disconnect::ByApplication, "", "English")
-            .await?;
-        Ok(())
-    }
-
-    async fn connect(ssh_config: SSHConfig) -> anyhow::Result<Self> {
-        let config = client::Config {
-            inactivity_timeout: None,
-            preferred: Preferred {
-                kex: Cow::Owned(vec![
-                    kex::CURVE25519_PRE_RFC_8731,
-                    kex::EXTENSION_SUPPORT_AS_CLIENT,
-                ]),
-                ..Default::default()
-            },
-            ..<_>::default()
-        };
-
-        let config = Arc::new(config);
-        let sh = SSHClient {};
-
-        let mut session = client::connect(config, (ssh_config.host, ssh_config.port), sh).await?;
-
-        let auth_res = match ssh_config.credentials {
-            SSHConfigAuth::UsernamePassword(username, password) => {
-                session.authenticate_password(username, password)
-            }
-        }
-        .await?;
-
-        if !auth_res.success() {
-            anyhow::bail!("SSH authentication failed. Please check your password.");
-        }
-
-        Ok(Self { session })
-    }
-}
-
+#[derive(Clone)]
 pub(crate) enum SSHConfigAuth {
     UsernamePassword(String, String),
 }
 
+#[derive(Clone)]
 pub(crate) struct SSHConfig {
     pub host: String,
     pub port: u16,
@@ -112,20 +68,54 @@ impl SSHConnection {
         Self { config }
     }
 
+    async fn create_client(&self) -> anyhow::Result<Handle<SSHClient>> {
+        let ssh_config: SSHConfig = self.config.clone();
+
+        let config = Arc::new(client::Config {
+            inactivity_timeout: None,
+            preferred: Preferred {
+                kex: Cow::Owned(vec![
+                    kex::CURVE25519_PRE_RFC_8731,
+                    kex::EXTENSION_SUPPORT_AS_CLIENT,
+                ]),
+                ..Default::default()
+            },
+            ..<_>::default()
+        });
+
+        let sh = SSHClient {};
+
+        let mut client_handler =
+            client::connect(config, (ssh_config.host, ssh_config.port), sh).await?;
+
+        let auth_res = match ssh_config.credentials {
+            SSHConfigAuth::UsernamePassword(username, password) => {
+                client_handler.authenticate_password(username, password)
+            }
+        }
+        .await?;
+
+        if !auth_res.success() {
+            anyhow::bail!("SSH authentication failed. Please check your password.");
+        }
+
+        Ok(client_handler)
+    }
+
     pub async fn connect(
-        self,
-        tx: &Sender<Vec<u8>>,
+        &self,
         cid: String,
+        tx: &Sender<Vec<u8>>,
         mut cmd_rx: Receiver<SSHCommand>,
         mut shutdown_rx: oneshot::Receiver<()>,
     ) -> anyhow::Result<()> {
         debug!("connecting ssh...");
 
-        let mut connection = Connection::connect(self.config).await?;
+        let session = self.create_client().await?;
 
         debug!("ssh connected");
 
-        let mut channel = connection.session.channel_open_session().await?;
+        let mut channel = session.channel_open_session().await?;
 
         // Allocate a PTY so bash runs in interactive mode and emits a prompt.
         channel
@@ -209,7 +199,9 @@ impl SSHConnection {
             warn!("failed to close ssh channel for {connection_id}: {err}");
         }
 
-        connection.close().await?;
+        session
+            .disconnect(Disconnect::ByApplication, "", "English")
+            .await?;
 
         Ok(())
     }
