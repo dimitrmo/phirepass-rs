@@ -1,6 +1,13 @@
-FROM alpine:3.20
+FROM alpine:3.23
 
-RUN apk add --no-cache openssh bash shadow \
+RUN apk add --no-cache \
+      openssh bash shadow \
+      htop btop \
+      curl jq \
+      tzdata \
+      vim \
+      musl-locales \
+      musl-locales-lang \
   && mkdir -p /var/run/sshd \
   && ssh-keygen -A \
   && sed -i \
