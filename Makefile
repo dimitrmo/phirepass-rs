@@ -1,4 +1,5 @@
 export RUST_LOG=info
+export ACCESS_CONTROL_ALLOW_ORIGIN=*
 
 server:
 	cargo run --bin server -- start
@@ -68,5 +69,14 @@ wasm-prod:
             --release
 
 wasm: wasm-dev wasm-prod
+
+.PHONY: sshd
+sshd:
+	cd daemon/sshd && \
+    	docker build -t sshd-pass . && \
+		docker run -it --rm -p 12222:22 \
+            -e SSH_USER=vscode \
+            -e SSH_PASSWORD='vscode' \
+            --name phirepass-sshd sshd-pass
 
 .PHONY: server deamon client web build arm format db docker-server docker-daemon wasm-dev wasm-prod
