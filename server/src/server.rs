@@ -10,7 +10,7 @@ use crate::state::AppState;
 use crate::web::ws_web_handler;
 use axum::Router;
 use axum::routing::get;
-use log::{info, warn};
+use log::{debug, info, warn};
 use phirepass_common::stats::Stats;
 use tokio::signal;
 use tokio::sync::broadcast;
@@ -100,9 +100,8 @@ fn spawn_stats_connections_logger(
         loop {
             interval.tick().await;
             let connections = connections.read().await;
-            info!("active web connections: {}", connections.len());
             let nodes = nodes.read().await;
-            info!("active nodes connections: {}", nodes.len());
+            info!("active connections: nodes={}, web={}", connections.len(), nodes.len());
         }
     })
 }
@@ -118,7 +117,7 @@ fn spawn_stats_logger(
             tokio::select! {
                 _ = interval.tick() => {
                     match Stats::gather() {
-                        Some(stats) => info!("server stats\n{}", stats.log_line()),
+                        Some(stats) => debug!("server stats\n{}", stats.log_line()),
                         None => warn!("stats: unable to read process metrics"),
                     }
                 }

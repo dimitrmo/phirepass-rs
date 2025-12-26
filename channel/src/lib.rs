@@ -376,12 +376,15 @@ pub enum ErrorType {
 pub enum Protocol {
     Control = 0,
     SSH = 1,
+    SFTP = 2,
 }
 
 impl From<u8> for Protocol {
     fn from(val: u8) -> Self {
         match val {
+            0 => Protocol::Control,
             1 => Protocol::SSH,
+            2 => Protocol::SFTP,
             _ => Protocol::Control,
         }
     }
@@ -444,6 +447,9 @@ fn handle_message(cb: &Function, event: &MessageEvent) {
         Protocol::SSH => {
             handle_ssh_frame(cb, &payload);
         }
+        Protocol::SFTP => {
+            handle_sftp_frame(cb, &payload);
+        }
     }
 }
 
@@ -481,6 +487,11 @@ fn handle_control_frame(cb: &Function, payload: &[u8]) {
     };
 
     let _ = cb.call2(&JsValue::NULL, &JsValue::from(Protocol::Control), &js_value);
+}
+
+fn handle_sftp_frame(cb: &Function, payload: &[u8]) {
+    let data = Uint8Array::from(payload);
+    let _ = cb.call2(&JsValue::NULL, &JsValue::from(Protocol::SFTP), &data.into());
 }
 
 fn handle_ssh_frame(cb: &Function, payload: &[u8]) {

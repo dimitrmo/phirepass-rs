@@ -134,23 +134,17 @@ pub const HEADER_LEN: usize = 5; // 1 + sizeof(u32)
 pub enum Protocol {
     Control = 0,
     SSH = 1,
+    SFTP = 2,
 }
 
-impl Protocol {
-    pub fn from_u8(n: u8) -> Option<Self> {
-        match n {
-            0 => Some(Self::Control),
-            1 => Some(Self::SSH),
-            _ => None,
+impl From<u8> for Protocol {
+    fn from(val: u8) -> Self {
+        match val {
+            0 => Protocol::Control,
+            1 => Protocol::SSH,
+            2 => Protocol::SFTP,
+            _ => Protocol::Control,
         }
-    }
-}
-
-impl TryFrom<u8> for Protocol {
-    type Error = ();
-
-    fn try_from(value: u8) -> anyhow::Result<Self, Self::Error> {
-        Protocol::from_u8(value).ok_or(())
     }
 }
 
@@ -159,6 +153,7 @@ impl Display for Protocol {
         match self {
             Protocol::Control => write!(f, "Control"),
             Protocol::SSH => write!(f, "SSH"),
+            Protocol::SFTP => write!(f, "SFTP"),
         }
     }
 }
@@ -179,7 +174,7 @@ impl Frame {
             return None;
         }
 
-        let protocol = Protocol::from_u8(data[0])?;
+        let protocol = Protocol::from(data[0]);
         let len = u32::from_be_bytes([data[1], data[2], data[3], data[4]]) as usize;
         if data.len() < HEADER_LEN + len {
             return None;

@@ -140,7 +140,7 @@ async fn update_web_heartbeat(state: &AppState, id: Ulid) {
     if let Some(info) = connections.get_mut(&id) {
         let since_last = info.node.last_heartbeat.elapsed();
         info.node.last_heartbeat = SystemTime::now();
-        info!(
+        debug!(
             "heartbeat from web {id} ({}) after {:.1?}",
             info.node.ip, since_last
         );
@@ -268,6 +268,8 @@ async fn handle_open_tunnel(
         let _ = send_requires_password_error(&state, cid).await;
         return;
     };
+
+    info!("credentials received, forwarding to node");
 
     if tx
         .send(NodeControlMessage::OpenTunnel {
