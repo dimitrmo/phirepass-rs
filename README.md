@@ -14,10 +14,11 @@ Rust workspace for the Phirepass remote-access relay. The system has three main 
 5) Heartbeats and ping/pong frames keep both directions alive; stats are logged server-side.
 
 ## Protocol snapshot
-- Frames: 1 byte protocol + 4 byte BE payload length + payload. `Protocol::Control = 0`, `Protocol::SSH = 1`.
-- Control messages web→server: `Heartbeat`, `OpenTunnel`, `TunnelData` (payload for SSH), `Resize`, `TunnelClosed`, `Error`, `Ok`.
+- Frames: 1 byte protocol + 4 byte BE payload length + payload. `Protocol::Control = 0`, `Protocol::SSH = 1`, `Protocol::SFTP = 2`.
+- Control messages web→server: `Heartbeat`, `OpenTunnel`, `TunnelData` (payload for SSH/SFTP), `Resize`, `TunnelClosed`, `Error`, `Ok`.
 - Control messages server→daemon: `Auth` (stubbed), `Heartbeat { stats }`, `OpenTunnel`, `TunnelData`, `Resize`, `Ping/Pong`, `ConnectionDisconnect`, `Frame { frame, cid }`, `Error`, `Ok`.
 - Errors back to web use `WebControlMessage::Error` with kinds `Generic`, `RequiresPassword`, `RequiresUsernamePassword`.
+- SFTP protocol supports custom commands: `ls [path]`, `cd <directory>`, `pwd`.
 
 ## HTTP endpoints (server)
 - `GET /api/web/ws` and `GET /api/nodes/ws`: WebSocket upgrades for web clients and nodes.
