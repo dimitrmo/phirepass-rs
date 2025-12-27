@@ -1,4 +1,5 @@
 use crate::env::Env;
+use crate::sftp::{SFTPCommand, SFTPConfig, SFTPConfigAuth, SFTPConnection, SFTPSessionHandle};
 use crate::ssh::{SSHCommand, SSHConfig, SSHConfigAuth, SSHConnection, SSHSessionHandle};
 use anyhow::anyhow;
 use futures_util::stream::SplitSink;
@@ -36,6 +37,7 @@ pub(crate) struct WebSocketConnection {
     writer: Sender<Vec<u8>>,
     reader: Receiver<Vec<u8>>,
     ssh_sessions: Arc<Mutex<HashMap<String, SSHSessionHandle>>>,
+    sftp_sessions: Arc<Mutex<HashMap<String, SFTPSessionHandle>>>,
 }
 
 fn generate_server_endpoint(mode: Mode, server_host: String, server_port: u16) -> String {
@@ -65,6 +67,7 @@ impl WebSocketConnection {
             reader: rx,
             writer: tx,
             ssh_sessions: Arc::new(Mutex::new(HashMap::new())),
+            sftp_sessions: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -98,6 +101,7 @@ impl WebSocketConnection {
 
         let tx_writer = self.writer.clone();
         let ssh_sessions = self.ssh_sessions.clone();
+        let sftp_sessions = self.sftp_sessions.clone();
 
         let write_task = setup_writer_task(self.reader, write).await;
 
@@ -111,6 +115,7 @@ impl WebSocketConnection {
                                 &tx_writer,
                                 config.clone(),
                                 ssh_sessions.clone(),
+                                sftp_sessions.clone(),
                             )
                             .await
                         }
@@ -258,6 +263,7 @@ async fn handle_control_from_server(
     tx: &Sender<Vec<u8>>,
     config: Arc<Env>,
     ssh_sessions: Arc<Mutex<HashMap<String, SSHSessionHandle>>>,
+    sftp_sessions: Arc<Mutex<HashMap<String, SFTPSessionHandle>>>,
 ) {
     debug!("received control message from server");
 
@@ -273,12 +279,16 @@ async fn handle_control_from_server(
                 Ok(Protocol::SSH) => {
                     open_ssh_tunnel(cid, tx, config, username, password, ssh_sessions.clone()).await
                 }
+                Ok(Protocol::SFTP) => {
+                    open_sftp_tunnel(cid, tx, config, username, password, sftp_sessions.clone()).await
+                }
                 Ok(protocol) => warn!("unsupported protocol for tunnel: {}", protocol),
                 Err(err) => warn!("invalid protocol value {}: {:?}", protocol, err),
             }
         }
         NodeControlMessage::ConnectionDisconnect { cid } => {
-            close_ssh_tunnel(cid, ssh_sessions.clone()).await;
+            close_ssh_tunnel(cid.clone(), ssh_sessions.clone()).await;
+            close_sftp_tunnel(cid, sftp_sessions.clone()).await;
         }
         NodeControlMessage::Resize { cid, cols, rows } => {
             if let Err(err) = send_ssh_forward_resize(cid, cols, rows, ssh_sessions.clone()).await {
@@ -292,6 +302,10 @@ async fn handle_control_from_server(
         } => {
             if protocol == Protocol::SSH as u8 {
                 if let Err(err) = send_ssh_tunnel_data(cid, data, ssh_sessions.clone()).await {
+                    warn!("{err}");
+                }
+            } else if protocol == Protocol::SFTP as u8 {
+                if let Err(err) = send_sftp_tunnel_data(cid, data, sftp_sessions.clone()).await {
                     warn!("{err}");
                 }
             } else {
@@ -518,6 +532,186 @@ async fn send_ssh_data_to_connection(
     let raw = encode_node_control(&node_msg)?;
     tx.send(raw).await.map_err(|err| {
         tokio::spawn(close_ssh_tunnel(cid.to_string(), ssh_sessions));
+        anyhow!("failed to send data to connection: {err}")
+    })
+}
+
+async fn open_sftp_tunnel(
+    cid: String,
+    tx: &Sender<Vec<u8>>,
+    config: Arc<Env>,
+    username: String,
+    password: String,
+    sftp_sessions: Arc<Mutex<HashMap<String, SFTPSessionHandle>>>,
+) {
+    info!("opening sftp tunnel for connection {cid}...");
+
+    // Check if authentication mode requires password
+    match &config.ssh_auth_mode {
+        crate::env::SSHAuthMethod::CredentialsPrompt => {
+            start_sftp_tunnel(
+                tx,
+                cid,
+                sftp_sessions,
+                config,
+                SFTPConfigAuth::UsernamePassword(username, password),
+            )
+            .await;
+        }
+    }
+}
+
+async fn start_sftp_tunnel(
+    tx: &Sender<Vec<u8>>,
+    cid: String,
+    sftp_sessions: Arc<Mutex<HashMap<String, SFTPSessionHandle>>>,
+    config: Arc<Env>,
+    credentials: SFTPConfigAuth,
+) {
+    let (stdin_tx, stdin_rx) = channel::<SFTPCommand>(512);
+    let (stop_tx, stop_rx) = oneshot::channel();
+    let sender = tx.clone();
+    let cid_for_task = cid.clone();
+    let cid_for_connection = cid.clone();
+    let session_id = SESSION_ID.fetch_add(1, Ordering::Relaxed);
+    let sftp_sessions_for_task = sftp_sessions.clone();
+    let sftp_task = tokio::spawn(async move {
+        info!("sftp task started for connection {cid_for_task}");
+
+        match SFTPConnection::connect(
+            cid_for_task.clone(),
+            SFTPConfig {
+                host: config.ssh_host.clone(),
+                port: config.ssh_port,
+                credentials,
+            },
+            &sender,
+            stdin_rx,
+            stop_rx,
+        )
+        .await
+        {
+            Ok(()) => {
+                info!("sftp connection {cid_for_task} ended");
+
+                if let Err(err) = send_sftp_data_to_connection(
+                    cid.as_str(),
+                    &sender,
+                    &WebControlMessage::TunnelClosed {
+                        protocol: Protocol::SFTP as u8,
+                    },
+                    sftp_sessions_for_task.clone(),
+                )
+                .await
+                {
+                    warn!("failed to notify cid {cid_for_task} for sftp connection closure: {err}");
+                }
+            }
+            Err(err) => {
+                warn!("sftp connection error for {cid_for_task}: {err}");
+                if let Err(err) = send_sftp_data_to_connection(
+                    cid.as_str(),
+                    &sender,
+                    &generic_web_error("SFTP authentication failed. Please check your password."),
+                    sftp_sessions_for_task.clone(),
+                )
+                .await
+                {
+                    warn!("failed to notify connection {cid} about authentication failure: {err}");
+                }
+            }
+        }
+    });
+
+    let sessions_for_cleanup = sftp_sessions.clone();
+    let cid_for_cleanup = cid_for_connection.clone();
+    let cleanup_task = tokio::spawn(async move {
+        if let Err(err) = sftp_task.await {
+            warn!("sftp session join error for {cid_for_cleanup}: {err}");
+        }
+
+        let mut sessions = sessions_for_cleanup.lock().await;
+        let should_remove = sessions
+            .get(&cid_for_cleanup)
+            .map(|handle| handle.id == session_id)
+            .unwrap_or(false);
+
+        if should_remove {
+            sessions.remove(&cid_for_cleanup);
+        }
+    });
+
+    let handle = SFTPSessionHandle {
+        id: session_id,
+        stop: Some(stop_tx),
+        join: cleanup_task,
+        stdin: stdin_tx,
+    };
+
+    let previous = {
+        let mut sessions = sftp_sessions.lock().await;
+        sessions.insert(cid_for_connection, handle)
+    };
+
+    if let Some(prev) = previous {
+        prev.shutdown().await;
+    }
+}
+
+async fn close_sftp_tunnel(
+    cid: String,
+    sftp_sessions: Arc<Mutex<HashMap<String, SFTPSessionHandle>>>,
+) {
+    let handle = {
+        let mut sessions = sftp_sessions.lock().await;
+        sessions.remove(&cid)
+    };
+
+    match handle {
+        Some(handle) => {
+            info!("closing sftp tunnel for connection {cid}");
+            handle.shutdown().await;
+        }
+        None => info!("no sftp tunnel to close for connection {cid}"),
+    }
+}
+
+async fn send_sftp_tunnel_data(
+    cid: String,
+    data: Vec<u8>,
+    sftp_sessions: Arc<Mutex<HashMap<String, SFTPSessionHandle>>>,
+) -> anyhow::Result<(), String> {
+    let stdin = {
+        let sessions = sftp_sessions.lock().await;
+        sessions.get(&cid).map(|s| s.stdin.clone())
+    };
+
+    let Some(stdin) = stdin else {
+        return Err(format!("no sftp tunnel found for connection {cid}"));
+    };
+
+    stdin
+        .send(SFTPCommand::Data(data))
+        .await
+        .map_err(|err| format!("failed to queue data to sftp tunnel for {cid}: {err}"))
+}
+
+async fn send_sftp_data_to_connection(
+    cid: &str,
+    tx: &Sender<Vec<u8>>,
+    data: &WebControlMessage,
+    sftp_sessions: Arc<Mutex<HashMap<String, SFTPSessionHandle>>>,
+) -> anyhow::Result<()> {
+    let frame = encode_web_control_to_frame(data)?;
+
+    let node_msg = NodeControlMessage::Frame {
+        frame,
+        cid: cid.to_string(),
+    };
+
+    let raw = encode_node_control(&node_msg)?;
+    tx.send(raw).await.map_err(|err| {
+        tokio::spawn(close_sftp_tunnel(cid.to_string(), sftp_sessions));
         anyhow!("failed to send data to connection: {err}")
     })
 }
