@@ -55,7 +55,10 @@ impl client::Handler for SFTPConnection {
     async fn check_server_key(
         &mut self,
         _server_public_key: &PublicKey,
-    ) -> anyhow::Result<bool, Self::Error> {
+    ) -> Result<bool, Self::Error> {
+        // WARNING: This bypasses host key verification.
+        // In production, you should implement proper key validation.
+        warn!("SFTP connection: skipping server key verification (security risk)");
         Ok(true)
     }
 
@@ -104,10 +107,7 @@ impl SFTPConnection {
             ..<_>::default()
         });
 
-        let sh = Self {
-            cid,
-            sender,
-        };
+        let sh = Self { cid, sender };
 
         let mut client_handler =
             client::connect(config, (sftp_config.host, sftp_config.port), sh).await?;
@@ -147,7 +147,7 @@ impl SFTPConnection {
                             if let Ok(command_str) = String::from_utf8(buf.clone()) {
                                 let command_str = command_str.trim();
                                 debug!("sftp command received: {}", command_str);
-                                
+
                                 if let Some(response) = Self::handle_custom_command(
                                     command_str,
                                     channel,
@@ -166,13 +166,25 @@ impl SFTPConnection {
         }
     }
 
+    fn sanitize_path(path: &str) -> Option<String> {
+        // Basic path validation to prevent command injection
+        // Only allow alphanumeric, dots, dashes, underscores, and forward slashes
+        if path.chars().all(|c| {
+            c.is_alphanumeric() || c == '.' || c == '-' || c == '_' || c == '/' || c == '~'
+        }) {
+            Some(path.to_string())
+        } else {
+            None
+        }
+    }
+
     async fn handle_custom_command(
         command: &str,
         channel: &Channel<Msg>,
         current_dir: Arc<tokio::sync::Mutex<String>>,
     ) -> Option<String> {
         let parts: Vec<&str> = command.split_whitespace().collect();
-        
+
         if parts.is_empty() {
             return None;
         }
@@ -181,12 +193,19 @@ impl SFTPConnection {
             "ls" => {
                 // Execute ls command
                 let path = if parts.len() > 1 {
-                    parts[1].to_string()
+                    match Self::sanitize_path(parts[1]) {
+                        Some(p) => p,
+                        None => {
+                            return Some(
+                                "ls: invalid path (contains unsafe characters)\n".to_string(),
+                            );
+                        }
+                    }
                 } else {
                     let dir = current_dir.lock().await;
                     dir.clone()
                 };
-                
+
                 let cmd = format!("ls -la {}\n", path);
                 if let Err(err) = channel.data(cmd.as_bytes()).await {
                     warn!("failed to execute ls: {err}");
@@ -199,19 +218,26 @@ impl SFTPConnection {
                 if parts.len() < 2 {
                     return Some("cd: missing directory argument\n".to_string());
                 }
-                
-                let new_dir = parts[1];
-                let cmd = format!("cd {} && pwd\n", new_dir);
-                
+
+                let new_dir = match Self::sanitize_path(parts[1]) {
+                    Some(p) => p,
+                    None => {
+                        return Some("cd: invalid path (contains unsafe characters)\n".to_string());
+                    }
+                };
+
+                let cmd = format!("cd {}\n", new_dir);
+
                 if let Err(err) = channel.data(cmd.as_bytes()).await {
                     warn!("failed to execute cd: {err}");
                     return Some(format!("Error executing cd: {}\n", err));
                 }
-                
-                // Update current directory
+
+                // Note: We update current_dir here for tracking purposes
+                // In a real implementation, we should wait for confirmation from the server
                 let mut dir = current_dir.lock().await;
-                *dir = new_dir.to_string();
-                
+                *dir = new_dir.clone();
+
                 Some(format!("Changed directory to {}\n", new_dir))
             }
             "pwd" => {
@@ -219,12 +245,8 @@ impl SFTPConnection {
                 Some(format!("{}\n", dir.as_str()))
             }
             _ => {
-                // Unknown command, forward as-is
-                if let Err(err) = channel.data(format!("{}\n", command).as_bytes()).await {
-                    warn!("failed to send data to sftp channel: {err}");
-                    return Some(format!("Error: {}\n", err));
-                }
-                None
+                // For unknown commands, reject them instead of forwarding
+                Some(format!("Unknown command: {}\n", parts[0]))
             }
         }
     }
@@ -244,19 +266,16 @@ impl SFTPConnection {
 
         let channel = session.channel_open_session().await?;
 
-        // Request sftp subsystem
-        if let Err(err) = channel.request_subsystem(true, "sftp").await {
-            warn!("failed to request sftp subsystem: {err}, falling back to shell");
-            // Fallback to shell mode for custom commands
-            channel
-                .request_pty(true, "xterm-256color", 80, 24, 0, 0, &[])
-                .await?;
-            channel.request_shell(true).await?;
-        }
+        // For custom SFTP commands (ls, cd, pwd), use shell mode
+        // Note: This is not actual SFTP protocol but custom commands over SSH shell
+        channel
+            .request_pty(true, "xterm-256color", 80, 24, 0, 0, &[])
+            .await?;
+        channel.request_shell(true).await?;
 
         let connection_id = cid.clone();
         let current_dir = Arc::new(tokio::sync::Mutex::new("/".to_string()));
-        debug!("sftp ready");
+        debug!("sftp shell ready for custom commands");
 
         Self::listen(cid, &channel, cmd_rx, shutdown_rx, current_dir).await;
 

@@ -280,7 +280,8 @@ async fn handle_control_from_server(
                     open_ssh_tunnel(cid, tx, config, username, password, ssh_sessions.clone()).await
                 }
                 Ok(Protocol::SFTP) => {
-                    open_sftp_tunnel(cid, tx, config, username, password, sftp_sessions.clone()).await
+                    open_sftp_tunnel(cid, tx, config, username, password, sftp_sessions.clone())
+                        .await
                 }
                 Ok(protocol) => warn!("unsupported protocol for tunnel: {}", protocol),
                 Err(err) => warn!("invalid protocol value {}: {:?}", protocol, err),
