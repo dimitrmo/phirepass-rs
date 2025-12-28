@@ -111,11 +111,11 @@ impl SSHConnection {
     ) -> anyhow::Result<()> {
         debug!("connecting ssh...");
 
-        let session = self.create_client().await?;
+        let client = self.create_client().await?;
 
         debug!("ssh connected");
 
-        let mut channel = session.channel_open_session().await?;
+        let mut channel = client.channel_open_session().await?;
 
         // Allocate a PTY so bash runs in interactive mode and emits a prompt.
         channel
@@ -125,7 +125,6 @@ impl SSHConnection {
 
         let connection_id = cid.clone();
         let sender = tx.clone();
-        debug!("ssh ready");
 
         loop {
             tokio::select! {
@@ -183,6 +182,7 @@ impl SSHConnection {
                             if let Err(err) = channel.eof().await {
                                 warn!("failed to send EOF to ssh channel: {err}");
                             }
+
                             break;
                         }
                         ChannelMsg::Close { .. } => {
@@ -199,7 +199,7 @@ impl SSHConnection {
             warn!("failed to close ssh channel for {connection_id}: {err}");
         }
 
-        session
+        client
             .disconnect(Disconnect::ByApplication, "", "English")
             .await?;
 
