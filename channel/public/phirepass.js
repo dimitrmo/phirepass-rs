@@ -363,8 +363,13 @@ function connect() {
         }
 
         switch (msg.type) {
+            case "TunnelOpened":
+                console.log(msg);
+                log(`Tunnel opened - Session ID: ${msg.sid}`);
+                setStatus("Tunnel established", "info");
+                break;
             case "TunnelClosed":
-                log(`Tunnel closed by remote host`);
+                log(`Tunnel closed - Session ID: ${msg.sid}`);
                 setStatus("Tunnel closed", "warn");
                 term.reset();
                 cleanup();

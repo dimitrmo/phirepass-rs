@@ -93,6 +93,10 @@ async fn handle_web_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
                             WebControlMessage::Resize { target, cols, rows } => {
                                 handle_resize(&state, id, target, cols, rows).await;
                             }
+                            WebControlMessage::TunnelOpened { .. } => {
+                                // TunnelOpened is sent from server to web client, not the other way
+                                warn!("received TunnelOpened from web client {id} - this should not happen");
+                            }
                             WebControlMessage::TunnelClosed { .. } => {}
                             WebControlMessage::Error { .. } => {}
                             WebControlMessage::Ok => {}

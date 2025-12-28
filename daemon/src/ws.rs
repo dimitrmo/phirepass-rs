@@ -369,6 +369,8 @@ async fn start_ssh_tunnel(
     let cid_for_connection = cid.clone();
     let session_id = SESSION_ID.fetch_add(1, Ordering::Relaxed);
     let sessions_for_task = sessions.clone();
+    let tx_for_opened = tx.clone();
+    let cid_for_opened = cid.clone();
     let ssh_task = tokio::spawn(async move {
         info!("ssh task started for connection {cid_for_task}");
 
@@ -383,6 +385,20 @@ async fn start_ssh_tunnel(
             config.ssh_host, config.ssh_port
         );
 
+        let opened_msg = NodeControlMessage::TunnelOpened {
+            protocol: Protocol::Control as u8,
+            cid: cid_for_opened.clone(),
+            sid: session_id,
+        };
+
+        if let Ok(raw) = encode_node_control(&opened_msg) {
+            if let Err(err) = tx_for_opened.send(raw).await {
+                warn!("failed to send TunnelOpened notification for {cid_for_opened}: {err}");
+            } else {
+                info!("TunnelOpened notification sent for {cid_for_opened} with sid {session_id}");
+            }
+        }
+
         match conn
             .connect(cid_for_task.clone(), &sender, stdin_rx, stop_rx)
             .await
@@ -395,6 +411,7 @@ async fn start_ssh_tunnel(
                     &sender,
                     &WebControlMessage::TunnelClosed {
                         protocol: Protocol::SSH as u8,
+                        sid: session_id,
                     },
                     sessions_for_task.clone(),
                 )

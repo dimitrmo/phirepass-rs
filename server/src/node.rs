@@ -8,7 +8,8 @@ use axum_client_ip::ClientIp;
 use futures_util::{SinkExt, StreamExt};
 use log::{debug, info, warn};
 use phirepass_common::protocol::{
-    Frame, NodeControlMessage, decode_node_control, encode_node_control,
+    Frame, NodeControlMessage, WebControlMessage, decode_node_control, encode_node_control,
+    encode_web_control_to_frame,
 };
 use phirepass_common::stats::Stats;
 use std::net::IpAddr;
@@ -99,6 +100,10 @@ async fn handle_node_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
                             info!("pong response to node {id} sent");
                         }
                     }
+                    NodeControlMessage::TunnelOpened { protocol, cid, sid } => {
+                        info!("node {id} opened tunnel for {cid} with session {sid}");
+                        handle_tunnel_opened(&state, protocol, cid, sid).await;
+                    }
                     _ => {}
                 },
                 Err(err) => warn!("failed to decode node control: {}", err),
@@ -135,6 +140,34 @@ async fn handle_frame_response(state: &AppState, frame: Frame, nid: String, cid:
             Ok(..) => debug!("frame response sent to connection {cid_as_str}"),
             Err(err) => warn!("failed to send frame to user({}): {}", cid_as_str, err),
         }
+    }
+}
+
+async fn handle_tunnel_opened(state: &AppState, protocol: u8, cid: String, sid: u64) {
+    debug!("handling tunnel opened for connection {cid} with session {sid}");
+
+    let Ok(cid_as_ulid) = Ulid::from_string(&cid) else {
+        warn!("{cid} is not a valid ULID format");
+        return;
+    };
+
+    let connections = state.connections.read().await;
+    if let Some(conn) = connections.get(&cid_as_ulid) {
+        let message = WebControlMessage::TunnelOpened {
+            protocol,
+            sid,
+        };
+
+        if let Ok(frame) = encode_web_control_to_frame(&message) {
+            match conn.tx.send(frame).await {
+                Ok(..) => info!("TunnelOpened notification sent to web client {cid_as_ulid}"),
+                Err(err) => warn!("failed to send TunnelOpened to client {cid_as_ulid}: {err}"),
+            }
+        } else {
+            warn!("failed to encode TunnelOpened message");
+        }
+    } else {
+        warn!("connection {cid} not found");
     }
 }
 

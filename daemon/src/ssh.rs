@@ -18,9 +18,9 @@ pub(crate) enum SSHCommand {
 
 pub(crate) struct SSHSessionHandle {
     pub id: u64,
-    pub stop: Option<oneshot::Sender<()>>,
     pub join: JoinHandle<()>,
     pub stdin: Sender<SSHCommand>,
+    pub stop: Option<oneshot::Sender<()>>,
 }
 
 impl SSHSessionHandle {

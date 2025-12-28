@@ -56,8 +56,13 @@ pub enum WebControlMessage {
         target: String,
         data: Vec<u8>,
     },
+    TunnelOpened {
+        protocol: u8,
+        sid: u64,
+    },
     TunnelClosed {
         protocol: u8,
+        sid: u64,
     },
     Resize {
         target: String,
@@ -98,11 +103,17 @@ pub enum NodeControlMessage {
         username: String,
         password: String,
     },
+    TunnelOpened {
+        protocol: u8,
+        cid: String,
+        sid: u64,
+    },
     TunnelData {
         protocol: u8,
         cid: String,
         data: Vec<u8>,
     },
+
     Resize {
         cid: String,
         cols: u32,

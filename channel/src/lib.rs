@@ -447,14 +447,6 @@ fn handle_message(cb: &Function, event: &MessageEvent) {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct IncomingControl {
-    #[serde(rename = "type")]
-    pub msg_type: String,
-    pub message: Option<String>,
-    pub kind: Option<u32>,
-}
-
 fn handle_control_frame(cb: &Function, payload: &[u8]) {
     let message = match String::from_utf8(payload.to_vec()) {
         Ok(msg) => msg,
@@ -464,7 +456,7 @@ fn handle_control_frame(cb: &Function, payload: &[u8]) {
         }
     };
 
-    let control: IncomingControl = match serde_json::from_str(&message) {
+    let control: serde_json::Value = match serde_json::from_str(&message) {
         Ok(msg) => msg,
         Err(err) => {
             console_warn!("{}", err);
@@ -472,7 +464,10 @@ fn handle_control_frame(cb: &Function, payload: &[u8]) {
         }
     };
 
-    let js_value = match serde_wasm_bindgen::to_value(&control) {
+    let serializer = serde_wasm_bindgen::Serializer::new()
+        .serialize_maps_as_objects(true);
+
+    let js_value = match control.serialize(&serializer) {
         Ok(msg) => msg,
         Err(err) => {
             console_warn!("{}", err);
