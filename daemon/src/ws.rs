@@ -27,10 +27,36 @@ type WebSocketReader = SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>;
 
 static SESSION_ID: AtomicU64 = AtomicU64::new(1);
 
+enum SessionHandle {
+    SSH(SSHSessionHandle),
+}
+
+impl SessionHandle {
+    pub fn get_id(&self) -> u64 {
+        match self {
+            SessionHandle::SSH(ssh_handle) => ssh_handle.id,
+        }
+    }
+
+    pub fn get_stdin(&self) -> Sender<SSHCommand> {
+        match self {
+            SessionHandle::SSH(ssh_handle) => ssh_handle.stdin.clone(),
+        }
+    }
+
+    pub async fn shutdown(self) {
+        match self {
+            SessionHandle::SSH(ssh_handle) => {
+                ssh_handle.shutdown().await;
+            }
+        }
+    }
+}
+
 pub(crate) struct WebSocketConnection {
     writer: Sender<Vec<u8>>,
     reader: Receiver<Vec<u8>>,
-    sessions: Arc<Mutex<HashMap<String, SSHSessionHandle>>>,
+    sessions: Arc<Mutex<HashMap<String, SessionHandle>>>,
 }
 
 fn generate_server_endpoint(mode: Mode, server_host: String, server_port: u16) -> String {
@@ -240,7 +266,7 @@ async fn handle_control_from_server(
     msg: NodeControlMessage,
     tx: &Sender<Vec<u8>>,
     config: Arc<Env>,
-    sessions: Arc<Mutex<HashMap<String, SSHSessionHandle>>>,
+    sessions: Arc<Mutex<HashMap<String, SessionHandle>>>,
 ) {
     debug!("received control message from server");
 
@@ -310,7 +336,7 @@ async fn open_ssh_tunnel(
     config: Arc<Env>,
     username: String,
     password: String,
-    sessions: Arc<Mutex<HashMap<String, SSHSessionHandle>>>,
+    sessions: Arc<Mutex<HashMap<String, SessionHandle>>>,
 ) {
     info!("opening ssh tunnel for connection {cid}...");
 
@@ -334,7 +360,7 @@ async fn start_ssh_tunnel(
     cid: String,
     config: Arc<Env>,
     credentials: SSHConfigAuth,
-    sessions: Arc<Mutex<HashMap<String, SSHSessionHandle>>>,
+    sessions: Arc<Mutex<HashMap<String, SessionHandle>>>,
 ) {
     let (stdin_tx, stdin_rx) = channel::<SSHCommand>(512);
     let (stop_tx, stop_rx) = oneshot::channel();
@@ -352,7 +378,10 @@ async fn start_ssh_tunnel(
             credentials,
         });
 
-        info!("connecting ssh for connection {cid_for_task}: {}:{}", config.ssh_host, config.ssh_port);
+        info!(
+            "connecting ssh for connection {cid_for_task}: {}:{}",
+            config.ssh_host, config.ssh_port
+        );
 
         match conn
             .connect(cid_for_task.clone(), &sender, stdin_rx, stop_rx)
@@ -400,7 +429,7 @@ async fn start_ssh_tunnel(
         let mut sessions = sessions_for_cleanup.lock().await;
         let should_remove = sessions
             .get(&cid_for_cleanup)
-            .map(|handle| handle.id == session_id)
+            .map(|handle| handle.get_id() == session_id)
             .unwrap_or(false);
 
         if should_remove {
@@ -408,12 +437,12 @@ async fn start_ssh_tunnel(
         }
     });
 
-    let handle = SSHSessionHandle {
+    let handle = SessionHandle::SSH(SSHSessionHandle {
         id: session_id,
         stop: Some(stop_tx),
         join: cleanup_task,
         stdin: stdin_tx,
-    };
+    });
 
     let previous = {
         let mut sessions = sessions.lock().await;
@@ -425,10 +454,7 @@ async fn start_ssh_tunnel(
     }
 }
 
-async fn close_ssh_tunnel(
-    cid: String,
-    sessions: Arc<Mutex<HashMap<String, SSHSessionHandle>>>,
-) {
+async fn close_ssh_tunnel(cid: String, sessions: Arc<Mutex<HashMap<String, SessionHandle>>>) {
     let handle = {
         let mut sessions = sessions.lock().await;
         sessions.remove(&cid)
@@ -446,11 +472,11 @@ async fn close_ssh_tunnel(
 async fn send_ssh_tunnel_data(
     cid: String,
     data: Vec<u8>,
-    sessions: Arc<Mutex<HashMap<String, SSHSessionHandle>>>,
+    sessions: Arc<Mutex<HashMap<String, SessionHandle>>>,
 ) -> anyhow::Result<(), String> {
     let stdin = {
         let sessions = sessions.lock().await;
-        sessions.get(&cid).map(|s| s.stdin.clone())
+        sessions.get(&cid).map(|s| s.get_stdin())
     };
 
     let Some(stdin) = stdin else {
@@ -467,11 +493,11 @@ async fn send_ssh_forward_resize(
     cid: String,
     cols: u32,
     rows: u32,
-    sessions: Arc<Mutex<HashMap<String, SSHSessionHandle>>>,
+    sessions: Arc<Mutex<HashMap<String, SessionHandle>>>,
 ) -> anyhow::Result<(), String> {
     let stdin = {
         let sessions = sessions.lock().await;
-        sessions.get(&cid).map(|s| s.stdin.clone())
+        sessions.get(&cid).map(|s| s.get_stdin())
     };
 
     let Some(stdin) = stdin else {
@@ -488,7 +514,7 @@ async fn send_ssh_data_to_connection(
     cid: &str,
     tx: &Sender<Vec<u8>>,
     data: &WebControlMessage,
-    sessions: Arc<Mutex<HashMap<String, SSHSessionHandle>>>,
+    sessions: Arc<Mutex<HashMap<String, SessionHandle>>>,
 ) -> anyhow::Result<()> {
     let frame = encode_web_control_to_frame(data)?;
 
