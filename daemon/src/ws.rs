@@ -352,6 +352,8 @@ async fn start_ssh_tunnel(
             credentials,
         });
 
+        info!("connecting ssh for connection {cid_for_task}: {}:{}", config.ssh_host, config.ssh_port);
+
         match conn
             .connect(cid_for_task.clone(), &sender, stdin_rx, stop_rx)
             .await
