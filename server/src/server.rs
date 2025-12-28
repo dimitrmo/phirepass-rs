@@ -101,7 +101,11 @@ fn spawn_stats_connections_logger(
             interval.tick().await;
             let connections = connections.read().await;
             let nodes = nodes.read().await;
-            info!("active connections: nodes={}, web={}", connections.len(), nodes.len());
+            info!(
+                "active connections: nodes={}, web={}",
+                nodes.len(),
+                connections.len()
+            );
         }
     })
 }

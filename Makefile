@@ -5,7 +5,8 @@ server:
 	cargo run --bin server -- start
 
 client:
-	SSH_USER=$(USER) \
+	RUST_LOG=debug \
+    SSH_USER=$(USER) \
 		cargo run --bin daemon -- start
 
 daemon: client

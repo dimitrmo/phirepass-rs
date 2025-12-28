@@ -79,7 +79,8 @@ fn generate_server_endpoint(mode: Mode, server_host: String, server_port: u16) -
 impl WebSocketConnection {
     pub fn new() -> Self {
         // Cap the outbound queue to avoid unbounded memory use when the socket is back-pressured.
-        let (tx, rx) = channel::<Vec<u8>>(1024);
+        // Increased from 1024 to 2048 to reduce likelihood of backpressure under burst traffic.
+        let (tx, rx) = channel::<Vec<u8>>(2048);
         Self {
             reader: rx,
             writer: tx,
@@ -171,12 +172,22 @@ async fn setup_writer_task(
     mut writer: WebSocketWriter,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
+        let mut frame_count = 0u64;
         while let Some(frame) = reader.recv().await {
-            if let Err(err) = writer.send(Message::Binary(frame.into())).await {
-                warn!("failed to send frame: {}", err);
-                break;
+            frame_count += 1;
+            match writer.send(Message::Binary(frame.into())).await {
+                Ok(_) => {
+                    if frame_count % 100 == 0 {
+                        debug!("ws writer: sent {} frames", frame_count);
+                    }
+                }
+                Err(err) => {
+                    warn!("ws writer failed after {} frames: {}", frame_count, err);
+                    break;
+                }
             }
         }
+        warn!("ws writer task ended after {} frames", frame_count);
     })
 }
 
@@ -196,8 +207,9 @@ async fn setup_heartbeat_task(
 
             match encode_node_control(&NodeControlMessage::Heartbeat { stats }) {
                 Ok(raw) => {
-                    if sender.send(raw).await.is_err() {
-                        warn!("failed to queue heartbeat: channel closed");
+                    // Use try_send to avoid blocking when channel is full
+                    if let Err(err) = sender.try_send(raw) {
+                        warn!("failed to queue heartbeat: {:?}", err);
                         break;
                     }
                 }
@@ -219,8 +231,9 @@ async fn setup_ping_task(
             let sent_at = now_millis();
             match encode_node_control(&NodeControlMessage::Ping { sent_at }) {
                 Ok(raw) => {
-                    if sender.send(raw).await.is_err() {
-                        warn!("failed to queue ping: channel closed");
+                    // Use try_send to avoid blocking when channel is full
+                    if let Err(err) = sender.try_send(raw) {
+                        warn!("failed to queue ping: {:?}", err);
                         break;
                     }
                     debug!("ping sent at {sent_at}");
@@ -324,8 +337,9 @@ async fn handle_control_from_server(
             let pong = NodeControlMessage::Pong { sent_at: now };
             match encode_node_control(&pong) {
                 Ok(raw) => {
-                    if tx.send(raw).await.is_err() {
-                        warn!("failed to queue pong: channel closed");
+                    // Use try_send to avoid blocking when channel is full
+                    if let Err(err) = tx.try_send(raw) {
+                        warn!("failed to queue pong: {:?}", err);
                     }
                 }
                 Err(err) => warn!("failed to encode pong: {err}"),
@@ -381,8 +395,32 @@ async fn start_ssh_tunnel(
     let cid_for_connection = cid.clone();
     let session_id = SESSION_ID.fetch_add(1, Ordering::Relaxed);
     let sessions_for_task = sessions.clone();
+
+    // Monitor backpressure by checking channel capacity periodically
+    let sender_for_monitor = sender.clone();
+    let cid_for_monitor = cid_for_task.clone();
+    let monitor_task = tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(10));
+        loop {
+            interval.tick().await;
+            let capacity = sender_for_monitor.capacity();
+            if capacity < 512 {
+                warn!(
+                    "ws writer channel capacity low for {}: {} remaining",
+                    cid_for_monitor, capacity
+                );
+            } else {
+                debug!(
+                    "ws writer channel capacity for {}: {} remaining",
+                    cid_for_monitor, capacity
+                );
+            }
+        }
+    });
+
     let ssh_task = tokio::spawn(async move {
         info!("ssh task started for connection {cid_for_task}");
+        let _monitor = monitor_task; // Keep monitor alive with ssh task
 
         match SSHConnection::connect(
             cid_for_task.clone(),
@@ -528,7 +566,7 @@ async fn send_ssh_data_to_connection(
     cid: &str,
     tx: &Sender<Vec<u8>>,
     data: &WebControlMessage,
-    sessions: Arc<Mutex<HashMap<String, SessionHandle>>>,
+    _sessions: Arc<Mutex<HashMap<String, SessionHandle>>>,
 ) -> anyhow::Result<()> {
     let frame = encode_web_control_to_frame(data)?;
 
@@ -538,8 +576,26 @@ async fn send_ssh_data_to_connection(
     };
 
     let raw = encode_node_control(&node_msg)?;
-    tx.send(raw).await.map_err(|err| {
-        tokio::spawn(close_ssh_tunnel(cid.to_string(), sessions));
-        anyhow!("failed to send data to connection: {err}")
-    })
+
+    // Use try_send to avoid blocking when channel is full during cleanup
+    match tx.try_send(raw) {
+        Ok(_) => Ok(()),
+        Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+            warn!(
+                "failed to send {} message to connection {}: channel full",
+                std::any::type_name_of_val(data),
+                cid
+            );
+            // If we can't send TunnelClosed due to backpressure, the connection is already broken
+            Err(anyhow!("channel full during cleanup"))
+        }
+        Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+            warn!(
+                "failed to send {} message to connection {}: channel closed",
+                std::any::type_name_of_val(data),
+                cid
+            );
+            Err(anyhow!("channel closed"))
+        }
+    }
 }

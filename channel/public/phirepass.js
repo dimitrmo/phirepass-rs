@@ -18,8 +18,10 @@ const fullscreenBtn = document.getElementById("fullscreen");
 
 const wsScheme = window.location.protocol === "https:" ? "wss" : "ws";
 
-const wsEndpoint = `${wsScheme}://${window.location.hostname}:8080`;
-const httpEndpoint = `${window.location.protocol}//${window.location.hostname}:8080`;
+// const wsEndpoint = `${wsScheme}://${window.location.hostname}:8080`;
+// const httpEndpoint = `${window.location.protocol}//${window.location.hostname}:8080`;
+const wsEndpoint = `wss://silver-space-umbrella-qx997r7j956299wp-8080.app.github.dev`;
+const httpEndpoint = `https://silver-space-umbrella-qx997r7j956299wp-8080.app.github.dev`;
 
 let term, fitAddon;
 let socket;

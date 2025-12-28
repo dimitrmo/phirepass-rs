@@ -54,7 +54,7 @@ pub(crate) struct Env {
     #[envconfig(from = "SSH_HOST", default = "0.0.0.0")]
     pub ssh_host: String,
 
-    #[envconfig(from = "SSH_PORT", default = "22")]
+    #[envconfig(from = "SSH_PORT", default = "12222")]
     pub ssh_port: u16,
 
     #[envconfig(from = "SSH_AUTH_METHOD", default = "credentials_prompt")]
