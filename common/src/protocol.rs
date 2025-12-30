@@ -4,8 +4,8 @@ use crate::stats::Stats;
 use rmp_serde::{decode, encode};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-#[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
 pub enum WebControlErrorType {
     Generic = 0,
     RequiresPassword = 100,
@@ -43,37 +43,44 @@ impl From<u8> for WebControlErrorType {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(tag = "type")]
+#[repr(u8)]
 pub enum WebControlMessage {
-    Heartbeat, // send from web to server to keep connection alive970705
+    Heartbeat = 10, // send from web to server to keep connection alive970705
     OpenTunnel {
         protocol: u8,
         target: String,
         username: Option<String>,
         password: Option<String>,
-    }, // open a tunnel to target ( by name ) - send form web to server
+    } = 20, // open a tunnel to target ( by name ) - send form web to server
     TunnelData {
         protocol: u8,
         target: String,
         data: Vec<u8>,
-    },
+    } = 21,
     TunnelOpened {
         protocol: u8,
         sid: u64,
-    },
+    } = 22,
     TunnelClosed {
         protocol: u8,
         sid: u64,
-    },
+    } = 23,
     Resize {
         target: String,
         cols: u32,
         rows: u32,
-    }, // resize a tunnel's pty
+    } = 30, // resize a tunnel's pty
     Error {
         kind: WebControlErrorType,
         message: String,
-    }, // error message
-    Ok, // ack
+    } = 40, // error message
+    Ok = 50, // ack
+}
+
+impl From<WebControlErrorType> for u8 {
+    fn from(value: WebControlErrorType) -> Self {
+        value as u8
+    }
 }
 
 pub fn generic_web_error(msg: impl Into<String>) -> WebControlMessage {
@@ -138,6 +145,8 @@ pub enum NodeControlMessage {
     Ok, // ack
 }
 
+/*
+
 pub const HEADER_LEN: usize = 5; // 1 + sizeof(u32)
 
 #[repr(u8)]
@@ -147,21 +156,13 @@ pub enum Protocol {
     SSH = 1,
 }
 
-impl Protocol {
-    pub fn from_u8(n: u8) -> Option<Self> {
-        match n {
-            0 => Some(Self::Control),
-            1 => Some(Self::SSH),
-            _ => None,
+impl From<u8> for Protocol {
+    fn from(value: u8) -> Self {
+        match value {
+            0 => Protocol::Control,
+            1 => Protocol::SSH,
+            _ => Protocol::Control, // default to Control
         }
-    }
-}
-
-impl TryFrom<u8> for Protocol {
-    type Error = ();
-
-    fn try_from(value: u8) -> anyhow::Result<Self, Self::Error> {
-        Protocol::from_u8(value).ok_or(())
     }
 }
 
@@ -190,7 +191,7 @@ impl Frame {
             return None;
         }
 
-        let protocol = Protocol::from_u8(data[0])?;
+        let protocol = Protocol::from(data[0]);
         let len = u32::from_be_bytes([data[1], data[2], data[3], data[4]]) as usize;
         if data.len() < HEADER_LEN + len {
             return None;
@@ -226,4 +227,176 @@ pub fn encode_web_control_to_frame(msg: &WebControlMessage) -> serde_json::Resul
 
 pub fn decode_web_control(payload: &[u8]) -> serde_json::Result<WebControlMessage> {
     serde_json::from_slice(payload)
+}
+
+*/
+
+// --------------------------------------------------------------------------------------------------------------------
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Frame {
+    pub version: u8,
+    pub encoding: FrameEncoding,
+    pub data: FrameData,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub enum FrameData {
+    Web(WebFrameData),
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[repr(u8)]
+pub enum FrameEncoding {
+    MsgPack = 1,
+    JSON = 0,
+}
+
+impl Frame {
+    pub fn encode(frame: Frame) -> anyhow::Result<Vec<u8>> {
+        let data = match &frame.data {
+            FrameData::Web(data) => match frame.encoding {
+                FrameEncoding::MsgPack => {
+                    let mut buf = Vec::new();
+                    encode::write(&mut buf, &data)?;
+                    (buf, data.code())
+                }
+                FrameEncoding::JSON => {
+                    let raw = serde_json::to_vec(&data)?;
+                    (raw, data.code())
+                }
+            },
+        };
+
+        let mut buf = Vec::with_capacity(8 + data.0.len());
+        buf.push(1u8); // version - 1
+        buf.push(frame.encoding as u8); // encoding - 1
+        buf.push(data.1); // kind - 1
+        buf.push(0u8); // reserved - 1
+        buf.extend_from_slice(&(data.0.len() as u32).to_be_bytes()); // data size - 4
+        buf.extend_from_slice(&data.0); // data payload - variable
+        Ok(buf)
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[repr(u8)]
+pub enum WebFrameData {
+    Heartbeat = 10, // send from web to server to keep connection alive
+
+    OpenTunnel {
+        protocol: u8,
+        target: String,
+        msg_id: Option<u64>, // custom web user supplied. easier to track responses and map them to requests
+        username: Option<String>, // optional username for auth
+        password: Option<String>, // optional password for auth
+    } = 20, // open a tunnel to target ( by name ) - send form web to server
+
+    TunnelOpened {
+        protocol: u8,
+        sid: u64,
+        msg_id: Option<u64>, // echo back the user supplied msg_id
+    } = 21, // notify web that tunnel is opened
+
+    TunnelData {
+        sid: u64,
+        data: Vec<u8>,
+        msg_id: Option<u64>, // echo back the user supplied msg_id
+    } = 22, // bidirectioanal tunnel data
+
+    TunnelClosed {
+        sid: u64,
+        msg_id: Option<u64>, // echo back the user supplied msg_id
+    } = 23, // notify web that tunnel is closed
+
+    SSHWindowResize {
+        sid: u64,
+        cols: u32,
+        rows: u32,
+    } = 30, // resize a tunnel's pty ( only for SSH tunnel ) - request sent from web to server
+
+    Error {
+        kind: WebControlErrorType,
+        message: String,
+        msg_id: Option<u64>, // echo back the user supplied msg_id
+    } = 50, // error message
+}
+
+impl WebFrameData {
+    pub fn encode(self) -> anyhow::Result<Vec<u8>> {
+        let frame = Frame {
+            version: 1,
+            encoding: FrameEncoding::JSON,
+            data: self.into(),
+        };
+
+        Frame::encode(frame)
+    }
+
+    pub fn code(&self) -> u8 {
+        match self {
+            WebFrameData::Heartbeat => 10,
+            WebFrameData::OpenTunnel { .. } => 20,
+            WebFrameData::TunnelOpened { .. } => 21,
+            WebFrameData::TunnelData { .. } => 22,
+            WebFrameData::TunnelClosed { .. } => 23,
+            WebFrameData::SSHWindowResize { .. } => 30,
+            WebFrameData::Error { .. } => 50,
+        }
+    }
+}
+
+impl Into<FrameData> for WebFrameData {
+    fn into(self) -> FrameData {
+        FrameData::Web(self)
+    }
+}
+
+impl Into<u8> for WebFrameData {
+    fn into(self) -> u8 {
+        self.code()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    // Note this useful idiom: importing names from outer (for mod tests) scope.
+    use super::*;
+
+    #[test]
+    fn test_frame_encode_heartbeat() {
+        let frame = Frame {
+            version: 1,
+            encoding: FrameEncoding::JSON,
+            data: FrameData::Web(WebFrameData::Heartbeat)
+        };
+
+        let encoded = Frame::encode(frame).unwrap();
+        assert!(!encoded.is_empty());
+        println!("Encoded heartbeat frame: {:?}", encoded);
+        assert_eq!(encoded.len(), 19); // 8 bytes header + 11 bytes payload
+    }
+
+    #[test]
+    fn test_webframe_encode_heartbeat() {
+        let web_frame = WebFrameData::Heartbeat;
+        let encoded = web_frame.encode().unwrap();
+        assert!(!encoded.is_empty());
+        println!("Encoded heartbeat web frame: {:?}", encoded);
+        assert_eq!(encoded.len(), 19); // 8 bytes header + 11 bytes payload
+    }
+
+    #[test]
+    fn test_frame_encode_heartbeat_msgpack() {
+        let frame = Frame {
+            version: 1,
+            encoding: FrameEncoding::MsgPack,
+            data: WebFrameData::Heartbeat.into(),
+        };
+
+        let encoded = Frame::encode(frame).unwrap();
+        assert!(!encoded.is_empty());
+        println!("Encoded heartbeat frame: {:?}", encoded);
+        assert_eq!(encoded.len(), 18); // 8 bytes header + 7 bytes payload
+    }
 }

@@ -386,7 +386,7 @@ async fn start_ssh_tunnel(
         );
 
         let opened_msg = NodeControlMessage::TunnelOpened {
-            protocol: Protocol::Control as u8,
+            protocol: Protocol::SSH as u8,
             cid: cid_for_opened.clone(),
             sid: session_id,
         };

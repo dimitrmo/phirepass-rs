@@ -95,7 +95,9 @@ async fn handle_web_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
                             }
                             WebControlMessage::TunnelOpened { .. } => {
                                 // TunnelOpened is sent from server to web client, not the other way
-                                warn!("received TunnelOpened from web client {id} - this should not happen");
+                                warn!(
+                                    "received TunnelOpened from web client {id} - this should not happen"
+                                );
                             }
                             WebControlMessage::TunnelClosed { .. } => {}
                             WebControlMessage::Error { .. } => {}

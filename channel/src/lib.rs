@@ -381,6 +381,7 @@ pub enum Protocol {
 impl From<u8> for Protocol {
     fn from(val: u8) -> Self {
         match val {
+            0 => Protocol::Control,
             1 => Protocol::SSH,
             _ => Protocol::Control,
         }
@@ -464,8 +465,7 @@ fn handle_control_frame(cb: &Function, payload: &[u8]) {
         }
     };
 
-    let serializer = serde_wasm_bindgen::Serializer::new()
-        .serialize_maps_as_objects(true);
+    let serializer = serde_wasm_bindgen::Serializer::new().serialize_maps_as_objects(true);
 
     let js_value = match control.serialize(&serializer) {
         Ok(msg) => msg,
@@ -480,6 +480,7 @@ fn handle_control_frame(cb: &Function, payload: &[u8]) {
 
 fn handle_ssh_frame(cb: &Function, payload: &[u8]) {
     let data = Uint8Array::from(payload);
+
     let _ = cb.call2(&JsValue::NULL, &JsValue::from(Protocol::SSH), &data.into());
 }
 

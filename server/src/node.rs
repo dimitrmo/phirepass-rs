@@ -153,10 +153,7 @@ async fn handle_tunnel_opened(state: &AppState, protocol: u8, cid: String, sid: 
 
     let connections = state.connections.read().await;
     if let Some(conn) = connections.get(&cid_as_ulid) {
-        let message = WebControlMessage::TunnelOpened {
-            protocol,
-            sid,
-        };
+        let message = WebControlMessage::TunnelOpened { protocol, sid };
 
         if let Ok(frame) = encode_web_control_to_frame(&message) {
             match conn.tx.send(frame).await {
