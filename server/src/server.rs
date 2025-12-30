@@ -25,6 +25,7 @@ pub async fn start(config: Env) -> anyhow::Result<()> {
         env: Arc::new(config),
         nodes: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         connections: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
+        tunnel_sessions: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
     };
 
     let conns_task = spawn_stats_connections_logger(&state, stats_refresh_interval);
