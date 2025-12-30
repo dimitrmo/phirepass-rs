@@ -14,8 +14,6 @@ use std::time::{Duration, SystemTime};
 use tokio::sync::mpsc;
 use ulid::Ulid;
 
-const VERSION: u8 = 1;
-
 pub(crate) async fn ws_web_handler(
     State(state): State<AppState>,
     ClientIp(ip): ClientIp,
@@ -205,7 +203,7 @@ async fn get_node_id_by_cid(
     };
 
     if !client_id.eq(&cid) {
-        anyhow::bail!("correct cid was not found for cid")
+        anyhow::bail!("correct cid was not found for sid {sid}")
     }
 
     Ok(*node_id)
@@ -222,7 +220,7 @@ async fn handle_web_tunnel_data(
     debug!("tunnel data received: {} bytes", data.len());
 
     let node_id = match get_node_id_by_cid(state, &cid, target, sid).await {
-        Ok(id) => id,
+        Ok(node_id) => node_id,
         Err(err) => {
             warn!("error getting node id: {err}");
             return;

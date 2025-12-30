@@ -5,12 +5,6 @@ use futures_util::stream::SplitStream;
 use futures_util::{SinkExt, StreamExt};
 use log::{debug, info, warn};
 use phirepass_common::env::Mode;
-use phirepass_common::protocol::{
-    NodeControlMessage, Protocol, WebControlMessage, decode_node_control, encode_node_control,
-    encode_web_control_to_frame, generic_web_error,
-};
-use phirepass_common::stats::Stats;
-use phirepass_common::time::now_millis;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -22,6 +16,8 @@ use tokio::sync::oneshot;
 use tokio_tungstenite::{
     MaybeTlsStream, WebSocketStream, connect_async, tungstenite::protocol::Message,
 };
+use phirepass_common::protocol::common::{Frame, FrameData, FrameEncoding};
+use phirepass_common::protocol::node::NodeFrameData;
 
 type WebSocketReader = SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>;
 
@@ -108,11 +104,17 @@ impl WebSocketConnection {
         let (stream, _) = connect_async(endpoint).await?;
         let (mut write, mut read) = stream.split();
 
-        let auth_frame = encode_node_control(&NodeControlMessage::Auth {
-            token: config.token.clone(),
-        })?;
+        let frame = Frame {
+            version: Frame::version(),
+            encoding: FrameEncoding::JSON,
+            data: NodeFrameData::Auth {
+                token: config.token.clone(),
+            }.into(),
+        };
 
-        write.send(Message::Binary(auth_frame.into())).await?;
+        write.send(Message::Binary(frame.to_bytes()?.into())).await?;
+
+        /*
 
         let (cid, version) = read_next_auth_response(&mut read).await?;
         info!("daemon authenticated successfully {cid} with server version {version}");
@@ -131,11 +133,31 @@ impl WebSocketConnection {
             }
         });
 
-        debug!("writer setup");
+        debug!("writer setup");*/
 
         let reader_task = tokio::spawn(async move {
             while let Some(msg) = read.next().await {
                 match msg {
+                    Ok(Message::Binary(data)) => {
+                        let frame = match Frame::decode(&data) {
+                            Ok(frame) => frame,
+                            Err(err) => {
+                                warn!("received malformed frame: {err}");
+                                break;
+                            }
+                        };
+
+                        let node_frame = match frame.data {
+                            FrameData::Node(data) => data,
+                            FrameData::Web(_) => {
+                                warn!("received web frame, but expected a node frame");
+                                break;
+                            }
+                        };
+
+                        info!("received node frame: {node_frame:?}");
+                    }
+                    /*
                     Ok(Message::Binary(data)) => match decode_node_control(&data) {
                         Ok(msg) => {
                             handle_control_from_server(
@@ -148,6 +170,7 @@ impl WebSocketConnection {
                         }
                         Err(err) => warn!("failed to code node control: {err}"),
                     },
+                     */
                     Ok(Message::Close(reason)) => {
                         match reason {
                             None => warn!("connection closed"),
@@ -165,7 +188,7 @@ impl WebSocketConnection {
         });
 
         debug!("reader setup");
-
+/*
         let heartbeat_task = tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(15));
             loop {
@@ -207,26 +230,24 @@ impl WebSocketConnection {
                 }
             }
         });
-
+*/
         info!("connected");
 
         tokio::select! {
-            _ = ping_task => warn!("ping task ended"),
-            _ = write_task => warn!("write task ended"),
+            // _ = ping_task => warn!("ping task ended"),
+            // _ = write_task => warn!("write task ended"),
             _ = reader_task => warn!("read task ended"),
-            _ = heartbeat_task => warn!("heartbeat task ended"),
+            // _ = heartbeat_task => warn!("heartbeat task ended"),
         }
 
         Ok(())
     }
 }
-
+/*
 async fn read_next_auth_response(read: &mut WebSocketReader) -> anyhow::Result<(String, String)> {
     if let Some(msg) = read_next_control(read).await? {
-        if let NodeControlMessage::AuthResponse {
-            cid,
-            version,
-            success,
+        if let NodeFrameData::AuthResponse {
+            ..
         } = msg
         {
             if success {
@@ -242,14 +263,13 @@ async fn read_next_auth_response(read: &mut WebSocketReader) -> anyhow::Result<(
     }
 }
 
-async fn read_next_control(
+async fn read_next_frame(
     read: &mut WebSocketReader,
-) -> anyhow::Result<Option<NodeControlMessage>> {
+) -> anyhow::Result<Option<NodeFrameData>> {
     while let Some(msg) = read.next().await {
         match msg {
-            Ok(Message::Binary(data)) => match decode_node_control(&data) {
-                Ok(msg) => return Ok(Some(msg)),
-                Err(err) => warn!("failed to decode node control: {err}"),
+            Ok(Message::Binary(data)) => {
+                //
             },
             Ok(Message::Close(reason)) => {
                 return Err(anyhow!("connection closed: {:?}", reason));
@@ -546,3 +566,4 @@ async fn send_ssh_data_to_connection(
         anyhow!("failed to send data to connection: {err}")
     })
 }
+*/

@@ -1,5 +1,5 @@
 use log::{debug, info, warn};
-use phirepass_common::protocol::{Frame, NodeControlMessage, Protocol, encode_node_control};
+// use phirepass_common::protocol::{Frame, NodeControlMessage, Protocol, encode_node_control};
 use russh::client::Handle;
 use russh::keys::*;
 use russh::*;
@@ -157,6 +157,7 @@ impl SSHConnection {
 
                     match msg {
                         ChannelMsg::Data { ref data } => {
+                            /*
                             let message = NodeControlMessage::Frame {
                                 frame: Frame::new(Protocol::SSH, data.to_vec()),
                                 cid: connection_id.clone(),
@@ -171,7 +172,9 @@ impl SSHConnection {
                                     }
                                 },
                                 Err(err) => warn!("failed to encode node control: {}", err),
-                            }
+                            }*/
+
+                            todo!();
                         }
                         ChannelMsg::Eof => {
                             debug!("ssh channel received EOF");

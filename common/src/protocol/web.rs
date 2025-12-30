@@ -1,4 +1,4 @@
-use crate::protocol::common::{Frame, FrameData, FrameEncoding, FrameError};
+use crate::protocol::common::{FrameData, FrameError};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -16,7 +16,6 @@ pub enum WebFrameData {
 
     TunnelOpened {
         protocol: u8,
-        // cid
         sid: u64,
         msg_id: Option<u64>, // echo back the user supplied msg_id
     } = 21, // notify web that tunnel is opened
@@ -34,6 +33,7 @@ pub enum WebFrameData {
     } = 23, // notify web that tunnel is closed
 
     SSHWindowResize {
+        // send by client
         target: String,
         sid: u64,
         cols: u32,

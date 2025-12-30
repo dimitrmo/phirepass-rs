@@ -9,14 +9,13 @@ use futures_util::{SinkExt, StreamExt};
 use log::{debug, info, warn};
 use phirepass_common::protocol::common::{Frame, FrameData, FrameEncoding};
 use phirepass_common::protocol::node::NodeFrameData;
+use phirepass_common::protocol::web::WebFrameData;
 use phirepass_common::stats::Stats;
 use std::net::IpAddr;
 use std::str::FromStr;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
-use tokio::sync::mpsc::error::SendError;
 use ulid::Ulid;
-use phirepass_common::protocol::web::WebFrameData;
 
 pub(crate) async fn ws_node_handler(
     State(state): State<AppState>,
@@ -79,10 +78,13 @@ async fn handle_node_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
                 let frame = match Frame::decode(&data) {
                     Ok(frame) => frame,
                     Err(err) => {
-                        warn!("received malformed frame: {err}");
+                        warn!("received malformed frame 23: {err}");
+                        warn!("received frame: {data:?}");
                         break;
                     }
                 };
+
+                debug!("received frame: {frame:?}");
 
                 let node_frame = match frame.data {
                     FrameData::Node(data) => data,
@@ -96,11 +98,11 @@ async fn handle_node_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
                     NodeFrameData::Heartbeat { stats } => {
                         update_node_heartbeat(&state, &id, Some(stats)).await;
                     }
-                    NodeFrameData::Auth { token } => {
+                    NodeFrameData::Auth { token: _ } => {
                         info!("node {id} is asking to be authenticated");
 
                         let resp = NodeFrameData::AuthResponse {
-                            nid: id.to_string(),
+                            node_id: id.to_string(),
                             success: true,
                             version: env::version().to_string(),
                         };
@@ -128,10 +130,11 @@ async fn handle_node_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
                         sid,
                         msg_id,
                     } => {
-                        handle_tunnel_opened(&state, protocol, cid.as_str(), sid, &id, msg_id).await;
+                        handle_tunnel_opened(&state, protocol, cid.as_str(), sid, &id, msg_id)
+                            .await;
                     }
-                    NodeFrameData::Frame { frame, cid } => {
-
+                    NodeFrameData::Frame { frame, sid } => {
+                        handle_frame_response(&state, frame, sid, &id).await;
                     }
                     _ => todo!(),
                 }
@@ -146,9 +149,7 @@ async fn handle_node_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
                         //
                     }
                     NodeControlMessage::Frame { frame, cid } => {
-                        // frames are sent by daemon directly to connections via server
-                        // TODO: check if frame comes from authenticated daemons
-                        handle_frame_response(&state, frame, id.to_string(), cid).await;
+                        //
                     }
                     NodeControlMessage::Ping { sent_at } => {
                         //
@@ -176,6 +177,55 @@ async fn handle_node_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
 
     disconnect_node(&state, id).await;
     write_task.abort();
+}
+
+async fn get_connection_id_by_sid(
+    state: &AppState,
+    sid: u64,
+    target: &Ulid,
+) -> anyhow::Result<Ulid> {
+    let key = format!("{}-{}", target, sid);
+    let sessions = state.tunnel_sessions.read().await;
+    let (client_id, node_id) = match sessions.get(&key) {
+        Some((client_id, node_id)) => (client_id, node_id),
+        _ => {
+            anyhow::bail!("node not found for session id {sid}")
+        }
+    };
+
+    if !node_id.eq(&target) {
+        anyhow::bail!("correct node_id was not found for sid {sid}")
+    }
+
+    Ok(*client_id)
+}
+
+async fn handle_frame_response(state: &AppState, frame: WebFrameData, sid: u64, node_id: &Ulid) {
+    debug!("web frame response received");
+
+    let client_id = match get_connection_id_by_sid(state, sid, node_id).await {
+        Ok(client_id) => client_id,
+        Err(err) => {
+            warn!("error getting client id: {err}");
+            return;
+        }
+    };
+
+    let tx = {
+        let connections = state.connections.read().await;
+        connections.get(&client_id).map(|info| info.tx.clone())
+    };
+
+    let Some(tx) = tx else {
+        warn!("tx for client not found {node_id}");
+        return;
+    };
+
+    if tx.send(frame).await.is_err() {
+        warn!("failed to forward tunnel data to node {node_id}");
+    } else {
+        debug!("forwarded tunnel data to node {node_id}");
+    }
 }
 
 /*
@@ -219,13 +269,17 @@ async fn handle_tunnel_opened(
         tunnel_sessions.insert(key, (cid, node_id.clone()));
     }
 
-    match connection.tx.send(WebFrameData::TunnelOpened {
-        protocol,
-        sid,
-        msg_id,
-    }).await {
+    match connection
+        .tx
+        .send(WebFrameData::TunnelOpened {
+            protocol,
+            sid,
+            msg_id,
+        })
+        .await
+    {
         Ok(..) => info!("tunnel opened notification sent to web client {cid}"),
-        Err(err) => warn!("failed to send tunnel opened to client {cid}: {err}")
+        Err(err) => warn!("failed to send tunnel opened to client {cid}: {err}"),
     }
 }
 

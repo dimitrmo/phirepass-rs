@@ -14,7 +14,7 @@ pub enum NodeFrameData {
     } = 10,
 
     AuthResponse {
-        nid: String,
+        node_id: String,
         success: bool,
         version: String,
     } = 11,
@@ -57,7 +57,7 @@ pub enum NodeFrameData {
 
     Frame {
         frame: WebFrameData,
-        cid: String,
+        sid: u64,
     } = 50,
 
     ConnectionDisconnect {
