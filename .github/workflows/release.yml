@@ -65,10 +65,10 @@ jobs:
         strategy:
             matrix:
                 images: [
-                    { image: "dimitrmok/phirepass-server", binary: "server", folder: "server" },
-                    { image: "dimitrmok/phirepass-daemon", binary: "daemon", folder: "daemon" },
-                    { image: "dimitrmok/phirepass-daemon-sandbox", binary: "daemon", folder: "daemon/sandbox" },
-                    { image: "dimitrmok/phirepass-sshd", binary: "daemon", folder: "daemon/sshd" },
+                    { image: "dimitrmok/phirepass-server", binary: "server", file: "server/Dockerfile" },
+                    { image: "dimitrmok/phirepass-daemon", binary: "daemon", file: "daemon/Dockerfile" },
+                    { image: "dimitrmok/phirepass-daemon-sandbox", binary: "daemon", file: "daemon/sandbox/Dockerfile" },
+                    # { image: "dimitrmok/phirepass-sshd", binary: "daemon", file: "daemon/sshd/Dockerfile" },
                 ]
         steps:
             - name: Checkout
@@ -118,11 +118,12 @@ jobs:
               id: build-and-push
               uses: docker/build-push-action@v6
               with:
-                  context: ${{ matrix.images.folder }}
+                  context: .
                   platforms: linux/amd64,linux/arm64
                   push: ${{ github.event_name != 'pull_request' }}
                   tags: ${{ matrix.images.image }}:${{ steps.verison.outputs.next_version }},${{ matrix.images.image }}:latest
                   labels: ${{ steps.meta.outputs.labels }}
+                  file: ${{ matrix.images.file }}
                   outputs: "type=registry"
                   build-args: |
                       APP_NAME=${{ matrix.images.binary }}
