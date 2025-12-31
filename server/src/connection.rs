@@ -1,6 +1,6 @@
 use phirepass_common::node::Node;
-use phirepass_common::protocol::{Frame, NodeControlMessage};
-use phirepass_common::stats::Stats;
+use phirepass_common::protocol::node::NodeFrameData;
+use phirepass_common::protocol::web::WebFrameData;
 use serde::Serialize;
 use std::net::IpAddr;
 use std::time::SystemTime;
@@ -8,21 +8,20 @@ use tokio::sync::mpsc::Sender;
 
 #[derive(Clone)]
 pub(crate) struct WebConnection {
-    pub(crate) node: Node,
-    pub(crate) tx: Sender<Frame>,
+    pub(crate) connected_at: SystemTime,
+    pub(crate) last_heartbeat: SystemTime,
+    pub(crate) ip: IpAddr,
+    pub(crate) tx: Sender<WebFrameData>,
 }
 
 impl WebConnection {
-    pub(crate) fn new(ip: IpAddr, tx: Sender<Frame>) -> Self {
+    pub(crate) fn new(ip: IpAddr, tx: Sender<WebFrameData>) -> Self {
         let now = SystemTime::now();
 
         Self {
-            node: Node {
-                connected_at: now,
-                last_heartbeat: now,
-                ip,
-                last_stats: None,
-            },
+            connected_at: now,
+            last_heartbeat: now,
+            ip,
             tx,
         }
     }
@@ -32,11 +31,11 @@ impl WebConnection {
 pub(crate) struct NodeConnection {
     pub(crate) node: Node,
     #[serde(skip_serializing)]
-    pub(crate) tx: Sender<NodeControlMessage>,
+    pub(crate) tx: Sender<NodeFrameData>,
 }
 
 impl NodeConnection {
-    pub(crate) fn new(ip: IpAddr, tx: Sender<NodeControlMessage>) -> Self {
+    pub(crate) fn new(ip: IpAddr, tx: Sender<NodeFrameData>) -> Self {
         let now = SystemTime::now();
 
         Self {
@@ -44,7 +43,7 @@ impl NodeConnection {
                 connected_at: now,
                 last_heartbeat: now,
                 ip,
-                last_stats: Stats::gather(),
+                last_stats: None,
             },
             tx,
         }

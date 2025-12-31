@@ -25,11 +25,12 @@ pub async fn start(config: Env) -> anyhow::Result<()> {
         env: Arc::new(config),
         nodes: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         connections: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
+        tunnel_sessions: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
     };
 
-    let conns_task = spawn_stats_connections_logger(&state, stats_refresh_interval);
+    let conns_task = spawn_stats_connections_logger(&state, stats_refresh_interval as u64);
     let http_task = start_http_server(state, shutdown_tx.subscribe());
-    let stats_task = spawn_stats_logger(stats_refresh_interval, shutdown_tx.subscribe());
+    let stats_task = spawn_stats_logger(stats_refresh_interval as u64, shutdown_tx.subscribe());
 
     let shutdown_signal = async {
         if let Err(err) = signal::ctrl_c().await {
@@ -88,15 +89,11 @@ fn start_http_server(
     })
 }
 
-fn spawn_stats_connections_logger(
-    state: &AppState,
-    stats_refresh_interval: u16,
-) -> tokio::task::JoinHandle<()> {
+fn spawn_stats_connections_logger(state: &AppState, interval: u64) -> tokio::task::JoinHandle<()> {
     let connections = state.connections.clone();
     let nodes = state.nodes.clone();
     tokio::spawn(async move {
-        let mut interval =
-            tokio::time::interval(Duration::from_secs(stats_refresh_interval as u64));
+        let mut interval = tokio::time::interval(Duration::from_secs(interval));
         loop {
             interval.tick().await;
             let connections = connections.read().await;
@@ -108,12 +105,11 @@ fn spawn_stats_connections_logger(
 }
 
 fn spawn_stats_logger(
-    stats_refresh_interval: u16,
+    interval: u64,
     mut shutdown: broadcast::Receiver<()>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        let mut interval =
-            tokio::time::interval(Duration::from_secs(stats_refresh_interval as u64));
+        let mut interval = tokio::time::interval(Duration::from_secs(interval));
         loop {
             tokio::select! {
                 _ = interval.tick() => {

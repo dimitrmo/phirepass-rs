@@ -1,8 +1,8 @@
 #!/usr/bin/env sh
 set -eu
 
-: "${SSH_USER:=sshuser}"
-: "${SSH_PASSWORD:=changeme}"
+: "${SSH_USER:=phire}"
+: "${SSH_PASSWORD:=pass}"
 : "${LANG:=en_US.UTF-8}"
 : "${LC_ALL:=$LANG}"
 

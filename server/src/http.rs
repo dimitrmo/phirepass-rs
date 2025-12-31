@@ -97,13 +97,13 @@ pub async fn list_connections(State(state): State<AppState>) -> impl IntoRespons
         .map(|(id, info)| {
             json!({
                 "id": id.to_string(),
-                "ip": info.node.ip.to_string(),
+                "ip": info.ip.to_string(),
                 "connected_for_secs": now
-                    .duration_since(info.node.connected_at)
+                    .duration_since(info.connected_at)
                     .unwrap()
                     .as_secs(),
                 "since_last_heartbeat_secs": now
-                    .duration_since(info.node.last_heartbeat)
+                    .duration_since(info.last_heartbeat)
                     .unwrap()
                     .as_secs(),
             })

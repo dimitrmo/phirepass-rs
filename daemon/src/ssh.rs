@@ -1,6 +1,8 @@
 use log::{debug, info, warn};
-use phirepass_common::protocol::{Frame, NodeControlMessage, Protocol, encode_node_control};
-use russh::client::{Handle, Msg};
+use phirepass_common::protocol::common::Frame;
+use phirepass_common::protocol::node::NodeFrameData;
+use phirepass_common::protocol::web::WebFrameData;
+use russh::client::Handle;
 use russh::keys::*;
 use russh::*;
 use std::borrow::Cow;
@@ -17,10 +19,10 @@ pub(crate) enum SSHCommand {
 }
 
 pub(crate) struct SSHSessionHandle {
-    pub id: u64,
-    pub stop: Option<oneshot::Sender<()>>,
+    pub id: u32,
     pub join: JoinHandle<()>,
     pub stdin: Sender<SSHCommand>,
+    pub stop: Option<oneshot::Sender<()>>,
 }
 
 impl SSHSessionHandle {
@@ -31,6 +33,19 @@ impl SSHSessionHandle {
         if let Err(err) = self.join.await {
             warn!("ssh session join error: {err}");
         }
+    }
+}
+
+struct SSHClient {}
+
+impl client::Handler for SSHClient {
+    type Error = russh::Error;
+
+    async fn check_server_key(
+        &mut self,
+        _server_public_key: &PublicKey,
+    ) -> anyhow::Result<bool, Self::Error> {
+        Ok(true)
     }
 }
 
@@ -47,52 +62,16 @@ pub(crate) struct SSHConfig {
 }
 
 pub(crate) struct SSHConnection {
-    cid: String,
-    sender: Sender<Vec<u8>>,
-}
-
-impl client::Handler for SSHConnection {
-    type Error = russh::Error;
-
-    async fn check_server_key(
-        &mut self,
-        _server_public_key: &PublicKey,
-    ) -> anyhow::Result<bool, Self::Error> {
-        Ok(true)
-    }
-
-    async fn data(
-        &mut self,
-        _channel: ChannelId,
-        data: &[u8],
-        _session: &mut client::Session,
-    ) -> Result<(), Self::Error> {
-        let message = NodeControlMessage::Frame {
-            frame: Frame::new(Protocol::SSH, data.to_vec()),
-            cid: self.cid.clone(),
-        };
-
-        match encode_node_control(&message) {
-            Ok(result) => match self.sender.send(result).await {
-                Ok(_) => debug!("ssh response sent back to {}", self.cid),
-                Err(err) => {
-                    warn!("failed to send: {err}; closing ssh channel");
-                }
-            },
-            Err(err) => warn!("failed to encode node control: {}", err),
-        }
-
-        Ok(())
-    }
+    config: SSHConfig,
 }
 
 impl SSHConnection {
-    async fn create_client(
-        cid: String,
-        config: SSHConfig,
-        sender: Sender<Vec<u8>>,
-    ) -> anyhow::Result<Handle<Self>> {
-        let ssh_config: SSHConfig = config.clone();
+    pub fn new(config: SSHConfig) -> Self {
+        Self { config }
+    }
+
+    async fn create_client(&self) -> anyhow::Result<Handle<SSHClient>> {
+        let ssh_config: SSHConfig = self.config.clone();
 
         let config = Arc::new(client::Config {
             inactivity_timeout: None,
@@ -106,11 +85,7 @@ impl SSHConnection {
             ..<_>::default()
         });
 
-        let sh = Self {
-            cid,
-            // config: ssh_config.clone(),
-            sender,
-        };
+        let sh = SSHClient {};
 
         let mut client_handler =
             client::connect(config, (ssh_config.host, ssh_config.port), sh).await?;
@@ -129,12 +104,29 @@ impl SSHConnection {
         Ok(client_handler)
     }
 
-    async fn listen(
+    pub async fn connect(
+        &self,
+        node_id: String,
         cid: String,
-        channel: &Channel<Msg>,
+        sid: u32,
+        tx: &Sender<Frame>,
         mut cmd_rx: Receiver<SSHCommand>,
         mut shutdown_rx: oneshot::Receiver<()>,
-    ) {
+    ) -> anyhow::Result<()> {
+        debug!("connecting ssh...");
+
+        let client = self.create_client().await?;
+
+        debug!("ssh connected");
+
+        let mut channel = client.channel_open_session().await?;
+
+        // Allocate a PTY so bash runs in interactive mode and emits a prompt.
+        channel
+            .request_pty(true, "xterm-256color", 80, 24, 0, 0, &[])
+            .await?;
+        channel.request_shell(true).await?;
+
         loop {
             tokio::select! {
                 biased;
@@ -145,7 +137,6 @@ impl SSHConnection {
                 Some(cmd) = cmd_rx.recv() => {
                     match cmd {
                         SSHCommand::Data(buf) => {
-                            // any SSHCommand::Data received from the web user is forwared to the SSH channel
                             let bytes = Cursor::new(buf);
                             if let Err(err) = channel.data(bytes).await {
                                 warn!("failed to send data to ssh channel {cid}: {err}");
@@ -153,48 +144,66 @@ impl SSHConnection {
                             }
                         }
                         SSHCommand::Resize { cols, rows } => {
-                            // web user sends a resize request
                             if let Err(err) = channel.window_change(cols, rows, 0, 0).await {
                                 warn!("failed to resize ssh channel {cid}: {err}");
                             }
                         }
                     }
                 }
+                msg = channel.wait() => {
+                    let Some(msg) = msg else {
+                        info!("ssh channel closed for {cid}");
+                        break;
+                    };
+
+                    match msg {
+                        ChannelMsg::Data { ref data } => {
+                            if let Err(err) = tx
+                                .send(
+                                    NodeFrameData::WebFrame {
+                                        frame: WebFrameData::TunnelData {
+                                            node_id: node_id.clone(),
+                                            sid,
+                                            data: data.to_vec(),
+                                        },
+                                        sid,
+                                    }
+                                    .into(),
+                                )
+                                .await
+                            {
+                                warn!("failed to send frame: {err}");
+                            } else {
+                                debug!("frame response sent");
+                            }
+                        }
+                        ChannelMsg::Eof => {
+                            debug!("ssh channel received EOF");
+                            break;
+                        }
+                        ChannelMsg::ExitStatus { exit_status } => {
+                            warn!("ssh channel exited with status {}", exit_status);
+                            if let Err(err) = channel.eof().await {
+                                warn!("failed to send EOF to ssh channel: {err}");
+                            }
+
+                            break;
+                        }
+                        ChannelMsg::Close { .. } => {
+                            debug!("ssh channel closed");
+                            break;
+                        }
+                        _ => {}
+                    }
+                }
             }
         }
-    }
-
-    pub async fn connect(
-        cid: String,
-        config: SSHConfig,
-        tx: &Sender<Vec<u8>>,
-        cmd_rx: Receiver<SSHCommand>,
-        shutdown_rx: oneshot::Receiver<()>,
-    ) -> anyhow::Result<()> {
-        debug!("connecting ssh...");
-
-        let session = Self::create_client(cid.clone(), config, tx.clone()).await?;
-
-        debug!("ssh connected");
-
-        let channel = session.channel_open_session().await?;
-
-        // Allocate a PTY so bash runs in interactive mode and emits a prompt.
-        channel
-            .request_pty(true, "xterm-256color", 80, 24, 0, 0, &[])
-            .await?;
-        channel.request_shell(true).await?;
-
-        let connection_id = cid.clone();
-        debug!("ssh ready");
-
-        Self::listen(cid, &channel, cmd_rx, shutdown_rx).await;
 
         if let Err(err) = channel.close().await {
-            warn!("failed to close ssh channel for {connection_id}: {err}");
+            warn!("failed to close ssh channel for {cid}: {err}");
         }
 
-        session
+        client
             .disconnect(Disconnect::ByApplication, "", "English")
             .await?;
 
