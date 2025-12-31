@@ -1,5 +1,4 @@
 import init, {
-    Protocol,
     ErrorType,
     Channel as PhirepassChannel,
 } from "/pkg/debug/phirepass-channel.js";
