@@ -7,7 +7,7 @@ use axum::http::HeaderMap;
 use axum_client_ip::ClientIp;
 use futures_util::{SinkExt, StreamExt};
 use log::{debug, info, warn};
-use phirepass_common::protocol::common::{Frame, FrameData, FrameEncoding};
+use phirepass_common::protocol::common::{Frame, FrameData};
 use phirepass_common::protocol::node::NodeFrameData;
 use phirepass_common::protocol::web::WebFrameData;
 use phirepass_common::stats::Stats;
@@ -43,12 +43,7 @@ async fn handle_node_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
 
     let write_task = tokio::spawn(async move {
         while let Some(node_frame) = rx.recv().await {
-            let frame = Frame {
-                version: Frame::version(),
-                encoding: FrameEncoding::JSON,
-                data: node_frame.into(),
-            };
-
+            let frame: Frame = node_frame.into();
             let frame = match frame.to_bytes() {
                 Ok(frame) => frame,
                 Err(err) => {
@@ -76,8 +71,9 @@ async fn handle_node_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
 
         match msg {
             Message::Close(reason) => {
-                // todo handle close
                 warn!("node connection close message: {:?}", reason);
+                disconnect_node(&state, id).await;
+                return;
             }
             Message::Binary(data) => {
                 let frame = match Frame::decode(&data) {
@@ -118,6 +114,7 @@ async fn handle_node_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
                             info!("auth response sent {id}");
                         }
                     }
+                    // ping from daemon
                     NodeFrameData::Ping { sent_at } => {
                         let now = now_millis();
                         let latency = now.saturating_sub(sent_at);
@@ -129,6 +126,7 @@ async fn handle_node_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
                             info!("pong response to node {id} sent");
                         }
                     }
+                    // daemon notified server that a tunnel has been opened
                     NodeFrameData::TunnelOpened {
                         protocol,
                         cid,
@@ -138,41 +136,12 @@ async fn handle_node_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
                         handle_tunnel_opened(&state, protocol, cid.as_str(), sid, &id, msg_id)
                             .await;
                     }
-                    NodeFrameData::Frame { frame, sid } => {
+                    // daemon notified server with data for web
+                    NodeFrameData::WebFrame { frame, sid } => {
                         handle_frame_response(&state, frame, sid, &id).await;
                     }
-                    _ => todo!(),
+                    o => warn!("unhandled node frame: {o:?}"),
                 }
-            }
-            /*
-            Message::Binary(data) => match decode_node_control(&data) {
-                Ok(msg) => match msg {
-                    NodeControlMessage::Auth { .. } => {
-                        //
-                    }
-                    NodeControlMessage::Heartbeat { stats } => {
-                        //
-                    }
-                    NodeControlMessage::Frame { frame, cid } => {
-                        //
-                    }
-                    NodeControlMessage::Ping { sent_at } => {
-                        //
-                    }
-                    NodeControlMessage::TunnelOpened { protocol, cid, sid } => {
-                        //
-                    }
-                    _ => {}
-                },
-                Err(err) => warn!("failed to decode node control: {}", err),
-            },*/
-            Message::Close(err) => {
-                match err {
-                    None => warn!("node {id} disconnected"),
-                    Some(err) => warn!("node {id} disconnected: {:?}", err),
-                }
-                disconnect_node(&state, id).await;
-                return;
             }
             _ => {
                 info!("unknown message: {:?}", msg);
@@ -186,7 +155,7 @@ async fn handle_node_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
 
 async fn get_connection_id_by_sid(
     state: &AppState,
-    sid: u64,
+    sid: u32,
     target: &Ulid,
 ) -> anyhow::Result<Ulid> {
     let key = format!("{}-{}", target, sid);
@@ -205,7 +174,7 @@ async fn get_connection_id_by_sid(
     Ok(*client_id)
 }
 
-async fn handle_frame_response(state: &AppState, frame: WebFrameData, sid: u64, node_id: &Ulid) {
+async fn handle_frame_response(state: &AppState, frame: WebFrameData, sid: u32, node_id: &Ulid) {
     debug!("web frame response received");
 
     let client_id = match get_connection_id_by_sid(state, sid, node_id).await {
@@ -226,10 +195,9 @@ async fn handle_frame_response(state: &AppState, frame: WebFrameData, sid: u64, 
         return;
     };
 
-    if tx.send(frame).await.is_err() {
-        warn!("failed to forward tunnel data to node {node_id}");
-    } else {
-        debug!("forwarded tunnel data to node {node_id}");
+    match tx.send(frame).await {
+        Ok(_) => debug!("forwarded tunnel data to node {node_id}"),
+        Err(err) => warn!("failed to forward tunnel data to node {node_id}: {err}"),
     }
 }
 
@@ -255,9 +223,9 @@ async fn handle_tunnel_opened(
     state: &AppState,
     protocol: u8,
     cid: &str,
-    sid: u64,
+    sid: u32,
     node_id: &Ulid,
-    msg_id: Option<u64>,
+    msg_id: Option<u32>,
 ) {
     debug!("handling tunnel opened for connection {cid} with session {sid}");
     let cid = Ulid::from_str(cid).unwrap();

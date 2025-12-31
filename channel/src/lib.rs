@@ -1,6 +1,8 @@
 include!(concat!(env!("OUT_DIR"), "/version.rs"));
 
 use gloo_timers::callback::Interval;
+use phirepass_common::protocol::common::Frame;
+use phirepass_common::protocol::web::WebFrameData;
 use serde::{Deserialize, Serialize};
 use std::{cell::RefCell, rc::Rc};
 use wasm_bindgen::prelude::*;
@@ -185,17 +187,11 @@ impl Channel {
             interval_as_millis = 15_000;
         }
 
-        if let Ok(raw) = serde_json::to_vec(&HeartbeatMessage::new()) {
-            self.send_raw(Protocol::Control as u8, raw);
-        }
-
-        let Ok(raw) = serde_json::to_vec(&HeartbeatMessage::new()) else {
-            return;
-        };
+        self.send_frame_data(WebFrameData::Heartbeat {});
 
         let channel = self.clone();
         let interval = Interval::new(interval_as_millis, move || {
-            channel.send_raw(Protocol::Control as u8, raw.clone());
+            channel.send_frame_data(WebFrameData::Heartbeat {});
         });
 
         self.state.borrow_mut().heartbeat = Some(interval);
@@ -206,46 +202,44 @@ impl Channel {
         node_id: String,
         username: Option<String>,
         password: Option<String>,
+        msg_id: Option<u32>,
     ) {
         if !self.is_open() {
             return;
         }
 
-        if let Ok(raw) = serde_json::to_vec(&OpenTunnelMessage::new(
-            Protocol::SSH as u8,
+        self.send_frame_data(WebFrameData::OpenTunnel {
+            protocol: Protocol::SSH as u8,
             node_id,
             username,
             password,
-        )) {
-            self.send_raw(Protocol::Control as u8, raw);
-        }
+            msg_id,
+        });
     }
 
-    pub fn send_terminal_resize(&self, node_id: String, cols: u32, rows: u32) {
+    pub fn send_terminal_resize(&self, node_id: String, sid: u32, cols: u32, rows: u32) {
         if !self.is_open() {
             return;
         }
 
-        if let Ok(raw) = serde_json::to_vec(&ResizeTerminal::new(node_id, cols, rows)) {
-            self.send_raw(Protocol::Control as u8, raw);
-        }
-    }
-
-    pub fn send_tunnel_data(&self, node_id: String, data: String) {
-        if !self.is_open() {
-            return;
-        }
-
-        if let Ok(raw) = serde_json::to_vec(&TunnelData::new(
-            Protocol::SSH as u8,
+        self.send_frame_data(WebFrameData::SSHWindowResize {
             node_id,
-            data.into_bytes(),
-        )) {
-            // console_warn!("tunnel data sent");
-            // Tunnel data must travel inside a control frame; the server will
-            // unwrap and forward the payload to the SSH tunnel.
-            self.send_raw(Protocol::Control as u8, raw);
+            sid,
+            cols,
+            rows,
+        });
+    }
+
+    pub fn send_tunnel_data(&self, node_id: String, sid: u32, data: String) {
+        if !self.is_open() {
+            return;
         }
+
+        self.send_frame_data(WebFrameData::TunnelData {
+            node_id,
+            sid,
+            data: data.into_bytes(),
+        });
     }
 
     pub fn is_open(&self) -> bool {
@@ -256,17 +250,24 @@ impl Channel {
         }
     }
 
-    fn send_raw(&self, protocol: u8, message: Vec<u8>) {
-        let frame = encode_frame(protocol, &message);
-
+    fn send_frame_data(&self, data: WebFrameData) {
         if !self.is_open() {
             console_warn!("Cannot send raw message: socket not open");
             return;
         }
 
-        if let Some(socket) = self.state.borrow().socket.as_ref() {
-            if let Err(err) = socket.send_with_u8_array(&frame) {
-                console_warn!("{}", format!("Failed to send raw frame: {err:?}"));
+        let frame: Frame = data.into();
+
+        match frame.to_bytes() {
+            Ok(raw) => {
+                if let Some(socket) = self.state.borrow().socket.as_ref() {
+                    if let Err(err) = socket.send_with_u8_array(raw.as_slice()) {
+                        console_warn!("{}", format!("Failed to send raw frame: {err:?}"));
+                    }
+                }
+            }
+            Err(err) => {
+                console_warn!("Cannot send frame data: {err}");
             }
         }
     }
@@ -275,89 +276,6 @@ impl Channel {
         self.stop_heartbeat();
         if let Some(socket) = self.state.borrow_mut().socket.take() {
             let _ = socket.close();
-        }
-    }
-}
-
-#[derive(Serialize)]
-struct HeartbeatMessage {
-    #[serde(rename = "type")]
-    msg_type: String,
-}
-
-impl HeartbeatMessage {
-    fn new() -> Self {
-        HeartbeatMessage {
-            msg_type: "Heartbeat".to_string(),
-        }
-    }
-}
-
-#[derive(Serialize)]
-struct OpenTunnelMessage {
-    #[serde(rename = "type")]
-    msg_type: String,
-    protocol: u8,
-    target: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    username: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    password: Option<String>,
-}
-
-impl OpenTunnelMessage {
-    fn new(
-        protocol: u8,
-        target: String,
-        username: Option<String>,
-        password: Option<String>,
-    ) -> Self {
-        OpenTunnelMessage {
-            msg_type: "OpenTunnel".to_string(),
-            protocol,
-            target,
-            username,
-            password,
-        }
-    }
-}
-
-#[derive(Serialize)]
-struct ResizeTerminal {
-    #[serde(rename = "type")]
-    msg_type: String,
-    target: String,
-    cols: u32,
-    rows: u32,
-}
-
-impl ResizeTerminal {
-    fn new(target: String, cols: u32, rows: u32) -> Self {
-        ResizeTerminal {
-            msg_type: "Resize".to_string(),
-            target,
-            cols,
-            rows,
-        }
-    }
-}
-
-#[derive(Serialize)]
-struct TunnelData {
-    #[serde(rename = "type")]
-    msg_type: String,
-    protocol: u8,
-    target: String,
-    data: Vec<u8>,
-}
-
-impl TunnelData {
-    fn new(protocol: u8, target: String, data: Vec<u8>) -> Self {
-        TunnelData {
-            msg_type: "TunnelData".to_string(),
-            protocol,
-            target,
-            data,
         }
     }
 }
@@ -371,45 +289,21 @@ pub enum ErrorType {
     RequiresUsernamePassword = 110,
 }
 
+#[repr(u8)]
 #[wasm_bindgen]
 #[derive(Serialize, Deserialize)]
 pub enum Protocol {
-    Control = 0,
-    SSH = 1,
+    SSH = 0,
 }
 
-impl From<u8> for Protocol {
-    fn from(val: u8) -> Self {
-        match val {
-            0 => Protocol::Control,
-            1 => Protocol::SSH,
-            _ => Protocol::Control,
+impl TryFrom<u8> for Protocol {
+    type Error = &'static str;
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(Protocol::SSH),
+            _ => Err("Unknown protocol variant"),
         }
     }
-}
-
-fn encode_frame(protocol: u8, payload: &[u8]) -> Vec<u8> {
-    let mut buffer = Vec::with_capacity(5 + payload.len());
-    buffer.push(protocol);
-    buffer.extend_from_slice(&(payload.len() as u32).to_be_bytes());
-    buffer.extend_from_slice(payload);
-    buffer
-}
-
-fn decode_frame(bytes: &[u8]) -> Option<(u8, Vec<u8>)> {
-    if bytes.len() < 5 {
-        console_warn!("Frame is too short");
-        return None;
-    }
-
-    let protocol = bytes[0];
-    let length = u32::from_be_bytes([bytes[1], bytes[2], bytes[3], bytes[4]]) as usize;
-    if bytes.len() < 5 + length {
-        console_warn!("Invalid frame format");
-        return None;
-    }
-
-    Some((protocol, bytes[5..5 + length].to_vec()))
 }
 
 fn handle_message(cb: &Function, event: &MessageEvent) {
@@ -421,7 +315,7 @@ fn handle_message(cb: &Function, event: &MessageEvent) {
     let buffer: web_sys::js_sys::ArrayBuffer = match event.data().dyn_into() {
         Ok(buf) => buf,
         Err(err) => {
-            console_warn!("{:?}", err);
+            console_warn!("error converting to array buffer: {err:?}");
             return;
         }
     };
@@ -430,58 +324,25 @@ fn handle_message(cb: &Function, event: &MessageEvent) {
     let mut data = vec![0u8; view.length() as usize];
     view.copy_to(&mut data);
 
-    let (protocol, payload) = match decode_frame(&data) {
-        Some(parts) => parts,
-        None => {
-            console_warn!("received invalid frame");
-            return;
-        }
-    };
-
-    match Protocol::from(protocol) {
-        Protocol::Control => {
-            handle_control_frame(cb, &payload);
-        }
-        Protocol::SSH => {
-            handle_ssh_frame(cb, &payload);
-        }
-    }
-}
-
-fn handle_control_frame(cb: &Function, payload: &[u8]) {
-    let message = match String::from_utf8(payload.to_vec()) {
-        Ok(msg) => msg,
+    let frame = match Frame::decode(&data) {
+        Ok(frame) => frame,
         Err(err) => {
-            console_warn!("{}", err);
-            return;
-        }
-    };
-
-    let control: serde_json::Value = match serde_json::from_str(&message) {
-        Ok(msg) => msg,
-        Err(err) => {
-            console_warn!("{}", err);
+            console_warn!("received invalid frame: {err}");
             return;
         }
     };
 
     let serializer = serde_wasm_bindgen::Serializer::new().serialize_maps_as_objects(true);
 
-    let js_value = match control.serialize(&serializer) {
+    let js_value = match frame.serialize(&serializer) {
         Ok(msg) => msg,
         Err(err) => {
-            console_warn!("{}", err);
+            console_warn!("error serializing frame: {}", err);
             return;
         }
     };
 
-    let _ = cb.call2(&JsValue::NULL, &JsValue::from(Protocol::Control), &js_value);
-}
-
-fn handle_ssh_frame(cb: &Function, payload: &[u8]) {
-    let data = Uint8Array::from(payload);
-
-    let _ = cb.call2(&JsValue::NULL, &JsValue::from(Protocol::SSH), &data.into());
+    let _ = cb.call1(&JsValue::NULL, &js_value);
 }
 
 #[wasm_bindgen]

@@ -1,37 +1,37 @@
-use crate::env::Env;
+use crate::env::{Env, SSHAuthMethod};
 use crate::ssh::{SSHCommand, SSHConfig, SSHConfigAuth, SSHConnection, SSHSessionHandle};
-use anyhow::anyhow;
 use futures_util::stream::SplitStream;
 use futures_util::{SinkExt, StreamExt};
 use log::{debug, error, info, warn};
 use phirepass_common::env::Mode;
-use phirepass_common::protocol::common::{Frame, FrameData, FrameEncoding};
+use phirepass_common::protocol::Protocol;
+use phirepass_common::protocol::common::{Frame, FrameData, FrameError};
 use phirepass_common::protocol::node::NodeFrameData;
+use phirepass_common::protocol::web::WebFrameData;
 use phirepass_common::stats::Stats;
 use phirepass_common::time::now_millis;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::{Receiver, Sender, channel};
 use tokio::sync::oneshot;
-use tokio_tungstenite::tungstenite::Error;
 use tokio_tungstenite::{
     MaybeTlsStream, WebSocketStream, connect_async, tungstenite::protocol::Message,
 };
 
 type WebSocketReader = SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>;
 
-static SESSION_ID: AtomicU64 = AtomicU64::new(1);
+static SESSION_ID: AtomicU32 = AtomicU32::new(1);
 
 enum SessionHandle {
     SSH(SSHSessionHandle),
 }
 
 impl SessionHandle {
-    pub fn get_id(&self) -> u64 {
+    pub fn get_id(&self) -> u32 {
         match self {
             SessionHandle::SSH(ssh_handle) => ssh_handle.id,
         }
@@ -90,9 +90,7 @@ impl WebSocketConnection {
 
     pub async fn connect(self, config: Arc<Env>) -> anyhow::Result<()> {
         info!("connecting ws...");
-        // let mut connection_id: Option<String> = None;
 
-        let ping_interval = config.ping_interval;
         let endpoint = format!(
             "{}/api/nodes/ws",
             generate_server_endpoint(
@@ -107,14 +105,10 @@ impl WebSocketConnection {
         let (stream, _) = connect_async(endpoint).await?;
         let (mut write, mut read) = stream.split();
 
-        let frame = Frame {
-            version: Frame::version(),
-            encoding: FrameEncoding::JSON,
-            data: NodeFrameData::Auth {
-                token: config.token.clone(),
-            }
-            .into(),
-        };
+        let frame: Frame = NodeFrameData::Auth {
+            token: config.token.clone(),
+        }
+        .into();
 
         write
             .send(Message::Binary(frame.to_bytes()?.into()))
@@ -137,11 +131,13 @@ impl WebSocketConnection {
         });
 
         let reader_task = spawn_reader_task(
+            &node_id,
             read,
             self.writer.clone(),
             config.clone(),
             self.sessions.clone(),
-        ).await;
+        )
+        .await;
 
         /*
 
@@ -214,11 +210,13 @@ impl WebSocketConnection {
 }
 
 async fn spawn_reader_task(
+    target: &String,
     mut reader: WebSocketReader,
     sender: Sender<Frame>,
     config: Arc<Env>,
     sessions: Arc<Mutex<HashMap<String, SessionHandle>>>,
 ) -> tokio::task::JoinHandle<()> {
+    let target = target.clone();
     tokio::spawn(async move {
         while let Some(frame) = reader.next().await {
             match frame {
@@ -241,52 +239,33 @@ async fn spawn_reader_task(
 
                     debug!("received node frame: {data:?}");
 
-                    handle_message(data, &sender, &config, &sessions).await;
+                    handle_message(&target, data, &sender, &config, &sessions).await;
                 }
                 Ok(Message::Close(reason)) => {
                     info!("received close message: {reason:?}");
                     break;
                 }
-                Err(err) => {
-                    error!("error receiving frame: {err:?}");
-                }
-                _ => {
-                    warn!("received unsupported socket frame");
-                }
+                Err(err) => error!("error receiving frame: {err:?}"),
+                _ => warn!("received unsupported socket frame"),
             }
         }
     })
 }
 
-async fn spawn_ping_task(sender: Sender<Frame>, ping_interval: u64) -> tokio::task::JoinHandle<()> {
+async fn spawn_ping_task(sender: Sender<Frame>, interval: u64) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(ping_interval));
+        let mut interval = tokio::time::interval(Duration::from_secs(interval));
         loop {
             interval.tick().await;
-
             let sent_at = now_millis();
-
-            let frame = Frame {
-                version: Frame::version(),
-                encoding: FrameEncoding::JSON,
-                data: NodeFrameData::Ping { sent_at }.into(),
-            };
-
-            if let Err(err) = sender.send(frame).await {
-                warn!("failed to send heartbeat frame: {err}");
-            } else {
-                debug!("ping sent");
-            }
+            send_frame_data(&sender, NodeFrameData::Ping { sent_at }).await;
         }
     })
 }
 
-async fn spawn_heartbeat_task(
-    sender: Sender<Frame>,
-    heartbeat_interval: u64,
-) -> tokio::task::JoinHandle<()> {
+async fn spawn_heartbeat_task(sender: Sender<Frame>, interval: u64) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(heartbeat_interval));
+        let mut interval = tokio::time::interval(Duration::from_secs(interval));
         loop {
             interval.tick().await;
 
@@ -295,22 +274,12 @@ async fn spawn_heartbeat_task(
                 continue;
             };
 
-            let frame = Frame {
-                version: Frame::version(),
-                encoding: FrameEncoding::JSON,
-                data: NodeFrameData::Heartbeat { stats }.into(),
-            };
-
-            if let Err(err) = sender.send(frame).await {
-                warn!("failed to send heartbeat frame: {err}");
-            } else {
-                debug!("heartbeat sent");
-            }
+            send_frame_data(&sender, NodeFrameData::Heartbeat { stats }).await;
         }
     })
 }
 
-async fn read_auth_response(reader: &mut WebSocketReader) -> anyhow::Result<((String, String))> {
+async fn read_auth_response(reader: &mut WebSocketReader) -> anyhow::Result<(String, String)> {
     match read_next_frame(reader).await {
         None => anyhow::bail!("failed to read auth response"),
         Some(frame) => {
@@ -365,115 +334,144 @@ async fn read_next_frame(reader: &mut WebSocketReader) -> Option<NodeFrameData> 
 }
 
 async fn handle_message(
+    node_id: &String,
     data: NodeFrameData,
     sender: &Sender<Frame>,
     config: &Arc<Env>,
     sessions: &Arc<Mutex<HashMap<String, SessionHandle>>>,
 ) {
     debug!("handling message: {data:?}");
-}
 
-/*
-
-async fn handle_control_from_server(
-    msg: NodeControlMessage,
-    tx: &Sender<Vec<u8>>,
-    config: Arc<Env>,
-    sessions: Arc<Mutex<HashMap<String, SessionHandle>>>,
-) {
-    debug!("received control message from server");
-
-    match msg {
-        NodeControlMessage::OpenTunnel {
+    match data {
+        NodeFrameData::OpenTunnel {
             protocol,
             cid,
             username,
             password,
+            msg_id,
         } => {
-            info!("received open tunnel with protocol {:?}", protocol);
+            info!("received open tunnel with protocol {protocol}");
             match Protocol::try_from(protocol) {
                 Ok(Protocol::SSH) => {
-                    open_ssh_tunnel(cid, tx, config, username, password, sessions.clone()).await
+                    match &config.ssh_auth_mode {
+                        SSHAuthMethod::CredentialsPrompt => {
+                            start_ssh_tunnel(
+                                sender,
+                                node_id,
+                                &cid,
+                                config,
+                                SSHConfigAuth::UsernamePassword(username, password),
+                                sessions,
+                                msg_id,
+                            )
+                            .await;
+                        }
+                    }
                 }
-                Ok(protocol) => warn!("unsupported protocol for tunnel: {}", protocol),
                 Err(err) => warn!("invalid protocol value {}: {:?}", protocol, err),
             }
         }
-        NodeControlMessage::ConnectionDisconnect { cid } => {
-            close_ssh_tunnel(cid, sessions.clone()).await;
-        }
-        NodeControlMessage::Resize { cid, cols, rows } => {
-            if let Err(err) = send_ssh_forward_resize(cid, cols, rows, sessions.clone()).await {
-                warn!("failed to forward resize: {err}");
-            }
-        }
-        NodeControlMessage::TunnelData {
-            protocol,
-            cid,
-            data,
-        } => {
-            if protocol == Protocol::SSH as u8 {
-                if let Err(err) = send_ssh_tunnel_data(cid, data, sessions.clone()).await {
-                    warn!("{err}");
-                }
-            } else {
-                warn!("unsupported tunnel protocol {protocol} for connection {cid}");
-            }
-        }
-        NodeControlMessage::Ping { sent_at } => {
-            let now = now_millis();
-            let latency = now.saturating_sub(sent_at);
-            info!("received ping from server; latency={}ms", latency);
-            let pong = NodeControlMessage::Pong { sent_at: now };
-            match encode_node_control(&pong) {
-                Ok(raw) => {
-                    if tx.send(raw).await.is_err() {
-                        warn!("failed to queue pong: channel closed");
-                    }
-                }
-                Err(err) => warn!("failed to encode pong: {err}"),
-            }
-        }
-        NodeControlMessage::Pong { sent_at } => {
+        NodeFrameData::Pong { sent_at } => {
             let now = now_millis();
             let rtt = now.saturating_sub(sent_at);
             info!("received pong; round-trip={}ms (sent_at={sent_at})", rtt);
         }
-        o => warn!("received unsupported control message: {:?}", o),
+        NodeFrameData::ConnectionDisconnect { cid } => {
+            close_ssh_tunnel(cid, sessions.clone()).await;
+        }
+        NodeFrameData::SSHWindowResize {
+            cid,
+            sid,
+            cols,
+            rows,
+        } => {
+            if let Err(err) = send_ssh_forward_resize(cid, sid, cols, rows, &sessions).await {
+                warn!("failed to forward resize: {err}");
+            }
+        }
+        NodeFrameData::TunnelData { cid, sid, data } => {
+            if let Err(err) = send_ssh_tunnel_data(cid, sid, data, &sessions).await {
+                warn!("failed to forward tunnel data: {err}");
+            }
+        }
+        o => warn!("not implemented yet: {o:?}"),
     }
 }
 
-async fn open_ssh_tunnel(
+async fn send_ssh_tunnel_data(
     cid: String,
-    tx: &Sender<Vec<u8>>,
-    config: Arc<Env>,
-    username: String,
-    password: String,
-    sessions: Arc<Mutex<HashMap<String, SessionHandle>>>,
-) {
-    info!("opening ssh tunnel for connection {cid}...");
+    _sid: u32,
+    data: Vec<u8>,
+    sessions: &Arc<Mutex<HashMap<String, SessionHandle>>>,
+) -> anyhow::Result<(), String> {
+    let stdin = {
+        let sessions = sessions.lock().await;
+        sessions.get(&cid).map(|s| s.get_stdin())
+    };
 
-    // Check if authentication mode requires password
-    match &config.ssh_auth_mode {
-        crate::env::SSHAuthMethod::CredentialsPrompt => {
-            start_ssh_tunnel(
-                tx,
-                cid,
-                config,
-                SSHConfigAuth::UsernamePassword(username, password),
-                sessions,
-            )
-            .await;
+    let Some(stdin) = stdin else {
+        return Err(format!("no ssh tunnel found for connection {cid}"));
+    };
+
+    stdin
+        .send(SSHCommand::Data(data))
+        .await
+        .map_err(|err| format!("failed to queue data to ssh tunnel for {cid}: {err}"))
+}
+
+async fn send_ssh_forward_resize(
+    cid: String,
+    _sid: u32,
+    cols: u32,
+    rows: u32,
+    sessions: &Arc<Mutex<HashMap<String, SessionHandle>>>,
+) -> anyhow::Result<(), String> {
+    let stdin = {
+        let sessions = sessions.lock().await;
+        sessions.get(&cid).map(|s| s.get_stdin())
+    };
+
+    let Some(stdin) = stdin else {
+        return Err(format!("no ssh tunnel found for connection {cid}"));
+    };
+
+    stdin
+        .send(SSHCommand::Resize { cols, rows })
+        .await
+        .map_err(|err| format!("failed to queue resize to ssh tunnel for {cid}: {err}"))
+}
+
+async fn close_ssh_tunnel(cid: String, sessions: Arc<Mutex<HashMap<String, SessionHandle>>>) {
+    let handle = {
+        let mut sessions = sessions.lock().await;
+        sessions.remove(&cid)
+    };
+
+    match handle {
+        Some(handle) => {
+            info!("closing ssh tunnel for connection {cid}");
+            handle.shutdown().await;
         }
+        None => info!("no ssh tunnel to close for connection {cid}"),
+    }
+}
+
+async fn send_frame_data(sender: &Sender<Frame>, data: NodeFrameData) {
+    if let Err(err) = sender.send(data.into()).await {
+        warn!("failed to send frame: {err}");
+    } else {
+        debug!("frame response sent");
     }
 }
 
 async fn start_ssh_tunnel(
-    tx: &Sender<Vec<u8>>,
-    cid: String,
-    config: Arc<Env>,
+    tx: &Sender<Frame>,
+    node_id: &String,
+    cid: &String,
+    config: &Arc<Env>,
     credentials: SSHConfigAuth,
-    sessions: Arc<Mutex<HashMap<String, SessionHandle>>>,
+    sessions: &Arc<Mutex<HashMap<String, SessionHandle>>>,
+    msg_id: Option<u32>,
 ) {
     let (stdin_tx, stdin_rx) = channel::<SSHCommand>(512);
     let (stop_tx, stop_rx) = oneshot::channel();
@@ -481,70 +479,74 @@ async fn start_ssh_tunnel(
     let cid_for_task = cid.clone();
     let cid_for_connection = cid.clone();
     let session_id = SESSION_ID.fetch_add(1, Ordering::Relaxed);
-    let sessions_for_task = sessions.clone();
+    // let sessions_for_task = sessions.clone();
     let tx_for_opened = tx.clone();
     let cid_for_opened = cid.clone();
+    // let config_for_task = config.clone();
+    let node_id_for_task = node_id.clone();
+
+    let conn = SSHConnection::new(SSHConfig {
+        host: config.ssh_host.clone(),
+        port: config.ssh_port,
+        credentials,
+    });
+
+    info!(
+        "connecting ssh for connection {cid_for_task}: {}:{}",
+        config.ssh_host, config.ssh_port
+    );
+
     let ssh_task = tokio::spawn(async move {
         info!("ssh task started for connection {cid_for_task}");
 
-        let conn = SSHConnection::new(SSHConfig {
-            host: config.ssh_host.clone(),
-            port: config.ssh_port,
-            credentials,
-        });
-
-        info!(
-            "connecting ssh for connection {cid_for_task}: {}:{}",
-            config.ssh_host, config.ssh_port
-        );
-
-        let opened_msg = NodeControlMessage::TunnelOpened {
-            protocol: Protocol::SSH as u8,
-            cid: cid_for_opened.clone(),
-            sid: session_id,
-        };
-
-        if let Ok(raw) = encode_node_control(&opened_msg) {
-            if let Err(err) = tx_for_opened.send(raw).await {
-                warn!("failed to send TunnelOpened notification for {cid_for_opened}: {err}");
-            } else {
-                info!("TunnelOpened notification sent for {cid_for_opened} with sid {session_id}");
-            }
-        }
+        send_frame_data(
+            &sender,
+            NodeFrameData::TunnelOpened {
+                protocol: Protocol::SSH as u8,
+                cid: cid_for_task.clone(),
+                sid: session_id,
+                msg_id,
+            },
+        )
+        .await;
 
         match conn
-            .connect(cid_for_task.clone(), &sender, stdin_rx, stop_rx)
+            .connect(
+                node_id_for_task,
+                cid_for_task,
+                session_id,
+                &sender,
+                stdin_rx,
+                stop_rx,
+            )
             .await
         {
-            Ok(()) => {
-                info!("ssh connection {cid_for_task} ended");
-
-                if let Err(err) = send_ssh_data_to_connection(
-                    cid.as_str(),
+            Ok(_) => {
+                info!("ssh connection {cid_for_opened} ended");
+                send_frame_data(
                     &sender,
-                    &WebControlMessage::TunnelClosed {
-                        protocol: Protocol::SSH as u8,
+                    NodeFrameData::TunnelClosed {
+                        cid: cid_for_opened,
                         sid: session_id,
+                        msg_id,
                     },
-                    sessions_for_task.clone(),
                 )
-                .await
-                {
-                    warn!("failed to notify cid {cid_for_task} for ssh connection closure: {err}");
-                }
+                .await;
             }
             Err(err) => {
-                warn!("ssh connection error for {cid_for_task}: {err}");
-                if let Err(err) = send_ssh_data_to_connection(
-                    cid.as_str(),
-                    &sender,
-                    &generic_web_error("SSH authentication failed. Please check your password."),
-                    sessions_for_task.clone(),
+                warn!("ssh connection error for {cid_for_opened}: {err}");
+                send_frame_data(
+                    &tx_for_opened,
+                    NodeFrameData::WebFrame {
+                        sid: session_id,
+                        frame: WebFrameData::Error {
+                            kind: FrameError::Generic,
+                            message: err.to_string(),
+                            msg_id,
+                        },
+                    },
                 )
-                .await
-                {
-                    warn!("failed to notify connection {cid} about authentication failure: {err}");
-                }
+                .await;
             }
         }
     });
@@ -568,11 +570,13 @@ async fn start_ssh_tunnel(
     });
 
     let handle = SessionHandle::SSH(SSHSessionHandle {
-        id: session_id,
+        id: session_id.clone(),
         stop: Some(stop_tx),
         join: cleanup_task,
         stdin: stdin_tx,
     });
+
+    info!("handle {session_id} created");
 
     let previous = {
         let mut sessions = sessions.lock().await;
@@ -583,80 +587,3 @@ async fn start_ssh_tunnel(
         prev.shutdown().await;
     }
 }
-
-async fn close_ssh_tunnel(cid: String, sessions: Arc<Mutex<HashMap<String, SessionHandle>>>) {
-    let handle = {
-        let mut sessions = sessions.lock().await;
-        sessions.remove(&cid)
-    };
-
-    match handle {
-        Some(handle) => {
-            info!("closing ssh tunnel for connection {cid}");
-            handle.shutdown().await;
-        }
-        None => info!("no ssh tunnel to close for connection {cid}"),
-    }
-}
-
-async fn send_ssh_tunnel_data(
-    cid: String,
-    data: Vec<u8>,
-    sessions: Arc<Mutex<HashMap<String, SessionHandle>>>,
-) -> anyhow::Result<(), String> {
-    let stdin = {
-        let sessions = sessions.lock().await;
-        sessions.get(&cid).map(|s| s.get_stdin())
-    };
-
-    let Some(stdin) = stdin else {
-        return Err(format!("no ssh tunnel found for connection {cid}"));
-    };
-
-    stdin
-        .send(SSHCommand::Data(data))
-        .await
-        .map_err(|err| format!("failed to queue data to ssh tunnel for {cid}: {err}"))
-}
-
-async fn send_ssh_forward_resize(
-    cid: String,
-    cols: u32,
-    rows: u32,
-    sessions: Arc<Mutex<HashMap<String, SessionHandle>>>,
-) -> anyhow::Result<(), String> {
-    let stdin = {
-        let sessions = sessions.lock().await;
-        sessions.get(&cid).map(|s| s.get_stdin())
-    };
-
-    let Some(stdin) = stdin else {
-        return Err(format!("no ssh tunnel found for connection {cid}"));
-    };
-
-    stdin
-        .send(SSHCommand::Resize { cols, rows })
-        .await
-        .map_err(|err| format!("failed to queue resize to ssh tunnel for {cid}: {err}"))
-}
-
-async fn send_ssh_data_to_connection(
-    cid: &str,
-    tx: &Sender<Vec<u8>>,
-    data: &WebControlMessage,
-    sessions: Arc<Mutex<HashMap<String, SessionHandle>>>,
-) -> anyhow::Result<()> {
-    let frame = encode_web_control_to_frame(data)?;
-
-    let node_msg = NodeControlMessage::Frame {
-        frame,
-        cid: cid.to_string(),
-    };
-
-    let raw = encode_node_control(&node_msg)?;
-    tx.send(raw).await.map_err(|err| {
-        tokio::spawn(close_ssh_tunnel(cid.to_string(), sessions));
-        anyhow!("failed to send data to connection: {err}")
-    })
-}
-*/

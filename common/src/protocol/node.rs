@@ -1,8 +1,9 @@
-use crate::protocol::{common::FrameData, web::WebFrameData};
+use crate::protocol::web::WebFrameData;
 use crate::stats::Stats;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(tag = "type")]
 #[repr(u8)]
 pub enum NodeFrameData {
     Heartbeat {
@@ -24,27 +25,33 @@ pub enum NodeFrameData {
         cid: String,
         username: String,
         password: String,
-        msg_id: Option<u64>, // custom web user supplied. easier to track responses and map them to requests
+        msg_id: Option<u32>, // custom web user supplied. easier to track responses and map them to requests
     } = 20,
 
     TunnelOpened {
         protocol: u8,
         cid: String,
-        sid: u64,
-        msg_id: Option<u64>, // custom web user supplied. easier to track responses and map them to requests
+        sid: u32,
+        msg_id: Option<u32>, // custom web user supplied. easier to track responses and map them to requests
     } = 21,
 
     TunnelData {
-        sid: u64,
+        cid: String,
+        sid: u32,
         data: Vec<u8>,
-        msg_id: Option<u64>,
     } = 22,
 
+    TunnelClosed {
+        cid: String,
+        sid: u32,
+        msg_id: Option<u32>, // echo back the user supplied msg_id
+    } = 23, // notify web that tunnel is closed
+
     SSHWindowResize {
-        sid: u64,
+        cid: String,
+        sid: u32,
         cols: u32,
         rows: u32,
-        msg_id: Option<u64>,
     } = 30,
 
     Ping {
@@ -55,9 +62,9 @@ pub enum NodeFrameData {
         sent_at: u64,
     } = 41,
 
-    Frame {
+    WebFrame {
         frame: WebFrameData,
-        sid: u64,
+        sid: u32,
     } = 50,
 
     ConnectionDisconnect {
@@ -74,17 +81,12 @@ impl NodeFrameData {
             NodeFrameData::OpenTunnel { .. } => 20,
             NodeFrameData::TunnelOpened { .. } => 21,
             NodeFrameData::TunnelData { .. } => 22,
+            NodeFrameData::TunnelClosed { .. } => 23,
             NodeFrameData::SSHWindowResize { .. } => 30,
             NodeFrameData::Ping { .. } => 40,
             NodeFrameData::Pong { .. } => 41,
-            NodeFrameData::Frame { .. } => 50,
+            NodeFrameData::WebFrame { .. } => 50,
             NodeFrameData::ConnectionDisconnect { .. } => 60,
         }
-    }
-}
-
-impl Into<FrameData> for NodeFrameData {
-    fn into(self) -> FrameData {
-        FrameData::Node(self)
     }
 }

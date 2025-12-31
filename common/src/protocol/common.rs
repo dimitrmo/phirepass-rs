@@ -1,12 +1,13 @@
+#[cfg(not(target_arch = "wasm32"))]
 use crate::protocol::node::NodeFrameData;
+
 use crate::protocol::web::WebFrameData;
 use anyhow::anyhow;
-use log::info;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt::Display;
 
 const HEADER_SIZE: usize = 8;
-const VERSION: u8 = 1;
+const FRAME_VERSION: u8 = 1;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Frame {
@@ -15,9 +16,34 @@ pub struct Frame {
     pub data: FrameData,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+impl From<NodeFrameData> for Frame {
+    fn from(data: NodeFrameData) -> Self {
+        Self {
+            version: Self::version(),
+            encoding: FrameEncoding::JSON,
+            data: FrameData::Node(data),
+        }
+    }
+}
+
+impl From<WebFrameData> for Frame {
+    fn from(data: WebFrameData) -> Self {
+        Self {
+            version: Self::version(),
+            encoding: FrameEncoding::JSON,
+            data: FrameData::Web(data),
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum FrameData {
+    #[serde(rename = "web")]
     Web(WebFrameData),
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[serde(rename = "node")]
     Node(NodeFrameData),
 }
 
@@ -48,7 +74,7 @@ impl TryFrom<u8> for FrameEncoding {
 
 impl Frame {
     pub fn version() -> u8 {
-        VERSION
+        FRAME_VERSION
     }
     pub fn decode(data: &[u8]) -> anyhow::Result<Self> {
         if data.len() < HEADER_SIZE {
@@ -72,10 +98,16 @@ impl Frame {
                 let web = serde_json::from_slice::<WebFrameData>(&payload)?;
                 FrameData::Web(web)
             }
+            #[cfg(not(target_arch = "wasm32"))]
             1 => {
                 let node = serde_json::from_slice::<NodeFrameData>(&payload)?;
                 FrameData::Node(node)
             }
+
+            #[cfg(target_arch = "wasm32")]
+            1_u8..=u8::MAX => anyhow::bail!("invalid frame type"),
+
+            #[cfg(not(target_arch = "wasm32"))]
             2_u8..=u8::MAX => anyhow::bail!("invalid frame type"),
         };
 
@@ -95,6 +127,7 @@ impl Frame {
                     (raw, 0, data.code())
                 }
             },
+            #[cfg(not(target_arch = "wasm32"))]
             FrameData::Node(data) => match frame_encoding {
                 FrameEncoding::JSON => {
                     let raw = serde_json::to_vec(&data)?;
@@ -104,7 +137,7 @@ impl Frame {
         };
 
         let mut buf = Vec::with_capacity(HEADER_SIZE + data.len());
-        buf.push(VERSION); // version - 1
+        buf.push(FRAME_VERSION); // version - 1
         buf.push(frame_encoding as u8); // encoding - 1
         buf.push(kind); // web or node - 1
         buf.push(code); // code - 1 - heartbeat, open tunnel etc

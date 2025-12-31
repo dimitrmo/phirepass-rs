@@ -1,5 +1,7 @@
 use log::{debug, info, warn};
-// use phirepass_common::protocol::{Frame, NodeControlMessage, Protocol, encode_node_control};
+use phirepass_common::protocol::common::Frame;
+use phirepass_common::protocol::node::NodeFrameData;
+use phirepass_common::protocol::web::WebFrameData;
 use russh::client::Handle;
 use russh::keys::*;
 use russh::*;
@@ -17,7 +19,7 @@ pub(crate) enum SSHCommand {
 }
 
 pub(crate) struct SSHSessionHandle {
-    pub id: u64,
+    pub id: u32,
     pub join: JoinHandle<()>,
     pub stdin: Sender<SSHCommand>,
     pub stop: Option<oneshot::Sender<()>>,
@@ -104,8 +106,10 @@ impl SSHConnection {
 
     pub async fn connect(
         &self,
+        node_id: String,
         cid: String,
-        tx: &Sender<Vec<u8>>,
+        sid: u32,
+        tx: &Sender<Frame>,
         mut cmd_rx: Receiver<SSHCommand>,
         mut shutdown_rx: oneshot::Receiver<()>,
     ) -> anyhow::Result<()> {
@@ -123,14 +127,11 @@ impl SSHConnection {
             .await?;
         channel.request_shell(true).await?;
 
-        let connection_id = cid.clone();
-        let sender = tx.clone();
-
         loop {
             tokio::select! {
                 biased;
                 _ = &mut shutdown_rx => {
-                    info!("shutdown signal received for ssh tunnel {connection_id}");
+                    info!("shutdown signal received for ssh tunnel {cid}");
                     break;
                 }
                 Some(cmd) = cmd_rx.recv() => {
@@ -138,43 +139,43 @@ impl SSHConnection {
                         SSHCommand::Data(buf) => {
                             let bytes = Cursor::new(buf);
                             if let Err(err) = channel.data(bytes).await {
-                                warn!("failed to send data to ssh channel {connection_id}: {err}");
+                                warn!("failed to send data to ssh channel {cid}: {err}");
                                 break;
                             }
                         }
                         SSHCommand::Resize { cols, rows } => {
                             if let Err(err) = channel.window_change(cols, rows, 0, 0).await {
-                                warn!("failed to resize ssh channel {connection_id}: {err}");
+                                warn!("failed to resize ssh channel {cid}: {err}");
                             }
                         }
                     }
                 }
                 msg = channel.wait() => {
                     let Some(msg) = msg else {
-                        info!("ssh channel closed for {connection_id}");
+                        info!("ssh channel closed for {cid}");
                         break;
                     };
 
                     match msg {
                         ChannelMsg::Data { ref data } => {
-                            /*
-                            let message = NodeControlMessage::Frame {
-                                frame: Frame::new(Protocol::SSH, data.to_vec()),
-                                cid: connection_id.clone(),
-                            };
-
-                            match encode_node_control(&message) {
-                                Ok(result) => match sender.send(result).await {
-                                    Ok(_) => debug!("ssh response sent back to {connection_id}"),
-                                    Err(err) => {
-                                        warn!("failed to send: {err}; closing ssh channel");
-                                        break;
+                            if let Err(err) = tx
+                                .send(
+                                    NodeFrameData::WebFrame {
+                                        frame: WebFrameData::TunnelData {
+                                            node_id: node_id.clone(),
+                                            sid,
+                                            data: data.to_vec(),
+                                        },
+                                        sid,
                                     }
-                                },
-                                Err(err) => warn!("failed to encode node control: {}", err),
-                            }*/
-
-                            todo!();
+                                    .into(),
+                                )
+                                .await
+                            {
+                                warn!("failed to send frame: {err}");
+                            } else {
+                                debug!("frame response sent");
+                            }
                         }
                         ChannelMsg::Eof => {
                             debug!("ssh channel received EOF");
@@ -199,7 +200,7 @@ impl SSHConnection {
         }
 
         if let Err(err) = channel.close().await {
-            warn!("failed to close ssh channel for {connection_id}: {err}");
+            warn!("failed to close ssh channel for {cid}: {err}");
         }
 
         client

@@ -6,7 +6,7 @@ use axum::http::HeaderMap;
 use axum_client_ip::ClientIp;
 use futures_util::{SinkExt, StreamExt};
 use log::{debug, info, warn};
-use phirepass_common::protocol::common::{Frame, FrameData, FrameEncoding, FrameError};
+use phirepass_common::protocol::common::{Frame, FrameData, FrameError};
 use phirepass_common::protocol::node::NodeFrameData;
 use phirepass_common::protocol::web::WebFrameData;
 use std::net::IpAddr;
@@ -40,11 +40,7 @@ async fn handle_web_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
 
     let write_task = tokio::spawn(async move {
         while let Some(web_frame) = rx.recv().await {
-            let frame = Frame {
-                version: Frame::version(),
-                encoding: FrameEncoding::JSON,
-                data: web_frame.into(),
-            };
+            let frame: Frame = web_frame.into();
 
             let frame = match frame.to_bytes() {
                 Ok(frame) => frame,
@@ -94,7 +90,7 @@ async fn handle_web_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
                     }
                     WebFrameData::OpenTunnel {
                         protocol,
-                        target,
+                        node_id: target,
                         msg_id,
                         username,
                         password,
@@ -108,13 +104,8 @@ async fn handle_web_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
                         warn!("received tunnel opened frame which is invalid if sent by user");
                         break;
                     }
-                    WebFrameData::TunnelData {
-                        sid,
-                        target,
-                        data,
-                        msg_id,
-                    } => {
-                        handle_web_tunnel_data(&state, cid, sid, target, data, msg_id).await;
+                    WebFrameData::TunnelData { sid, node_id, data } => {
+                        handle_web_tunnel_data(&state, cid, sid, node_id, data).await;
                     }
                     WebFrameData::TunnelClosed { .. } => {
                         warn!(
@@ -123,13 +114,12 @@ async fn handle_web_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
                         break;
                     }
                     WebFrameData::SSHWindowResize {
-                        target,
+                        node_id,
                         sid,
                         cols,
                         rows,
-                        msg_id,
                     } => {
-                        handle_web_resize(&state, cid, sid, target, cols, rows, msg_id).await;
+                        handle_web_resize(&state, cid, sid, node_id, cols, rows).await;
                     }
                     WebFrameData::Error { .. } => {
                         warn!("received error frame which is invalid if sent by web client");
@@ -191,7 +181,7 @@ async fn get_node_id_by_cid(
     state: &AppState,
     cid: &Ulid,
     node_id: String,
-    sid: u64,
+    sid: u32,
 ) -> anyhow::Result<Ulid> {
     let key = format!("{}-{}", node_id, sid);
     let sessions = state.tunnel_sessions.read().await;
@@ -212,14 +202,13 @@ async fn get_node_id_by_cid(
 async fn handle_web_tunnel_data(
     state: &AppState,
     cid: Ulid,
-    sid: u64,
-    target: String,
+    sid: u32,
+    node_id: String,
     data: Vec<u8>,
-    msg_id: Option<u64>,
 ) {
     debug!("tunnel data received: {} bytes", data.len());
 
-    let node_id = match get_node_id_by_cid(state, &cid, target, sid).await {
+    let node_id = match get_node_id_by_cid(state, &cid, node_id, sid).await {
         Ok(node_id) => node_id,
         Err(err) => {
             warn!("error getting node id: {err}");
@@ -238,7 +227,11 @@ async fn handle_web_tunnel_data(
     };
 
     if tx
-        .send(NodeFrameData::TunnelData { sid, data, msg_id })
+        .send(NodeFrameData::TunnelData {
+            cid: cid.to_string(),
+            sid,
+            data,
+        })
         .await
         .is_err()
     {
@@ -251,11 +244,10 @@ async fn handle_web_tunnel_data(
 async fn handle_web_resize(
     state: &AppState,
     cid: Ulid,
-    sid: u64,
+    sid: u32,
     target: String,
     cols: u32,
     rows: u32,
-    msg_id: Option<u64>,
 ) {
     debug!("tunnel ssh resize received");
 
@@ -277,17 +269,17 @@ async fn handle_web_resize(
         return;
     };
 
-    if tx
+    match tx
         .send(NodeFrameData::SSHWindowResize {
+            cid: cid.to_string(),
             sid,
             cols,
             rows,
-            msg_id,
         })
         .await
-        .is_err()
     {
-        warn!("failed to forward resize to node {node_id}");
+        Ok(_) => info!("sent ssh window resize to {node_id}"),
+        Err(err) => warn!("failed to forward resize to node {node_id}: {err}"),
     }
 }
 
@@ -296,7 +288,7 @@ async fn handle_web_open_tunnel(
     cid: Ulid,
     protocol: u8,
     node: String,
-    msg_id: Option<u64>,
+    msg_id: Option<u32>,
     username: Option<String>,
     password: Option<String>,
 ) {
@@ -358,7 +350,7 @@ async fn handle_web_open_tunnel(
 async fn send_requires_username_password_error(
     state: &AppState,
     cid: Ulid,
-    msg_id: Option<u64>,
+    msg_id: Option<u32>,
 ) -> anyhow::Result<()> {
     let connections = state.connections.read().await;
     if let Some(wc) = connections.get(&cid) {
@@ -379,7 +371,7 @@ async fn send_requires_username_password_error(
 async fn send_requires_password_error(
     state: &AppState,
     cid: Ulid,
-    msg_id: Option<u64>,
+    msg_id: Option<u32>,
 ) -> anyhow::Result<()> {
     let connections = state.connections.read().await;
     if let Some(wc) = connections.get(&cid) {

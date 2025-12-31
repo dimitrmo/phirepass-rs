@@ -18,22 +18,23 @@ const fullscreenBtn = document.getElementById("fullscreen");
 
 const wsScheme = window.location.protocol === "https:" ? "wss" : "ws";
 
-// const wsEndpoint = `${wsScheme}://${window.location.hostname}:8080`;
-// const httpEndpoint = `${window.location.protocol}//${window.location.hostname}:8080`;
-const wsEndpoint = 'wss://silver-space-umbrella-qx997r7j956299wp-8080.app.github.dev';
-const httpEndpoint = 'https://silver-space-umbrella-qx997r7j956299wp-8080.app.github.dev';
+const wsEndpoint = `${wsScheme}://${window.location.hostname}:8080`;
+const httpEndpoint = `${window.location.protocol}//${window.location.hostname}:8080`;
+// const wsEndpoint = 'wss://silver-space-umbrella-qx997r7j956299wp-8080.app.github.dev';
+// const httpEndpoint = 'https://silver-space-umbrella-qx997r7j956299wp-8080.app.github.dev';
 
 let term, fitAddon;
 let socket;
 let nodes = [];
-let selectedNodeId = null;
+let selected_node_id = null;
+let session_id = null;
 let isIntentionallyClosed = false;
 let isSshConnected = false;
 
 let credentialMode = null; // "username" | "password"
 let usernameBuffer = "";
 let passwordBuffer = "";
-let sessionUsername = "";
+let session_username = "";
 
 const log = (text) => {
     const line = document.createElement("div");
@@ -74,7 +75,6 @@ const fetchNodes = async () => {
         const res = await fetch(`${httpEndpoint}/api/nodes`);
         if (!res.ok) {
             log(`Failed to fetch nodes`);
-            console.warn(res.statusText, res);
             return;
         }
         nodes = await res.json();
@@ -133,7 +133,7 @@ const renderNodes = (list) => {
                 }
             }
 
-            selectedNodeId = node.id;
+            selected_node_id = node.id;
             Array.from(nodesEl.children).forEach((el) =>
                 el.classList.toggle("selected", el.dataset.nodeId === node.id)
             );
@@ -153,7 +153,8 @@ const cleanup = () => {
     }
 
     resetCredentialCapture();
-    sessionUsername = "";
+    session_username = "";
+    session_id = null;
     isSshConnected = false;
     fitAddon.fit();
 };
@@ -166,7 +167,7 @@ const resetCredentialCapture = () => {
 
 const promptForUsername = () => {
     resetCredentialCapture();
-    sessionUsername = "";
+    session_username = "";
     term.reset();
     term.write("Enter username: ");
     credentialMode = "username";
@@ -195,7 +196,7 @@ const submitUsername = () => {
         return;
     }
 
-    sessionUsername = username;
+    session_username = username;
     promptForPassword(true);
 };
 
@@ -243,7 +244,7 @@ const submitPassword = () => {
         return;
     }
 
-    if (!sessionUsername) {
+    if (!session_username) {
         log("Username is required before submitting password");
         promptForUsername();
         return;
@@ -255,8 +256,7 @@ const submitPassword = () => {
     );
 
     if (socket_healthy()) {
-        socket.open_ssh_tunnel(selectedNodeId, sessionUsername, password);
-        socket.send_terminal_resize(selectedNodeId, term.cols, term.rows);
+        socket.open_ssh_tunnel(selected_node_id, session_username, password);
     }
 };
 
@@ -300,7 +300,7 @@ function socket_healthy() {
 }
 
 function connect() {
-    if (!selectedNodeId) {
+    if (!selected_node_id) {
         log("Select a node before connecting");
         return;
     }
@@ -316,12 +316,12 @@ function connect() {
 
     channel.on_connection_open(() => {
         channel.start_heartbeat();
-        channel.open_ssh_tunnel(selectedNodeId);
+        channel.open_ssh_tunnel(selected_node_id);
         log("WebSocket connected");
         setStatus("Connecting to node...", "info");
     });
 
-    channel.on_connection_message((event) => {
+    channel.on_connection_message((_event) => {
         // console.log(">> on connection message", event);
     });
 
@@ -331,7 +331,6 @@ function connect() {
     });
 
     channel.on_connection_close((event) => {
-        // console.log(">> on connection close", event);
         if (!isIntentionallyClosed) {
             setStatus("Disconnected", "warn");
             const reason = event.reason || `code ${event.code}`;
@@ -344,38 +343,35 @@ function connect() {
         isIntentionallyClosed = false;
     });
 
-    channel.on_protocol_message((protocol, msg) => {
-        if (protocol === Protocol.SSH) {
-            if (!isSshConnected) {
-                isSshConnected = true;
-                const target = selectedNodeId || "selected node";
-                log(`SSH login successful on ${target}`);
-                setStatus("Connected", "ok");
-                term.reset();
-            }
-            term.write(new Uint8Array(msg));
-            return;
-        }
+    channel.on_protocol_message((frame) => {
+        switch (frame.data.web.type) {
+            case "TunnelData":
+                if (!isSshConnected) {
+                    isSshConnected = true;
+                    const target = selected_node_id || frame?.data?.web?.node_id || "selected node";
+                    log(`SSH login successful on ${target}`);
+                    setStatus("Connected", "ok");
+                    term.reset();
+                }
 
-        if (msg && !msg.type) {
-            console.error("Wrong control message format", msg);
-            return;
-        }
-
-        switch (msg.type) {
+                term.write(new Uint8Array(frame.data.web.data));
+                break;
             case "TunnelOpened":
-                console.log(msg);
-                log(`Tunnel opened - Session ID: ${msg.sid}`);
+                log(`Tunnel opened - Session ID: ${frame.data.web.sid}`);
                 setStatus("Tunnel established", "info");
+                session_id = frame.data.web.sid;
+                if (socket_healthy()) {
+                    channel.send_terminal_resize(selected_node_id, session_id, term.cols, term.rows);
+                }
                 break;
             case "TunnelClosed":
-                log(`Tunnel closed - Session ID: ${msg.sid}`);
+                log(`Tunnel closed - Session ID: ${frame.data.web.sid}`);
                 setStatus("Tunnel closed", "warn");
                 term.reset();
                 cleanup();
                 break;
             case "Error":
-                switch (msg.kind) {
+                switch (frame.data.web.kind) {
                     case ErrorType.RequiresUsernamePassword:
                         term.reset();
                         setStatus("Credentials required", "warn");
@@ -386,7 +382,7 @@ function connect() {
                         term.reset();
                         setStatus("Password required", "warn");
                         log("SSH password is required.");
-                        if (!sessionUsername) {
+                        if (!session_username) {
                             promptForUsername();
                         } else {
                             promptForPassword();
@@ -396,11 +392,11 @@ function connect() {
                     default:
                         term.reset();
                         const message =
-                            msg.message ||
-                            "An unknown error occurred during SSH authentication.";
-                        setStatus("Auth error", "error");
+                            frame?.data?.web?.message ||
+                            "An unknown error occurred.";
+                        setStatus("Error", "error");
                         log(message);
-                        sessionUsername = "";
+                        session_username = "";
                         isSshConnected = false;
                         promptForUsername();
                 }
@@ -408,11 +404,11 @@ function connect() {
             default:
                 term.reset();
                 const message =
-                    msg.message ||
-                    "SSH authentication failed. Please try again.";
+                    frame?.data?.web?.message ||
+                    "An unknown error occurred.";
                 setStatus("Auth failed", "error");
                 log(message);
-                sessionUsername = "";
+                session_username = "";
                 isSshConnected = false;
                 promptForUsername();
         }
@@ -481,21 +477,22 @@ document.addEventListener("DOMContentLoaded", () => {
             return;
         }
 
-        if (socket && socket.is_open() && !!selectedNodeId) {
-            socket.send_tunnel_data(selectedNodeId, data);
+        if (socket && socket.is_open() && !!selected_node_id && !!session_id) {
+            socket.send_tunnel_data(selected_node_id, session_id, data, 0);
         }
     });
 
     term.onResize(({ cols, rows }) => {
-        if (socket && socket.is_open() && !!selectedNodeId) {
-            socket.send_terminal_resize(selectedNodeId, cols, rows);
+        fitAddon.fit();
+        if (socket && socket.is_open() && !!selected_node_id && !!session_id) {
+            socket.send_terminal_resize(selected_node_id, session_id, cols, rows, 0);
         }
     });
 
     const resizeObserver = new ResizeObserver(() => {
         fitAddon.fit();
-        if (socket && socket.is_open() && !!selectedNodeId) {
-            socket.send_terminal_resize(selectedNodeId, term.cols, term.rows);
+        if (socket && socket.is_open() && !!selected_node_id && !!session_id) {
+            socket.send_terminal_resize(selected_node_id, session_id, term.cols, term.rows);
         }
     });
 

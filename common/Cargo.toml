@@ -6,16 +6,34 @@ repository = { workspace = true }
 license-file = { workspace = true }
 
 [dependencies]
-serde = { workspace = true }
-serde_json = { workspace = true }
-sysinfo = "0.37.2"
-get_if_addrs = "0.5.3"
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+sysinfo = { version = "0.37.2", optional = true}
+get_if_addrs = { version = "0.5.3", optional = true }
 env_logger = { workspace = true }
-thread-count = "0.3.1"
-anyhow = { workspace = true }
-os_info = "3.14.0"
-libc = "0.2.178"
-netstat2 = "0.11.2"
-mac_address = "1.1.8"
-axum = { workspace = true }
-log = "0.4.29"
+thread-count = { version = "0.3.1", optional = true }
+anyhow = { workspace = true, optional = true }
+os_info = { version = "3.14.0", optional = true }
+libc = { version = "0.2.178", optional = true }
+netstat2 = { version = "0.11.2", optional = true }
+mac_address = { version = "1.1.8", optional = true }
+axum = { workspace = true, optional = true }
+
+[features]
+full = ["env", "ip", "logger", "node", "protocol", "stats", "time"]
+env = []
+ip = ["dep:axum"]
+logger = ["dep:serde", "stats"]
+node = ["dep:serde", "stats"]
+protocol = ["dep:anyhow", "dep:serde", "dep:serde_json"]
+stats = [
+    "dep:get_if_addrs",
+    "dep:mac_address",
+    "dep:netstat2",
+    "dep:os_info",
+    "dep:serde",
+    "dep:sysinfo",
+    "dep:thread-count",
+    "dep:libc"
+]
+time = []

@@ -89,14 +89,11 @@ fn start_http_server(
     })
 }
 
-fn spawn_stats_connections_logger(
-    state: &AppState,
-    stats_refresh_interval: u64,
-) -> tokio::task::JoinHandle<()> {
+fn spawn_stats_connections_logger(state: &AppState, interval: u64) -> tokio::task::JoinHandle<()> {
     let connections = state.connections.clone();
     let nodes = state.nodes.clone();
     tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(stats_refresh_interval));
+        let mut interval = tokio::time::interval(Duration::from_secs(interval));
         loop {
             interval.tick().await;
             let connections = connections.read().await;
@@ -108,11 +105,11 @@ fn spawn_stats_connections_logger(
 }
 
 fn spawn_stats_logger(
-    stats_refresh_interval: u64,
+    interval: u64,
     mut shutdown: broadcast::Receiver<()>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(stats_refresh_interval));
+        let mut interval = tokio::time::interval(Duration::from_secs(interval));
         loop {
             tokio::select! {
                 _ = interval.tick() => {
