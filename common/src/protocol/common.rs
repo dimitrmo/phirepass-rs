@@ -1,9 +1,9 @@
-use std::fmt::Display;
 use crate::protocol::node::NodeFrameData;
 use crate::protocol::web::WebFrameData;
 use anyhow::anyhow;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use log::info;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::fmt::Display;
 
 const HEADER_SIZE: usize = 8;
 const VERSION: u8 = 1;
@@ -56,18 +56,12 @@ impl Frame {
         }
 
         let version = data[0];
-        info!("\tversion: {}", version);
         let encoding = FrameEncoding::try_from(data[1])?;
-        info!("\tencoding: {}", encoding);
         let frame_kind = data[2]; // web or node 0 for web 1 for node
-        info!("\tframe kind: {}", frame_kind);
         let _frame_code = data[3]; // remains unused when decoding
-        info!("\tframe code: {}", _frame_code);
         let len = u32::from_be_bytes([data[4], data[5], data[6], data[7]]) as usize;
-        info!("\tlength: {}", len);
 
         if data.len() < HEADER_SIZE + len {
-            info!("\tdata length: {}", data.len());
             anyhow::bail!("corrupt frame data")
         }
 
@@ -77,12 +71,12 @@ impl Frame {
             0 => {
                 let web = serde_json::from_slice::<WebFrameData>(&payload)?;
                 FrameData::Web(web)
-            },
+            }
             1 => {
                 let node = serde_json::from_slice::<NodeFrameData>(&payload)?;
                 FrameData::Node(node)
             }
-            1_u8..=u8::MAX => panic!("invalid frame type"),
+            2_u8..=u8::MAX => anyhow::bail!("invalid frame type"),
         };
 
         Ok(Self {

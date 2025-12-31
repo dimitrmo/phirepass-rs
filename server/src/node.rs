@@ -67,13 +67,18 @@ async fn handle_node_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
     while let Some(msg) = ws_rx.next().await {
         let msg = match msg {
             Ok(msg) => msg,
-            Err(_) => {
+            Err(err) => {
+                warn!("node web socket error: {err}");
                 disconnect_node(&state, id).await;
                 return;
             }
         };
 
         match msg {
+            Message::Close(reason) => {
+                // todo handle close
+                warn!("node connection close message: {:?}", reason);
+            }
             Message::Binary(data) => {
                 let frame = match Frame::decode(&data) {
                     Ok(frame) => frame,

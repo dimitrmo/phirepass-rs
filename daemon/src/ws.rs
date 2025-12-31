@@ -3,8 +3,12 @@ use crate::ssh::{SSHCommand, SSHConfig, SSHConfigAuth, SSHConnection, SSHSession
 use anyhow::anyhow;
 use futures_util::stream::SplitStream;
 use futures_util::{SinkExt, StreamExt};
-use log::{debug, info, warn};
+use log::{debug, error, info, warn};
 use phirepass_common::env::Mode;
+use phirepass_common::protocol::common::{Frame, FrameData, FrameEncoding};
+use phirepass_common::protocol::node::NodeFrameData;
+use phirepass_common::stats::Stats;
+use phirepass_common::time::now_millis;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -13,11 +17,10 @@ use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::{Receiver, Sender, channel};
 use tokio::sync::oneshot;
+use tokio_tungstenite::tungstenite::Error;
 use tokio_tungstenite::{
     MaybeTlsStream, WebSocketStream, connect_async, tungstenite::protocol::Message,
 };
-use phirepass_common::protocol::common::{Frame, FrameData, FrameEncoding};
-use phirepass_common::protocol::node::NodeFrameData;
 
 type WebSocketReader = SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>;
 
@@ -50,8 +53,8 @@ impl SessionHandle {
 }
 
 pub(crate) struct WebSocketConnection {
-    writer: Sender<Vec<u8>>,
-    reader: Receiver<Vec<u8>>,
+    writer: Sender<Frame>,
+    reader: Receiver<Frame>,
     sessions: Arc<Mutex<HashMap<String, SessionHandle>>>,
 }
 
@@ -77,7 +80,7 @@ fn generate_server_endpoint(mode: Mode, server_host: String, server_port: u16) -
 impl WebSocketConnection {
     pub fn new() -> Self {
         // Cap the outbound queue to avoid unbounded memory use when the socket is back-pressured.
-        let (tx, rx) = channel::<Vec<u8>>(1024);
+        let (tx, rx) = channel::<Frame>(1024);
         Self {
             reader: rx,
             writer: tx,
@@ -109,31 +112,38 @@ impl WebSocketConnection {
             encoding: FrameEncoding::JSON,
             data: NodeFrameData::Auth {
                 token: config.token.clone(),
-            }.into(),
+            }
+            .into(),
         };
 
-        write.send(Message::Binary(frame.to_bytes()?.into())).await?;
+        write
+            .send(Message::Binary(frame.to_bytes()?.into()))
+            .await?;
 
-        /*
+        let (node_id, version) = read_auth_response(&mut read).await?;
+        info!("daemon authenticated successfully {node_id} with server version {version}");
+        // todo: proper authentication
+        // todo: compare version for system compatibility
 
-        let (cid, version) = read_next_auth_response(&mut read).await?;
-        info!("daemon authenticated successfully {cid} with server version {version}");
-
-        let tx_writer = self.writer.clone();
-        let hb_tx = self.writer.clone();
         let mut rx = self.reader;
-        let sessions = self.sessions.clone();
-
         let write_task = tokio::spawn(async move {
             while let Some(frame) = rx.recv().await {
-                if let Err(err) = write.send(Message::Binary(frame.into())).await {
-                    warn!("failed to send frame: {}", err);
-                    break;
+                if let Ok(data) = frame.to_bytes() {
+                    if let Err(err) = write.send(Message::Binary(data.into())).await {
+                        warn!("failed to send frame: {}", err);
+                    }
                 }
             }
         });
 
-        debug!("writer setup");*/
+        let reader_task = spawn_reader_task(
+            read,
+            self.writer.clone(),
+            config.clone(),
+            self.sessions.clone(),
+        ).await;
+
+        /*
 
         let reader_task = tokio::spawn(async move {
             while let Some(msg) = read.next().await {
@@ -185,102 +195,185 @@ impl WebSocketConnection {
                     }
                 }
             }
-        });
+        });*/
 
-        debug!("reader setup");
-/*
-        let heartbeat_task = tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(15));
-            loop {
-                interval.tick().await;
+        let heartbeat_task =
+            spawn_heartbeat_task(self.writer.clone(), config.stats_refresh_interval as u64).await;
 
-                let Some(stats) = Stats::gather() else {
-                    warn!("failed to gather stats for heartbeat");
-                    continue;
-                };
-
-                match encode_node_control(&NodeControlMessage::Heartbeat { stats }) {
-                    Ok(raw) => {
-                        if hb_tx.send(raw).await.is_err() {
-                            warn!("failed to queue heartbeat: channel closed");
-                            break;
-                        }
-                    }
-                    Err(err) => warn!("failed to encode heartbeat: {}", err),
-                }
-            }
-        });
-
-        let ping_tx = self.writer.clone();
-        let ping_task = tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(ping_interval as u64));
-            loop {
-                interval.tick().await;
-
-                let sent_at = now_millis();
-                match encode_node_control(&NodeControlMessage::Ping { sent_at }) {
-                    Ok(raw) => {
-                        if ping_tx.send(raw).await.is_err() {
-                            warn!("failed to queue ping: channel closed");
-                            break;
-                        }
-                        info!("ping sent at {sent_at}");
-                    }
-                    Err(err) => warn!("failed to encode ping: {err}"),
-                }
-            }
-        });
-*/
-        info!("connected");
+        let ping_task = spawn_ping_task(self.writer.clone(), config.ping_interval as u64).await;
 
         tokio::select! {
-            // _ = ping_task => warn!("ping task ended"),
-            // _ = write_task => warn!("write task ended"),
+            _ = ping_task => warn!("ping task ended"),
+            _ = write_task => warn!("write task ended"),
             _ = reader_task => warn!("read task ended"),
-            // _ = heartbeat_task => warn!("heartbeat task ended"),
+            _ = heartbeat_task => warn!("heartbeat task ended"),
         }
 
         Ok(())
     }
 }
-/*
-async fn read_next_auth_response(read: &mut WebSocketReader) -> anyhow::Result<(String, String)> {
-    if let Some(msg) = read_next_control(read).await? {
-        if let NodeFrameData::AuthResponse {
-            ..
-        } = msg
-        {
-            if success {
-                Ok((cid, version))
+
+async fn spawn_reader_task(
+    mut reader: WebSocketReader,
+    sender: Sender<Frame>,
+    config: Arc<Env>,
+    sessions: Arc<Mutex<HashMap<String, SessionHandle>>>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        while let Some(frame) = reader.next().await {
+            match frame {
+                Ok(Message::Binary(data)) => {
+                    let frame = match Frame::decode(&data) {
+                        Ok(frame) => frame,
+                        Err(err) => {
+                            warn!("received malformed frame: {err}");
+                            return;
+                        }
+                    };
+
+                    let data = match frame.data {
+                        FrameData::Node(data) => data,
+                        FrameData::Web(_) => {
+                            warn!("received web frame, but expected a node frame");
+                            return;
+                        }
+                    };
+
+                    debug!("received node frame: {data:?}");
+
+                    handle_message(data, &sender, &config, &sessions).await;
+                }
+                Ok(Message::Close(reason)) => {
+                    info!("received close message: {reason:?}");
+                    break;
+                }
+                Err(err) => {
+                    error!("error receiving frame: {err:?}");
+                }
+                _ => {
+                    warn!("received unsupported socket frame");
+                }
+            }
+        }
+    })
+}
+
+async fn spawn_ping_task(sender: Sender<Frame>, ping_interval: u64) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(ping_interval));
+        loop {
+            interval.tick().await;
+
+            let sent_at = now_millis();
+
+            let frame = Frame {
+                version: Frame::version(),
+                encoding: FrameEncoding::JSON,
+                data: NodeFrameData::Ping { sent_at }.into(),
+            };
+
+            if let Err(err) = sender.send(frame).await {
+                warn!("failed to send heartbeat frame: {err}");
             } else {
-                anyhow::bail!("daemon failed to authenticated")
+                debug!("ping sent");
             }
-        } else {
-            anyhow::bail!("unexpected authentication response")
         }
-    } else {
-        anyhow::bail!("failed to read next control message")
+    })
+}
+
+async fn spawn_heartbeat_task(
+    sender: Sender<Frame>,
+    heartbeat_interval: u64,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(heartbeat_interval));
+        loop {
+            interval.tick().await;
+
+            let Some(stats) = Stats::gather() else {
+                warn!("failed to gather stats for heartbeat");
+                continue;
+            };
+
+            let frame = Frame {
+                version: Frame::version(),
+                encoding: FrameEncoding::JSON,
+                data: NodeFrameData::Heartbeat { stats }.into(),
+            };
+
+            if let Err(err) = sender.send(frame).await {
+                warn!("failed to send heartbeat frame: {err}");
+            } else {
+                debug!("heartbeat sent");
+            }
+        }
+    })
+}
+
+async fn read_auth_response(reader: &mut WebSocketReader) -> anyhow::Result<((String, String))> {
+    match read_next_frame(reader).await {
+        None => anyhow::bail!("failed to read auth response"),
+        Some(frame) => {
+            let NodeFrameData::AuthResponse {
+                node_id,
+                success,
+                version,
+            } = frame
+            else {
+                anyhow::bail!(
+                    "wrong frame type, expected NodeFrameData::Auth, got {:?}",
+                    frame
+                )
+            };
+
+            if !success {
+                anyhow::bail!("failed to authenticate node")
+            }
+
+            Ok((node_id, version))
+        }
     }
 }
 
-async fn read_next_frame(
-    read: &mut WebSocketReader,
-) -> anyhow::Result<Option<NodeFrameData>> {
-    while let Some(msg) = read.next().await {
-        match msg {
-            Ok(Message::Binary(data)) => {
-                //
-            },
-            Ok(Message::Close(reason)) => {
-                return Err(anyhow!("connection closed: {:?}", reason));
-            }
-            Ok(other) => warn!("received unexpected message: {:?}", other),
-            Err(err) => return Err(anyhow!("failed to read frame: {}", err)),
+async fn read_next_frame(reader: &mut WebSocketReader) -> Option<NodeFrameData> {
+    match reader.next().await {
+        Some(Ok(Message::Binary(data))) => {
+            let frame = match Frame::decode(&data) {
+                Ok(frame) => frame,
+                Err(err) => {
+                    warn!("received malformed frame: {err}");
+                    return None;
+                }
+            };
+
+            let node_frame = match frame.data {
+                FrameData::Node(data) => data,
+                FrameData::Web(_) => {
+                    warn!("received web frame, but expected a node frame");
+                    return None;
+                }
+            };
+
+            info!("received node frame: {node_frame:?}");
+
+            return Some(node_frame);
         }
+        _ => {}
     }
 
-    Ok(None)
+    None
 }
+
+async fn handle_message(
+    data: NodeFrameData,
+    sender: &Sender<Frame>,
+    config: &Arc<Env>,
+    sessions: &Arc<Mutex<HashMap<String, SessionHandle>>>,
+) {
+    debug!("handling message: {data:?}");
+}
+
+/*
 
 async fn handle_control_from_server(
     msg: NodeControlMessage,
