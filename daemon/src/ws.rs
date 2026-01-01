@@ -1,6 +1,7 @@
 use crate::env::{Env, SSHAuthMethod};
 use crate::sftp::{SFTPCommand, SFTPConfig, SFTPConfigAuth, SFTPConnection, SFTPSessionHandle};
 use crate::ssh::{SSHCommand, SSHConfig, SSHConfigAuth, SSHConnection, SSHSessionHandle};
+use anyhow::anyhow;
 use futures_util::stream::SplitStream;
 use futures_util::{SinkExt, StreamExt};
 use log::{debug, error, info, warn};
@@ -12,24 +13,36 @@ use phirepass_common::protocol::web::WebFrameData;
 use phirepass_common::stats::Stats;
 use phirepass_common::time::now_millis;
 use std::collections::HashMap;
+use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 use tokio::net::TcpStream;
-use tokio::sync::Mutex;
 use tokio::sync::mpsc::{Receiver, Sender, channel};
-use tokio::sync::oneshot;
+use tokio::sync::{Mutex, oneshot};
 use tokio_tungstenite::{
     MaybeTlsStream, WebSocketStream, connect_async, tungstenite::protocol::Message,
 };
+
+type TunnelSessions = Arc<Mutex<HashMap<(String, u32), SessionHandle>>>;
 
 type WebSocketReader = SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>;
 
 static SESSION_ID: AtomicU32 = AtomicU32::new(1);
 
+#[derive(Debug)]
 enum SessionHandle {
     SSH(SSHSessionHandle),
     SFTP(SFTPSessionHandle),
+}
+
+impl Display for SessionHandle {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SessionHandle::SSH(_) => write!(f, "SSHSessionHandle"),
+            SessionHandle::SFTP(_) => write!(f, "SFTPSessionHandle"),
+        }
+    }
 }
 
 enum SessionCommand {
@@ -38,13 +51,6 @@ enum SessionCommand {
 }
 
 impl SessionHandle {
-    pub fn get_id(&self) -> u32 {
-        match self {
-            SessionHandle::SSH(ssh_handle) => ssh_handle.id,
-            SessionHandle::SFTP(sftp_handle) => sftp_handle.id,
-        }
-    }
-
     pub fn get_stdin(&self) -> SessionCommand {
         match self {
             SessionHandle::SSH(ssh_handle) => SessionCommand::SSH(ssh_handle.stdin.clone()),
@@ -55,9 +61,11 @@ impl SessionHandle {
     pub async fn shutdown(self) {
         match self {
             SessionHandle::SSH(ssh_handle) => {
+                info!("shutting down ssh handle");
                 ssh_handle.shutdown().await;
             }
             SessionHandle::SFTP(sftp_handle) => {
+                info!("shutting down sftp handle");
                 sftp_handle.shutdown().await;
             }
         }
@@ -67,7 +75,7 @@ impl SessionHandle {
 pub(crate) struct WebSocketConnection {
     writer: Sender<Frame>,
     reader: Receiver<Frame>,
-    sessions: Arc<Mutex<HashMap<String, SessionHandle>>>,
+    sessions: TunnelSessions,
 }
 
 fn generate_server_endpoint(mode: Mode, server_host: String, server_port: u16) -> String {
@@ -172,7 +180,7 @@ async fn spawn_reader_task(
     mut reader: WebSocketReader,
     sender: Sender<Frame>,
     config: Arc<Env>,
-    sessions: Arc<Mutex<HashMap<String, SessionHandle>>>,
+    sessions: TunnelSessions,
 ) -> tokio::task::JoinHandle<()> {
     let target = target.clone();
     tokio::spawn(async move {
@@ -296,7 +304,7 @@ async fn handle_message(
     data: NodeFrameData,
     sender: &Sender<Frame>,
     config: &Arc<Env>,
-    sessions: &Arc<Mutex<HashMap<String, SessionHandle>>>,
+    sessions: &TunnelSessions,
 ) {
     debug!("handling message: {data:?}");
 
@@ -347,7 +355,8 @@ async fn handle_message(
             info!("received pong; round-trip={}ms (sent_at={sent_at})", rtt);
         }
         NodeFrameData::ConnectionDisconnect { cid } => {
-            close_ssh_tunnel(cid, sessions.clone()).await;
+            info!("received connection disconnect for {cid}");
+            close_tunnels_for_cid(&cid, &sessions).await;
         }
         NodeFrameData::SSHWindowResize {
             cid,
@@ -389,93 +398,107 @@ async fn handle_message(
 
 async fn send_sftp_list_data(
     cid: String,
-    _sid: u32,
+    sid: u32,
     path: String,
-    sessions: &Arc<Mutex<HashMap<String, SessionHandle>>>,
+    sessions: &TunnelSessions,
     msg_id: Option<u32>,
-) -> anyhow::Result<(), String> {
+) -> anyhow::Result<()> {
+    let ccid = cid.clone();
+
     let stdin = {
         let sessions = sessions.lock().await;
-        sessions.get(&cid).map(|s| s.get_stdin())
+        sessions.get(&(cid, sid)).map(|s| s.get_stdin())
     };
 
     let Some(stdin) = stdin else {
-        return Err(format!("no session found for connection {cid}"));
+        anyhow::bail!(format!("no session found for connection {ccid}"))
     };
 
     let SessionCommand::SFTP(stdin) = stdin else {
-        return Err(format!("no sftp tunnel found for connection {cid}"));
+        anyhow::bail!(format!("no sftp tunnel found for connection {ccid}"))
     };
 
     stdin
         .send(SFTPCommand::List(path, msg_id))
         .await
-        .map_err(|err| format!("failed to queue command to sftp tunnel for {cid}: {err}"))
+        .map_err(|err| anyhow!(err))
 }
 
 async fn send_ssh_tunnel_data(
     cid: String,
-    _sid: u32,
+    sid: u32,
     data: Vec<u8>,
-    sessions: &Arc<Mutex<HashMap<String, SessionHandle>>>,
-) -> anyhow::Result<(), String> {
+    sessions: &TunnelSessions,
+) -> anyhow::Result<()> {
+    let ccid = cid.clone();
+
     let stdin = {
         let sessions = sessions.lock().await;
-        sessions.get(&cid).map(|s| s.get_stdin())
+        sessions.get(&(cid, sid)).map(|s| s.get_stdin())
     };
 
     let Some(stdin) = stdin else {
-        return Err(format!("no session found for connection {cid}"));
+        anyhow::bail!(format!("no session found for connection {ccid}"))
     };
 
     let SessionCommand::SSH(stdin) = stdin else {
-        return Err(format!("no ssh tunnel found for connection {cid}"));
+        anyhow::bail!(format!("no ssh tunnel found for connection {ccid}"))
     };
 
     stdin
         .send(SSHCommand::Data(data))
         .await
-        .map_err(|err| format!("failed to queue data to ssh tunnel for {cid}: {err}"))
+        .map_err(|err| anyhow!(err))
 }
 
 async fn send_ssh_forward_resize(
     cid: String,
-    _sid: u32,
+    sid: u32,
     cols: u32,
     rows: u32,
-    sessions: &Arc<Mutex<HashMap<String, SessionHandle>>>,
-) -> anyhow::Result<(), String> {
+    sessions: &TunnelSessions,
+) -> anyhow::Result<()> {
+    let ccid = cid.clone();
+
     let stdin = {
         let sessions = sessions.lock().await;
-        sessions.get(&cid).map(|s| s.get_stdin())
+        sessions.get(&(cid, sid)).map(|s| s.get_stdin())
     };
 
     let Some(stdin) = stdin else {
-        return Err(format!("no session found for connection {cid}"));
+        anyhow::bail!(format!("no session found for connection {ccid}"))
     };
 
     let SessionCommand::SSH(stdin) = stdin else {
-        return Err(format!("no ssh tunnel found for connection {cid}"));
+        anyhow::bail!(format!("no ssh tunnel found for connection {ccid}"))
     };
 
     stdin
         .send(SSHCommand::Resize { cols, rows })
         .await
-        .map_err(|err| format!("failed to queue command to ssh tunnel for {cid}: {err}"))
+        .map_err(|err| anyhow!(err))
 }
 
-async fn close_ssh_tunnel(cid: String, sessions: Arc<Mutex<HashMap<String, SessionHandle>>>) {
-    let handle = {
-        let mut sessions = sessions.lock().await;
-        sessions.remove(&cid)
+async fn close_tunnels_for_cid(cid: &String, sessions: &TunnelSessions) {
+    info!("closing connection {cid}");
+
+    // Collect keys to remove
+    let keys_to_remove: Vec<(String, u32)> = {
+        let sessions = sessions.lock().await;
+        sessions
+            .iter()
+            .filter(|entry| entry.0.0.eq(cid))
+            .map(|entry| entry.0.clone())
+            .collect()
     };
 
-    match handle {
-        Some(handle) => {
-            info!("closing ssh tunnel for connection {cid}");
+    // Remove and shutdown each session
+    let mut sessions = sessions.lock().await;
+    for key in keys_to_remove {
+        info!("removing tunnel by key {:?}", key);
+        if let Some(handle) = sessions.remove(&key) {
             handle.shutdown().await;
         }
-        None => info!("no ssh tunnel to close for connection {cid}"),
     }
 }
 
@@ -493,7 +516,7 @@ async fn start_sftp_tunnel(
     cid: &String,
     config: &Arc<Env>,
     credentials: SFTPConfigAuth,
-    sessions: &Arc<Mutex<HashMap<String, SessionHandle>>>,
+    sessions: &TunnelSessions,
     msg_id: Option<u32>,
 ) {
     let (stdin_tx, stdin_rx) = channel::<SFTPCommand>(512);
@@ -519,7 +542,7 @@ async fn start_sftp_tunnel(
         config.ssh_host, config.ssh_port
     );
 
-    let sftp_task = tokio::spawn(async move {
+    let _sftp_task = tokio::spawn(async move {
         info!("sftp task started for connection {cid_for_task}");
 
         send_frame_data(
@@ -575,28 +598,8 @@ async fn start_sftp_tunnel(
         }
     });
 
-    let sessions_for_cleanup = sessions.clone();
-    let cid_for_cleanup = cid_for_connection.clone();
-    let cleanup_task = tokio::spawn(async move {
-        if let Err(err) = sftp_task.await {
-            warn!("sftp session join error for {cid_for_cleanup}: {err}");
-        }
-
-        let mut sessions = sessions_for_cleanup.lock().await;
-        let should_remove = sessions
-            .get(&cid_for_cleanup)
-            .map(|handle| handle.get_id() == session_id)
-            .unwrap_or(false);
-
-        if should_remove {
-            sessions.remove(&cid_for_cleanup);
-        }
-    });
-
     let handle = SessionHandle::SFTP(SFTPSessionHandle {
-        id: session_id.clone(),
         stop: Some(stop_tx),
-        join: cleanup_task,
         stdin: stdin_tx,
     });
 
@@ -604,10 +607,11 @@ async fn start_sftp_tunnel(
 
     let previous = {
         let mut sessions = sessions.lock().await;
-        sessions.insert(cid_for_connection, handle)
+        sessions.insert((cid_for_connection.clone(), session_id), handle)
     };
 
     if let Some(prev) = previous {
+        info!("removing previous sftp session {cid_for_connection}");
         prev.shutdown().await;
     }
 }
@@ -618,7 +622,7 @@ async fn start_ssh_tunnel(
     cid: &String,
     config: &Arc<Env>,
     credentials: SSHConfigAuth,
-    sessions: &Arc<Mutex<HashMap<String, SessionHandle>>>,
+    sessions: &TunnelSessions,
     msg_id: Option<u32>,
 ) {
     let (stdin_tx, stdin_rx) = channel::<SSHCommand>(512);
@@ -644,7 +648,7 @@ async fn start_ssh_tunnel(
         config.ssh_host, config.ssh_port
     );
 
-    let ssh_task = tokio::spawn(async move {
+    let _ssh_task = tokio::spawn(async move {
         info!("ssh task started for connection {cid_for_task}");
 
         send_frame_data(
@@ -700,28 +704,8 @@ async fn start_ssh_tunnel(
         }
     });
 
-    let sessions_for_cleanup = sessions.clone();
-    let cid_for_cleanup = cid_for_connection.clone();
-    let cleanup_task = tokio::spawn(async move {
-        if let Err(err) = ssh_task.await {
-            warn!("ssh session join error for {cid_for_cleanup}: {err}");
-        }
-
-        let mut sessions = sessions_for_cleanup.lock().await;
-        let should_remove = sessions
-            .get(&cid_for_cleanup)
-            .map(|handle| handle.get_id() == session_id)
-            .unwrap_or(false);
-
-        if should_remove {
-            sessions.remove(&cid_for_cleanup);
-        }
-    });
-
     let handle = SessionHandle::SSH(SSHSessionHandle {
-        id: session_id.clone(),
         stop: Some(stop_tx),
-        join: cleanup_task,
         stdin: stdin_tx,
     });
 
@@ -729,10 +713,11 @@ async fn start_ssh_tunnel(
 
     let previous = {
         let mut sessions = sessions.lock().await;
-        sessions.insert(cid_for_connection, handle)
+        sessions.insert((cid_for_connection.clone(), session_id), handle)
     };
 
     if let Some(prev) = previous {
+        info!("removing previous ssh session {cid_for_connection}");
         prev.shutdown().await;
     }
 }

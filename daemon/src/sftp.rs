@@ -12,27 +12,24 @@ use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::oneshot;
-use tokio::task::JoinHandle;
 
 #[derive(Clone, Debug)]
 pub(crate) enum SFTPCommand {
     List(String, Option<u32>),
 }
 
+#[derive(Debug)]
 pub(crate) struct SFTPSessionHandle {
-    pub id: u32,
-    pub join: JoinHandle<()>,
     pub stdin: Sender<SFTPCommand>,
     pub stop: Option<oneshot::Sender<()>>,
 }
 
 impl SFTPSessionHandle {
     pub async fn shutdown(mut self) {
+        info!("shutting down sftp session");
         if let Some(stop) = self.stop.take() {
             let _ = stop.send(());
-        }
-        if let Err(err) = self.join.await {
-            warn!("ssh session join error: {err}");
+            debug!("sftp self stopped sent");
         }
     }
 }
@@ -125,13 +122,11 @@ impl SFTPConnection {
         let stream = channel.into_stream();
         let sftp = SftpSession::new(stream).await?;
 
-        send_directory_listing(&tx, &sftp, ".", sid, None).await;
-
         loop {
             tokio::select! {
                 biased;
                 _ = &mut shutdown_rx => {
-                    info!("shutdown signal received for ssh tunnel {cid}");
+                    info!("shutdown signal received for sftp tunnel {cid}");
                     break;
                 }
                 Some(cmd) = cmd_rx.recv() => {

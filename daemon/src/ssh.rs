@@ -11,7 +11,6 @@ use std::io::Cursor;
 use std::sync::Arc;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::oneshot;
-use tokio::task::JoinHandle;
 
 #[derive(Clone, Debug)]
 pub(crate) enum SSHCommand {
@@ -19,9 +18,8 @@ pub(crate) enum SSHCommand {
     Resize { cols: u32, rows: u32 },
 }
 
+#[derive(Debug)]
 pub(crate) struct SSHSessionHandle {
-    pub id: u32,
-    pub join: JoinHandle<()>,
     pub stdin: Sender<SSHCommand>,
     pub stop: Option<oneshot::Sender<()>>,
 }
@@ -30,9 +28,7 @@ impl SSHSessionHandle {
     pub async fn shutdown(mut self) {
         if let Some(stop) = self.stop.take() {
             let _ = stop.send(());
-        }
-        if let Err(err) = self.join.await {
-            warn!("ssh session join error: {err}");
+            debug!("ssh self stopped sent");
         }
     }
 }

@@ -344,10 +344,8 @@ function connect() {
         console.log('#received frame', frame);
         switch (frame.data.web.type) {
             case "SFTPListItems":
-                console.log("SFTPListItems", frame.data.web);
-                if (frame.data.web.path === '.') {
-                    channel.send_sftp_list_data(selected_node_id, session_id, ".config");
-                }
+                // todo: Render items in sftp gui
+                console.log('sftp root dir items', frame.data.web.dir);
                 break;
             case "TunnelData":
                 if (!isSshConnected) {

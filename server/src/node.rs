@@ -140,6 +140,15 @@ async fn handle_node_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
                     NodeFrameData::WebFrame { frame, sid } => {
                         handle_frame_response(&state, frame, sid, &id).await;
                     }
+                    // daemon notified server with data for web
+                    NodeFrameData::TunnelClosed {
+                        protocol,
+                        cid,
+                        sid,
+                        msg_id,
+                    } => {
+                        handle_tunnel_closed(&state, protocol, cid.as_str(), sid, &id, msg_id).await;
+                    }
                     o => warn!("unhandled node frame: {o:?}"),
                 }
             }
@@ -218,6 +227,43 @@ async fn handle_frame_response(state: &AppState, frame: Frame, nid: String, cid:
         }
     }
 }*/
+
+async fn handle_tunnel_closed(
+    state: &AppState,
+    protocol: u8,
+    cid: &str,
+    sid: u32,
+    node_id: &Ulid,
+    msg_id: Option<u32>,
+) {
+    debug!("handling tunnel closed for connection {cid} with session {sid}");
+    let cid = Ulid::from_str(cid).unwrap();
+
+    let connections = state.connections.read().await;
+    let Some(connection) = connections.get(&cid) else {
+        warn!("connection {cid} not found");
+        return;
+    };
+
+    {
+        let key = format!("{node_id}-{sid}");
+        let mut tunnel_sessions = state.tunnel_sessions.write().await;
+        tunnel_sessions.remove(&key);
+    }
+
+    match connection
+        .tx
+        .send(WebFrameData::TunnelClosed {
+            protocol,
+            sid,
+            msg_id,
+        })
+        .await
+    {
+        Ok(..) => info!("tunnel closed notification sent to web client {cid}"),
+        Err(err) => warn!("failed to send tunnel closed to client {cid}: {err}"),
+    }
+}
 
 async fn handle_tunnel_opened(
     state: &AppState,
