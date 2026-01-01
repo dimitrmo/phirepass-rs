@@ -1,4 +1,5 @@
 use log::{debug, info, warn};
+use phirepass_common::protocol::Protocol;
 use phirepass_common::protocol::common::Frame;
 use phirepass_common::protocol::node::NodeFrameData;
 use phirepass_common::protocol::web::WebFrameData;
@@ -162,6 +163,7 @@ impl SSHConnection {
                                 .send(
                                     NodeFrameData::WebFrame {
                                         frame: WebFrameData::TunnelData {
+                                            protocol: Protocol::SSH as u8,
                                             node_id: node_id.clone(),
                                             sid,
                                             data: data.to_vec(),

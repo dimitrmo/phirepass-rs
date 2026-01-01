@@ -18,6 +18,7 @@ libc = { version = "0.2.178", optional = true }
 netstat2 = { version = "0.11.2", optional = true }
 mac_address = { version = "1.1.8", optional = true }
 axum = { workspace = true, optional = true }
+russh-sftp = "2.1.1"
 
 [features]
 full = ["env", "ip", "logger", "node", "protocol", "stats", "time"]

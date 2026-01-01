@@ -253,7 +253,7 @@ const submitPassword = () => {
     );
 
     if (socket_healthy()) {
-        socket.open_ssh_tunnel(selected_node_id, session_username, password);
+        socket.open_sftp_tunnel(selected_node_id, session_username, password);
     }
 };
 
@@ -313,7 +313,7 @@ function connect() {
 
     channel.on_connection_open(() => {
         channel.start_heartbeat();
-        channel.open_ssh_tunnel(selected_node_id);
+        channel.open_sftp_tunnel(selected_node_id);
         log("WebSocket connected");
         setStatus("Connecting to node...", "info");
     });
@@ -341,7 +341,14 @@ function connect() {
     });
 
     channel.on_protocol_message((frame) => {
+        console.log('#received frame', frame);
         switch (frame.data.web.type) {
+            case "SFTPListItems":
+                console.log("SFTPListItems", frame.data.web);
+                if (frame.data.web.path === '.') {
+                    channel.send_sftp_list_data(selected_node_id, session_id, ".config");
+                }
+                break;
             case "TunnelData":
                 if (!isSshConnected) {
                     isSshConnected = true;
@@ -358,7 +365,8 @@ function connect() {
                 setStatus("Tunnel established", "info");
                 session_id = frame.data.web.sid;
                 if (socket_healthy()) {
-                    channel.send_terminal_resize(selected_node_id, session_id, term.cols, term.rows);
+                    // channel.send_ssh_terminal_resize(selected_node_id, session_id, term.cols, term.rows);
+                    channel.send_sftp_list_data(selected_node_id, session_id, ".");
                 }
                 break;
             case "TunnelClosed":
@@ -475,21 +483,21 @@ document.addEventListener("DOMContentLoaded", () => {
         }
 
         if (socket && socket.is_open() && !!selected_node_id && !!session_id) {
-            socket.send_tunnel_data(selected_node_id, session_id, data, 0);
+            socket.send_ssh_tunnel_data(selected_node_id, session_id, data, 0);
         }
     });
 
     term.onResize(({ cols, rows }) => {
         fitAddon.fit();
         if (socket && socket.is_open() && !!selected_node_id && !!session_id) {
-            socket.send_terminal_resize(selected_node_id, session_id, cols, rows, 0);
+            socket.send_ssh_terminal_resize(selected_node_id, session_id, cols, rows, 0);
         }
     });
 
     const resizeObserver = new ResizeObserver(() => {
         fitAddon.fit();
         if (socket && socket.is_open() && !!selected_node_id && !!session_id) {
-            socket.send_terminal_resize(selected_node_id, session_id, term.cols, term.rows);
+            socket.send_ssh_terminal_resize(selected_node_id, session_id, term.cols, term.rows);
         }
     });
 

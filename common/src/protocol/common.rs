@@ -41,7 +41,6 @@ impl From<WebFrameData> for Frame {
 pub enum FrameData {
     #[serde(rename = "web")]
     Web(WebFrameData),
-
     #[cfg(not(target_arch = "wasm32"))]
     #[serde(rename = "node")]
     Node(NodeFrameData),

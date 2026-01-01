@@ -1,4 +1,5 @@
 use crate::env::{Env, SSHAuthMethod};
+use crate::sftp::{SFTPCommand, SFTPConfig, SFTPConfigAuth, SFTPConnection, SFTPSessionHandle};
 use crate::ssh::{SSHCommand, SSHConfig, SSHConfigAuth, SSHConnection, SSHSessionHandle};
 use futures_util::stream::SplitStream;
 use futures_util::{SinkExt, StreamExt};
@@ -28,18 +29,26 @@ static SESSION_ID: AtomicU32 = AtomicU32::new(1);
 
 enum SessionHandle {
     SSH(SSHSessionHandle),
+    SFTP(SFTPSessionHandle),
+}
+
+enum SessionCommand {
+    SSH(Sender<SSHCommand>),
+    SFTP(Sender<SFTPCommand>),
 }
 
 impl SessionHandle {
     pub fn get_id(&self) -> u32 {
         match self {
             SessionHandle::SSH(ssh_handle) => ssh_handle.id,
+            SessionHandle::SFTP(sftp_handle) => sftp_handle.id,
         }
     }
 
-    pub fn get_stdin(&self) -> Sender<SSHCommand> {
+    pub fn get_stdin(&self) -> SessionCommand {
         match self {
-            SessionHandle::SSH(ssh_handle) => ssh_handle.stdin.clone(),
+            SessionHandle::SSH(ssh_handle) => SessionCommand::SSH(ssh_handle.stdin.clone()),
+            SessionHandle::SFTP(sftp_handle) => SessionCommand::SFTP(sftp_handle.stdin.clone()),
         }
     }
 
@@ -47,6 +56,9 @@ impl SessionHandle {
         match self {
             SessionHandle::SSH(ssh_handle) => {
                 ssh_handle.shutdown().await;
+            }
+            SessionHandle::SFTP(sftp_handle) => {
+                sftp_handle.shutdown().await;
             }
         }
     }
@@ -138,60 +150,6 @@ impl WebSocketConnection {
             self.sessions.clone(),
         )
         .await;
-
-        /*
-
-        let reader_task = tokio::spawn(async move {
-            while let Some(msg) = read.next().await {
-                match msg {
-                    Ok(Message::Binary(data)) => {
-                        let frame = match Frame::decode(&data) {
-                            Ok(frame) => frame,
-                            Err(err) => {
-                                warn!("received malformed frame: {err}");
-                                break;
-                            }
-                        };
-
-                        let node_frame = match frame.data {
-                            FrameData::Node(data) => data,
-                            FrameData::Web(_) => {
-                                warn!("received web frame, but expected a node frame");
-                                break;
-                            }
-                        };
-
-                        info!("received node frame: {node_frame:?}");
-                    }
-                    /*
-                    Ok(Message::Binary(data)) => match decode_node_control(&data) {
-                        Ok(msg) => {
-                            handle_control_from_server(
-                                msg,
-                                &tx_writer,
-                                config.clone(),
-                                sessions.clone(),
-                            )
-                            .await
-                        }
-                        Err(err) => warn!("failed to code node control: {err}"),
-                    },
-                     */
-                    Ok(Message::Close(reason)) => {
-                        match reason {
-                            None => warn!("connection closed"),
-                            Some(reason) => warn!("connection closed: {:?}", reason),
-                        }
-                        break;
-                    }
-                    Ok(other) => warn!("received unexpected message: {:?}", other),
-                    Err(err) => {
-                        warn!("failed to read frame: {}", err);
-                        break;
-                    }
-                }
-            }
-        });*/
 
         let heartbeat_task =
             spawn_heartbeat_task(self.writer.clone(), config.stats_refresh_interval as u64).await;
@@ -352,23 +310,35 @@ async fn handle_message(
         } => {
             info!("received open tunnel with protocol {protocol}");
             match Protocol::try_from(protocol) {
-                Ok(Protocol::SSH) => {
-                    match &config.ssh_auth_mode {
-                        SSHAuthMethod::CredentialsPrompt => {
-                            start_ssh_tunnel(
-                                sender,
-                                node_id,
-                                &cid,
-                                config,
-                                SSHConfigAuth::UsernamePassword(username, password),
-                                sessions,
-                                msg_id,
-                            )
-                            .await;
-                        }
+                Ok(Protocol::SFTP) => match &config.ssh_auth_mode {
+                    SSHAuthMethod::CredentialsPrompt => {
+                        start_sftp_tunnel(
+                            sender,
+                            node_id,
+                            &cid,
+                            config,
+                            SFTPConfigAuth::UsernamePassword(username, password),
+                            sessions,
+                            msg_id,
+                        )
+                        .await;
                     }
-                }
-                Err(err) => warn!("invalid protocol value {}: {:?}", protocol, err),
+                },
+                Ok(Protocol::SSH) => match &config.ssh_auth_mode {
+                    SSHAuthMethod::CredentialsPrompt => {
+                        start_ssh_tunnel(
+                            sender,
+                            node_id,
+                            &cid,
+                            config,
+                            SSHConfigAuth::UsernamePassword(username, password),
+                            sessions,
+                            msg_id,
+                        )
+                        .await;
+                    }
+                },
+                Err(err) => warn!("invalid protocol value {protocol}: {err:?}"),
             }
         }
         NodeFrameData::Pong { sent_at } => {
@@ -389,13 +359,58 @@ async fn handle_message(
                 warn!("failed to forward resize: {err}");
             }
         }
-        NodeFrameData::TunnelData { cid, sid, data } => {
-            if let Err(err) = send_ssh_tunnel_data(cid, sid, data, &sessions).await {
-                warn!("failed to forward tunnel data: {err}");
+        NodeFrameData::TunnelData {
+            cid,
+            protocol,
+            sid,
+            data,
+        } => {
+            if protocol == Protocol::SSH as u8 {
+                if let Err(err) = send_ssh_tunnel_data(cid, sid, data, &sessions).await {
+                    warn!("failed to forward tunnel data: {err}");
+                }
+            } else {
+                warn!("unsupported tunnel data for {protocol}: {sid:?}");
+            }
+        }
+        NodeFrameData::SFTPList {
+            cid,
+            path,
+            sid,
+            msg_id,
+        } => {
+            if let Err(err) = send_sftp_list_data(cid, sid, path, &sessions, msg_id).await {
+                warn!("failed to forward sftp list data: {err}");
             }
         }
         o => warn!("not implemented yet: {o:?}"),
     }
+}
+
+async fn send_sftp_list_data(
+    cid: String,
+    _sid: u32,
+    path: String,
+    sessions: &Arc<Mutex<HashMap<String, SessionHandle>>>,
+    msg_id: Option<u32>,
+) -> anyhow::Result<(), String> {
+    let stdin = {
+        let sessions = sessions.lock().await;
+        sessions.get(&cid).map(|s| s.get_stdin())
+    };
+
+    let Some(stdin) = stdin else {
+        return Err(format!("no session found for connection {cid}"));
+    };
+
+    let SessionCommand::SFTP(stdin) = stdin else {
+        return Err(format!("no sftp tunnel found for connection {cid}"));
+    };
+
+    stdin
+        .send(SFTPCommand::List(path, msg_id))
+        .await
+        .map_err(|err| format!("failed to queue command to sftp tunnel for {cid}: {err}"))
 }
 
 async fn send_ssh_tunnel_data(
@@ -410,6 +425,10 @@ async fn send_ssh_tunnel_data(
     };
 
     let Some(stdin) = stdin else {
+        return Err(format!("no session found for connection {cid}"));
+    };
+
+    let SessionCommand::SSH(stdin) = stdin else {
         return Err(format!("no ssh tunnel found for connection {cid}"));
     };
 
@@ -432,13 +451,17 @@ async fn send_ssh_forward_resize(
     };
 
     let Some(stdin) = stdin else {
+        return Err(format!("no session found for connection {cid}"));
+    };
+
+    let SessionCommand::SSH(stdin) = stdin else {
         return Err(format!("no ssh tunnel found for connection {cid}"));
     };
 
     stdin
         .send(SSHCommand::Resize { cols, rows })
         .await
-        .map_err(|err| format!("failed to queue resize to ssh tunnel for {cid}: {err}"))
+        .map_err(|err| format!("failed to queue command to ssh tunnel for {cid}: {err}"))
 }
 
 async fn close_ssh_tunnel(cid: String, sessions: Arc<Mutex<HashMap<String, SessionHandle>>>) {
@@ -461,6 +484,131 @@ async fn send_frame_data(sender: &Sender<Frame>, data: NodeFrameData) {
         warn!("failed to send frame: {err}");
     } else {
         debug!("frame response sent");
+    }
+}
+
+async fn start_sftp_tunnel(
+    tx: &Sender<Frame>,
+    node_id: &String,
+    cid: &String,
+    config: &Arc<Env>,
+    credentials: SFTPConfigAuth,
+    sessions: &Arc<Mutex<HashMap<String, SessionHandle>>>,
+    msg_id: Option<u32>,
+) {
+    let (stdin_tx, stdin_rx) = channel::<SFTPCommand>(512);
+    let (stop_tx, stop_rx) = oneshot::channel();
+    let sender = tx.clone();
+    let cid_for_task = cid.clone();
+    let cid_for_connection = cid.clone();
+    let session_id = SESSION_ID.fetch_add(1, Ordering::Relaxed);
+    // let sessions_for_task = sessions.clone();
+    let tx_for_opened = tx.clone();
+    let cid_for_opened = cid.clone();
+    // let config_for_task = config.clone();
+    let node_id_for_task = node_id.clone();
+
+    let conn = SFTPConnection::new(SFTPConfig {
+        host: config.ssh_host.clone(),
+        port: config.ssh_port,
+        credentials,
+    });
+
+    info!(
+        "connecting sftp for connection {cid_for_task}: {}:{}",
+        config.ssh_host, config.ssh_port
+    );
+
+    let sftp_task = tokio::spawn(async move {
+        info!("sftp task started for connection {cid_for_task}");
+
+        send_frame_data(
+            &sender,
+            NodeFrameData::TunnelOpened {
+                protocol: Protocol::SFTP as u8,
+                cid: cid_for_task.clone(),
+                sid: session_id,
+                msg_id,
+            },
+        )
+        .await;
+
+        match conn
+            .connect(
+                node_id_for_task,
+                cid_for_task,
+                session_id,
+                &sender,
+                stdin_rx,
+                stop_rx,
+            )
+            .await
+        {
+            Ok(_) => {
+                info!("sftp connection {cid_for_opened} ended");
+                send_frame_data(
+                    &sender,
+                    NodeFrameData::TunnelClosed {
+                        protocol: Protocol::SFTP as u8,
+                        cid: cid_for_opened,
+                        sid: session_id,
+                        msg_id,
+                    },
+                )
+                .await;
+            }
+            Err(err) => {
+                warn!("sftp connection error for {cid_for_opened}: {err}");
+                send_frame_data(
+                    &tx_for_opened,
+                    NodeFrameData::WebFrame {
+                        sid: session_id,
+                        frame: WebFrameData::Error {
+                            kind: FrameError::Generic,
+                            message: err.to_string(),
+                            msg_id,
+                        },
+                    },
+                )
+                .await;
+            }
+        }
+    });
+
+    let sessions_for_cleanup = sessions.clone();
+    let cid_for_cleanup = cid_for_connection.clone();
+    let cleanup_task = tokio::spawn(async move {
+        if let Err(err) = sftp_task.await {
+            warn!("sftp session join error for {cid_for_cleanup}: {err}");
+        }
+
+        let mut sessions = sessions_for_cleanup.lock().await;
+        let should_remove = sessions
+            .get(&cid_for_cleanup)
+            .map(|handle| handle.get_id() == session_id)
+            .unwrap_or(false);
+
+        if should_remove {
+            sessions.remove(&cid_for_cleanup);
+        }
+    });
+
+    let handle = SessionHandle::SFTP(SFTPSessionHandle {
+        id: session_id.clone(),
+        stop: Some(stop_tx),
+        join: cleanup_task,
+        stdin: stdin_tx,
+    });
+
+    info!("sftp session handle {session_id} created");
+
+    let previous = {
+        let mut sessions = sessions.lock().await;
+        sessions.insert(cid_for_connection, handle)
+    };
+
+    if let Some(prev) = previous {
+        prev.shutdown().await;
     }
 }
 
@@ -526,6 +674,7 @@ async fn start_ssh_tunnel(
                 send_frame_data(
                     &sender,
                     NodeFrameData::TunnelClosed {
+                        protocol: Protocol::SSH as u8,
                         cid: cid_for_opened,
                         sid: session_id,
                         msg_id,
@@ -576,7 +725,7 @@ async fn start_ssh_tunnel(
         stdin: stdin_tx,
     });
 
-    info!("handle {session_id} created");
+    info!("ssh session handle {session_id} created");
 
     let previous = {
         let mut sessions = sessions.lock().await;

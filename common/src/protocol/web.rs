@@ -1,4 +1,5 @@
 use crate::protocol::common::FrameError;
+use crate::protocol::sftp::SFTPListItem;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -21,12 +22,14 @@ pub enum WebFrameData {
     }, // notify web that tunnel is opened
 
     TunnelData {
+        protocol: u8,
         node_id: String,
         sid: u32,
         data: Vec<u8>,
     }, // bidirectioanal tunnel data
 
     TunnelClosed {
+        protocol: u8,
         sid: u32,
         msg_id: Option<u32>, // echo back the user supplied msg_id
     }, // notify web that tunnel is closed
@@ -37,6 +40,20 @@ pub enum WebFrameData {
         cols: u32,
         rows: u32,
     }, // resize a tunnel's pty ( only for SSH tunnel ) - request sent from web to server
+
+    SFTPList {
+        node_id: String,
+        path: String,
+        sid: u32,
+        msg_id: Option<u32>, // echo back the user supplied msg_id
+    },
+
+    SFTPListItems {
+        path: String,
+        sid: u32,
+        dir: SFTPListItem,
+        msg_id: Option<u32>, // echo back the user supplied msg_id
+    },
 
     Error {
         kind: FrameError,
@@ -54,6 +71,8 @@ impl WebFrameData {
             WebFrameData::TunnelData { .. } => 22,
             WebFrameData::TunnelClosed { .. } => 23,
             WebFrameData::SSHWindowResize { .. } => 30,
+            WebFrameData::SFTPList { .. } => 40,
+            WebFrameData::SFTPListItems { .. } => 41,
             WebFrameData::Error { .. } => 50,
         }
     }

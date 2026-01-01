@@ -204,10 +204,6 @@ impl Channel {
         password: Option<String>,
         msg_id: Option<u32>,
     ) {
-        if !self.is_open() {
-            return;
-        }
-
         self.send_frame_data(WebFrameData::OpenTunnel {
             protocol: Protocol::SSH as u8,
             node_id,
@@ -217,11 +213,7 @@ impl Channel {
         });
     }
 
-    pub fn send_terminal_resize(&self, node_id: String, sid: u32, cols: u32, rows: u32) {
-        if !self.is_open() {
-            return;
-        }
-
+    pub fn send_ssh_terminal_resize(&self, node_id: String, sid: u32, cols: u32, rows: u32) {
         self.send_frame_data(WebFrameData::SSHWindowResize {
             node_id,
             sid,
@@ -230,16 +222,44 @@ impl Channel {
         });
     }
 
-    pub fn send_tunnel_data(&self, node_id: String, sid: u32, data: String) {
-        if !self.is_open() {
-            return;
-        }
-
+    pub fn send_ssh_tunnel_data(&self, node_id: String, sid: u32, data: String) {
         self.send_frame_data(WebFrameData::TunnelData {
+            protocol: Protocol::SSH as u8,
             node_id,
             sid,
             data: data.into_bytes(),
         });
+    }
+
+    pub fn open_sftp_tunnel(
+        &self,
+        node_id: String,
+        username: Option<String>,
+        password: Option<String>,
+        msg_id: Option<u32>,
+    ) {
+        self.send_frame_data(WebFrameData::OpenTunnel {
+            protocol: Protocol::SFTP as u8,
+            node_id,
+            username,
+            password,
+            msg_id,
+        });
+    }
+
+    pub fn send_sftp_list_data(
+        &self,
+        node_id: String,
+        sid: u32,
+        path: String,
+        msg_id: Option<u32>,
+    ) {
+        self.send_frame_data(WebFrameData::SFTPList {
+            node_id,
+            path,
+            sid,
+            msg_id,
+        })
     }
 
     pub fn is_open(&self) -> bool {
@@ -294,6 +314,7 @@ pub enum ErrorType {
 #[derive(Serialize, Deserialize)]
 pub enum Protocol {
     SSH = 0,
+    SFTP = 1,
 }
 
 impl TryFrom<u8> for Protocol {

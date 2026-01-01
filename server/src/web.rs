@@ -104,8 +104,13 @@ async fn handle_web_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
                         warn!("received tunnel opened frame which is invalid if sent by user");
                         break;
                     }
-                    WebFrameData::TunnelData { sid, node_id, data } => {
-                        handle_web_tunnel_data(&state, cid, sid, node_id, data).await;
+                    WebFrameData::TunnelData {
+                        protocol,
+                        sid,
+                        node_id,
+                        data,
+                    } => {
+                        handle_web_tunnel_data(&state, cid, protocol, sid, node_id, data).await;
                     }
                     WebFrameData::TunnelClosed { .. } => {
                         warn!(
@@ -120,6 +125,18 @@ async fn handle_web_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
                         rows,
                     } => {
                         handle_web_resize(&state, cid, sid, node_id, cols, rows).await;
+                    }
+                    WebFrameData::SFTPList {
+                        path,
+                        sid,
+                        node_id,
+                        msg_id,
+                    } => {
+                        handle_sftp_list(&state, cid, sid, node_id, path, msg_id).await;
+                    }
+                    WebFrameData::SFTPListItems { .. } => {
+                        warn!("received sftp list items which is invalid if sent by web client");
+                        break;
                     }
                     WebFrameData::Error { .. } => {
                         warn!("received error frame which is invalid if sent by web client");
@@ -202,6 +219,7 @@ async fn get_node_id_by_cid(
 async fn handle_web_tunnel_data(
     state: &AppState,
     cid: Ulid,
+    protocol: u8,
     sid: u32,
     node_id: String,
     data: Vec<u8>,
@@ -229,6 +247,7 @@ async fn handle_web_tunnel_data(
     if tx
         .send(NodeFrameData::TunnelData {
             cid: cid.to_string(),
+            protocol,
             sid,
             data,
         })
@@ -238,6 +257,48 @@ async fn handle_web_tunnel_data(
         warn!("failed to forward tunnel data to node {node_id}");
     } else {
         debug!("forwarded tunnel data to node {node_id}");
+    }
+}
+
+async fn handle_sftp_list(
+    state: &AppState,
+    cid: Ulid,
+    sid: u32,
+    target: String,
+    path: String,
+    msg_id: Option<u32>,
+) {
+    debug!("handle sftp list request");
+
+    let node_id = match get_node_id_by_cid(state, &cid, target, sid).await {
+        Ok(id) => id,
+        Err(err) => {
+            warn!("error getting node id: {err}");
+            return;
+        }
+    };
+
+    let tx = {
+        let nodes = state.nodes.read().await;
+        nodes.get(&node_id).map(|info| info.tx.clone())
+    };
+
+    let Some(tx) = tx else {
+        warn!("tx for node not found {node_id}");
+        return;
+    };
+
+    match tx
+        .send(NodeFrameData::SFTPList {
+            cid: cid.to_string(),
+            path,
+            sid,
+            msg_id,
+        })
+        .await
+    {
+        Ok(_) => info!("sent ssh window resize to {node_id}"),
+        Err(err) => warn!("failed to forward resize to node {node_id}: {err}"),
     }
 }
 

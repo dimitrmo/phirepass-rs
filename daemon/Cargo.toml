@@ -21,3 +21,4 @@ axum-client-ip = { workspace = true }
 rustls = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+russh-sftp = { workspace = true }
