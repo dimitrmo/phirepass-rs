@@ -2,7 +2,8 @@ use log::{debug, info, warn};
 use phirepass_common::protocol::common::{Frame, FrameError};
 use phirepass_common::protocol::node::NodeFrameData;
 use phirepass_common::protocol::sftp::{
-    SFTPFileChunk, SFTPListItem, SFTPListItemAttributes, SFTPListItemKind, SFTPUploadChunk,
+    SFTPDelete, SFTPFileChunk, SFTPListItem, SFTPListItemAttributes, SFTPListItemKind,
+    SFTPUploadChunk,
 };
 use phirepass_common::protocol::web::WebFrameData;
 use russh::client::Handle;
@@ -32,6 +33,10 @@ pub(crate) enum SFTPCommand {
     },
     Upload {
         chunk: SFTPUploadChunk,
+        msg_id: Option<u32>,
+    },
+    Delete {
+        data: SFTPDelete,
         msg_id: Option<u32>,
     },
 }
@@ -161,6 +166,10 @@ impl SFTPConnection {
                         SFTPCommand::Upload { chunk, msg_id } => {
                             debug!("sftp upload command received for {}/{}: {msg_id:?}", chunk.remote_path, chunk.filename);
                             upload_file_chunk(&tx, &sftp, &chunk, sid, msg_id, uploads).await;
+                        }
+                        SFTPCommand::Delete { data, msg_id } => {
+                            debug!("sftp delete command received for {}/{}: {msg_id:?}", data.path, data.filename);
+                            delete_file(&tx, &sftp, &data, sid, msg_id, uploads).await;
                         }
                     }
                 }
@@ -588,6 +597,60 @@ async fn upload_file_chunk(
                         frame: WebFrameData::Error {
                             kind: FrameError::Generic,
                             message: "File handle not found for final chunk".to_string(),
+                            msg_id,
+                        },
+                        sid,
+                    }
+                    .into(),
+                )
+                .await;
+        }
+    }
+}
+async fn delete_file(
+    tx: &Sender<Frame>,
+    sftp_session: &SftpSession,
+    data: &SFTPDelete,
+    sid: u32,
+    msg_id: Option<u32>,
+    uploads: &SFTPActiveUploads,
+) {
+    let file_path = format!(
+        "{}{}",
+        data.path,
+        if data.path.ends_with('/') { "" } else { "/" }
+    )
+    .trim_end_matches('/')
+    .to_string()
+        + "/"
+        + &data.filename;
+
+    info!("starting file delete: {file_path}");
+
+    // Cancel any active uploads for this file
+    let temp_path = format!("{}.tmp", file_path);
+    {
+        let mut uploads = uploads.lock().await;
+        if uploads.remove(&(temp_path.clone(), sid)).is_some() {
+            info!("cancelled active upload for deleted file: {file_path}");
+        }
+    }
+
+    // Attempt to delete the file
+    match sftp_session.remove_file(&file_path).await {
+        Ok(_) => {
+            info!("file deleted successfully: {file_path}");
+            // No need to send response, UI will refresh the directory listing
+        }
+        Err(err) => {
+            warn!("failed to delete file {file_path}: {err}");
+            // Send error response to web client
+            let _ = tx
+                .send(
+                    NodeFrameData::WebFrame {
+                        frame: WebFrameData::Error {
+                            kind: FrameError::Generic,
+                            message: format!("Failed to delete file: {}", err),
                             msg_id,
                         },
                         sid,

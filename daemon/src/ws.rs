@@ -426,6 +426,16 @@ async fn handle_message(
                 warn!("failed to forward sftp upload data: {err}");
             }
         }
+        NodeFrameData::SFTPDelete {
+            cid,
+            sid,
+            msg_id,
+            data,
+        } => {
+            if let Err(err) = send_sftp_delete_data(cid, sid, msg_id, data, &sessions).await {
+                warn!("failed to forward sftp delete data: {err}");
+            }
+        }
         o => warn!("not implemented yet: {o:?}"),
     }
 }
@@ -522,6 +532,36 @@ async fn send_sftp_upload_data(
 
     stdin
         .send(SFTPCommand::Upload { chunk, msg_id })
+        .await
+        .map_err(|err| anyhow!(err))
+}
+
+async fn send_sftp_delete_data(
+    cid: String,
+    sid: u32,
+    msg_id: Option<u32>,
+    data: phirepass_common::protocol::sftp::SFTPDelete,
+    sessions: &TunnelSessions,
+) -> anyhow::Result<()> {
+    let connection_id = cid.clone();
+
+    let stdin = {
+        let sessions = sessions.lock().await;
+        sessions.get(&(cid, sid)).map(|s| s.get_stdin())
+    };
+
+    let Some(stdin) = stdin else {
+        anyhow::bail!(format!("no session found for connection {connection_id}"))
+    };
+
+    let SessionCommand::SFTP(stdin) = stdin else {
+        anyhow::bail!(format!(
+            "no sftp tunnel found for connection {connection_id}"
+        ))
+    };
+
+    stdin
+        .send(SFTPCommand::Delete { data, msg_id })
         .await
         .map_err(|err| anyhow!(err))
 }

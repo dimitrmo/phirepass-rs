@@ -153,6 +153,14 @@ async fn handle_web_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
                     } => {
                         handle_sftp_upload(&state, cid, sid, node_id, path, msg_id, chunk).await;
                     }
+                    WebFrameData::SFTPDelete {
+                        sid,
+                        node_id,
+                        msg_id,
+                        data,
+                    } => {
+                        handle_sftp_delete(&state, cid, sid, node_id, msg_id, data).await;
+                    }
                     WebFrameData::SFTPListItems { .. } => {
                         warn!("received sftp list items which is invalid if sent by web client");
                         break;
@@ -410,6 +418,48 @@ async fn handle_sftp_upload(
     {
         Ok(_) => info!("sent sftp upload chunk to {node_id}"),
         Err(err) => warn!("failed to forward sftp upload to node {node_id}: {err}"),
+    }
+}
+
+async fn handle_sftp_delete(
+    state: &AppState,
+    cid: Ulid,
+    sid: u32,
+    target: String,
+    msg_id: Option<u32>,
+    data: phirepass_common::protocol::sftp::SFTPDelete,
+) {
+    debug!("handle sftp delete request");
+
+    let node_id = match get_node_id_by_cid(state, &cid, target, sid).await {
+        Ok(id) => id,
+        Err(err) => {
+            warn!("error getting node id: {err}");
+            return;
+        }
+    };
+
+    let tx = {
+        let nodes = state.nodes.read().await;
+        nodes.get(&node_id).map(|info| info.tx.clone())
+    };
+
+    let Some(tx) = tx else {
+        warn!("tx for node not found {node_id}");
+        return;
+    };
+
+    match tx
+        .send(NodeFrameData::SFTPDelete {
+            cid: cid.to_string(),
+            sid,
+            msg_id,
+            data,
+        })
+        .await
+    {
+        Ok(_) => info!("sent sftp delete request to {node_id}"),
+        Err(err) => warn!("failed to forward sftp delete to node {node_id}: {err}"),
     }
 }
 

@@ -311,6 +311,23 @@ impl Channel {
         })
     }
 
+    pub fn send_sftp_delete(
+        &self,
+        node_id: String,
+        sid: u32,
+        path: String,
+        filename: String,
+        msg_id: Option<u32>,
+    ) {
+        let data = phirepass_common::protocol::sftp::SFTPDelete { path, filename };
+        self.send_frame_data(WebFrameData::SFTPDelete {
+            node_id,
+            sid,
+            msg_id,
+            data,
+        })
+    }
+
     pub fn is_open(&self) -> bool {
         if let Some(socket) = self.state.borrow().socket.as_ref() {
             socket.ready_state() == WebSocket::OPEN

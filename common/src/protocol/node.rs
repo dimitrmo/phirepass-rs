@@ -1,4 +1,4 @@
-use crate::protocol::sftp::SFTPUploadChunk;
+use crate::protocol::sftp::{SFTPDelete, SFTPUploadChunk};
 use crate::protocol::web::WebFrameData;
 use crate::stats::Stats;
 use serde::{Deserialize, Serialize};
@@ -79,6 +79,13 @@ pub enum NodeFrameData {
         chunk: SFTPUploadChunk,
     },
 
+    SFTPDelete {
+        cid: String,
+        sid: u32,
+        msg_id: Option<u32>,
+        data: SFTPDelete,
+    },
+
     Ping {
         sent_at: u64,
     },
@@ -111,6 +118,7 @@ impl NodeFrameData {
             NodeFrameData::SFTPList { .. } => 31,
             NodeFrameData::SFTPDownload { .. } => 32,
             NodeFrameData::SFTPUpload { .. } => 33,
+            NodeFrameData::SFTPDelete { .. } => 34,
             NodeFrameData::Ping { .. } => 40,
             NodeFrameData::Pong { .. } => 41,
             NodeFrameData::WebFrame { .. } => 50,

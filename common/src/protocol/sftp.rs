@@ -41,3 +41,8 @@ pub struct SFTPUploadChunk {
     pub chunk_size: u32,
     pub data: Vec<u8>,
 }
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SFTPDelete {
+    pub path: String,
+    pub filename: String,
+}

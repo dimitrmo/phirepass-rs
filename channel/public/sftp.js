@@ -15,6 +15,8 @@ export class SFTPBrowser {
         this.currentItems = [];
         this.previousState = null; // Store previous successful state for error recovery
         this.errorMessage = null; // Store current error for recovery
+        this.deletePoll = null; // Track ongoing delete polling
+        this.activeOps = 0; // Track ongoing blocking operations
 
         this.setupElements();
         this.setupEventListeners();
@@ -32,6 +34,13 @@ export class SFTPBrowser {
         this.passwordInput = document.getElementById("sftp-password");
         this.credsSubmitBtn = document.getElementById("sftp-creds-submit");
         this.credsCancelBtn = document.getElementById("sftp-creds-cancel");
+
+        // Ensure container can position overlay
+        if (this.container) {
+            this.container.style.position = "relative";
+        }
+
+        this.createLoaderOverlay();
     }
 
     setupEventListeners() {
@@ -171,17 +180,35 @@ export class SFTPBrowser {
                 size.textContent = this.formatBytes(item.size);
                 itemEl.appendChild(size);
 
+                // Create button container for download and delete
+                const buttonContainer = document.createElement("div");
+                buttonContainer.style.cssText = "margin-left: auto; display: flex; gap: 6px;";
+
                 // Add download button for files
                 const downloadBtn = document.createElement("button");
                 downloadBtn.className = "sftp-download-btn";
                 downloadBtn.textContent = "⬇";
                 downloadBtn.title = "Download";
-                downloadBtn.style.cssText = "margin-left: auto; padding: 4px 12px; background-color: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px;";
+                downloadBtn.style.cssText = "padding: 4px 12px; background-color: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px;";
                 downloadBtn.addEventListener("click", (e) => {
                     e.stopPropagation();
                     this.downloadFile(item.name);
                 });
-                itemEl.appendChild(downloadBtn);
+                buttonContainer.appendChild(downloadBtn);
+
+                // Add delete button for files
+                const deleteBtn = document.createElement("button");
+                deleteBtn.className = "sftp-delete-btn";
+                deleteBtn.textContent = "🗑";
+                deleteBtn.title = "Delete";
+                deleteBtn.style.cssText = "padding: 4px 12px; background-color: #ef4444; color: white; border: 1px solid #ef4444; border-radius: 4px; cursor: pointer; font-size: 16px;";
+                deleteBtn.addEventListener("click", (e) => {
+                    e.stopPropagation();
+                    this.deleteFile(item.name);
+                });
+                buttonContainer.appendChild(deleteBtn);
+
+                itemEl.appendChild(buttonContainer);
             }
 
             if (item.is_dir) {
@@ -329,6 +356,7 @@ export class SFTPBrowser {
         this.currentItems = [];
         this.container.style.display = "none";
         this.hideCredentialsModal();
+        this.hideLoader(true);
     }
 
     formatBytes(bytes) {
@@ -352,64 +380,21 @@ export class SFTPBrowser {
         const msgId = this.msgId++;
         console.log(`Starting download for ${filename} with msgId ${msgId}`);
 
+        this.showLoader("Downloading...", true);
+
         // Initialize download tracking
         this.activeDownloads.set(msgId, {
             filename: filename,
             chunks: new Map(),
             total_chunks: null,
             total_size: null,
-            progressElement: null
+            startTime: Date.now(),
+            lastUpdateTime: Date.now(),
+            lastReceivedBytes: 0
         });
-
-        // Create progress indicator
-        const progressEl = this.createDownloadProgressElement(filename, msgId);
-        this.browser.insertBefore(progressEl, this.browser.firstChild);
-        this.activeDownloads.get(msgId).progressElement = progressEl;
 
         // Send download request
         this.socket.send_sftp_download(this.selectedNode, this.sessionId, this.currentPath, filename, msgId);
-    }
-
-    createDownloadProgressElement(filename, msgId) {
-        const container = document.createElement("div");
-        container.id = `download-progress-${msgId}`;
-        container.style.cssText = "padding: 12px; margin-bottom: 8px; background-color: #1f2937; border-radius: 6px; border-left: 4px solid #3b82f6;";
-
-        const header = document.createElement("div");
-        header.style.cssText = "display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;";
-
-        const filename_el = document.createElement("span");
-        filename_el.textContent = `Downloading: ${filename}`;
-        filename_el.style.cssText = "font-weight: 500; color: #f9fafb;";
-
-        const cancel_btn = document.createElement("button");
-        cancel_btn.textContent = "✕";
-        cancel_btn.title = "Cancel";
-        cancel_btn.style.cssText = "padding: 2px 8px; background-color: #ef4444; color: white; border: none; border-radius: 4px; cursor: pointer;";
-        cancel_btn.addEventListener("click", () => this.cancelDownload(msgId));
-
-        header.appendChild(filename_el);
-        header.appendChild(cancel_btn);
-
-        const progress_bar_bg = document.createElement("div");
-        progress_bar_bg.style.cssText = "width: 100%; height: 8px; background-color: #374151; border-radius: 4px; overflow: hidden;";
-
-        const progress_bar = document.createElement("div");
-        progress_bar.id = `download-progress-bar-${msgId}`;
-        progress_bar.style.cssText = "height: 100%; background-color: #3b82f6; transition: width 0.3s ease; width: 0%;";
-
-        progress_bar_bg.appendChild(progress_bar);
-
-        const info = document.createElement("div");
-        info.id = `download-info-${msgId}`;
-        info.style.cssText = "margin-top: 4px; font-size: 12px; color: #9ca3af;";
-        info.textContent = "Initializing...";
-
-        container.appendChild(header);
-        container.appendChild(progress_bar_bg);
-        container.appendChild(info);
-
-        return container;
     }
 
     handleFileChunk(msgId, chunk) {
@@ -432,19 +417,15 @@ export class SFTPBrowser {
         // Store chunk
         download.chunks.set(chunk.chunk_index, chunkData);
 
-        // Update progress
+        // Update progress solely in the loader overlay
         const progress = (download.chunks.size / download.total_chunks) * 100;
-        const progressBar = document.getElementById(`download-progress-bar-${msgId}`);
-        const infoEl = document.getElementById(`download-info-${msgId}`);
+        const receivedSize = Array.from(download.chunks.values()).reduce((sum, data) => sum + data.length, 0);
+        const currentTime = Date.now();
+        const elapsedSeconds = (currentTime - download.startTime) / 1000;
+        const speed = elapsedSeconds > 0 ? receivedSize / elapsedSeconds : 0;
+        const infoText = `${this.formatBytes(receivedSize)} / ${this.formatBytes(download.total_size)} • ↓ ${this.formatBytes(speed)}/s`;
 
-        if (progressBar) {
-            progressBar.style.width = `${progress}%`;
-        }
-
-        if (infoEl) {
-            const receivedSize = Array.from(download.chunks.values()).reduce((sum, data) => sum + data.length, 0);
-            infoEl.textContent = `${download.chunks.size} / ${download.total_chunks} chunks (${this.formatBytes(receivedSize)} / ${this.formatBytes(download.total_size)})`;
-        }
+        this.setLoaderProgress(progress, infoText);
 
         // Check if download is complete
         if (download.chunks.size === download.total_chunks) {
@@ -475,14 +456,10 @@ export class SFTPBrowser {
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
 
-        // Remove progress indicator
-        if (download.progressElement) {
-            download.progressElement.remove();
-        }
-
         // Clean up
         this.activeDownloads.delete(msgId);
         console.log(`Download finalized and cleaned up: ${download.filename}`);
+        this.hideLoader();
     }
 
     cancelDownload(msgId) {
@@ -491,13 +468,217 @@ export class SFTPBrowser {
 
         console.log(`Cancelling download: ${download.filename}`);
 
-        // Remove progress indicator
-        if (download.progressElement) {
-            download.progressElement.remove();
-        }
-
         // Clean up
         this.activeDownloads.delete(msgId);
+        this.hideLoader();
+    }
+
+    deleteFile(filename) {
+        if (!this.socket || !this.sessionId) {
+            console.error("Cannot delete: not connected");
+            return;
+        }
+
+        // Ask for confirmation
+        if (!confirm(`Are you sure you want to delete "${filename}"?`)) {
+            return;
+        }
+
+        // Stop any previous delete poll before starting a new one
+        this.stopDeletePolling(false);
+
+        const msgId = this.msgId++;
+        console.log(`Deleting file: ${filename} with msgId ${msgId}`);
+
+        // Cancel any active downloads for this file
+        for (const [downloadMsgId, download] of this.activeDownloads.entries()) {
+            if (download.filename === filename) {
+                console.log(`Cancelling download for deleted file: ${filename}`);
+                this.activeDownloads.delete(downloadMsgId);
+            }
+        }
+
+        this.showLoader("Deleting...");
+
+        // Track polling state
+        this.deletePoll = {
+            filename,
+            msgId,
+            started: Date.now(),
+            intervalId: null,
+        };
+
+        const poll = () => {
+            if (!this.deletePoll) return;
+            const elapsed = Date.now() - this.deletePoll.started;
+            if (elapsed >= 30000) {
+                console.warn(`Delete poll timed out for ${filename}`);
+                this.stopDeletePolling(false);
+                this.listDirectory(this.currentPath);
+                return;
+            }
+
+            this.listDirectory(this.currentPath);
+
+            // After the listing updates, check if the file is gone
+            setTimeout(() => {
+                if (!this.deletePoll || this.deletePoll.filename !== filename) return;
+                const stillExists = this.currentItems.some((item) => item.name === filename);
+                if (!stillExists) {
+                    this.stopDeletePolling(true);
+                }
+            }, 800);
+        };
+
+        // Start polling immediately and then every ~2.5s (within 2-3s window)
+        poll();
+        this.deletePoll.intervalId = setInterval(poll, 2500);
+
+        // Send delete request
+        this.socket.send_sftp_delete(this.selectedNode, this.sessionId, this.currentPath, filename, msgId);
+    }
+
+    stopDeletePolling(success) {
+        if (this.deletePoll && this.deletePoll.intervalId) {
+            clearInterval(this.deletePoll.intervalId);
+        }
+
+        this.deletePoll = null;
+
+        if (success) {
+            // Final refresh to reflect deletion
+            this.listDirectory(this.currentPath);
+        }
+
+        this.hideLoader();
+    }
+
+    createLoaderOverlay() {
+        if (!this.container) return;
+
+        const overlay = document.createElement("div");
+        overlay.id = "sftp-loader-overlay";
+        overlay.style.cssText = "position: absolute; inset: 0; background: rgba(15,23,42,0.68); display: none; align-items: center; justify-content: center; z-index: 5; backdrop-filter: blur(2px);";
+
+        const box = document.createElement("div");
+        box.style.cssText = "display: flex; flex-direction: column; gap: 10px; padding: 14px 18px; border-radius: 10px; background: rgba(17,24,39,0.92); border: 1px solid rgba(255,255,255,0.08); color: #e5e7eb; font-weight: 600; min-width: 240px;";
+
+        const row = document.createElement("div");
+        row.style.cssText = "display: flex; align-items: center; gap: 10px;";
+
+        const spinner = document.createElement("span");
+        spinner.style.cssText = "display: inline-block; width: 18px; height: 18px; border: 2px solid #374151; border-top: 2px solid #3b82f6; border-radius: 50%; animation: spin 0.6s linear infinite;";
+
+        const text = document.createElement("span");
+        text.id = "sftp-loader-text";
+        text.textContent = "Working...";
+
+        row.appendChild(spinner);
+        row.appendChild(text);
+        box.appendChild(row);
+
+        const progressWrap = document.createElement("div");
+        progressWrap.id = "sftp-loader-progress";
+        progressWrap.style.cssText = "display: none; flex-direction: column; gap: 8px; width: 100%;";
+
+        const progressRow = document.createElement("div");
+        progressRow.style.cssText = "display: flex; align-items: center; gap: 10px; width: 100%;";
+
+        const progressBarBg = document.createElement("div");
+        progressBarBg.style.cssText = "flex: 1; height: 10px; background: #374151; border-radius: 9999px; overflow: hidden; box-shadow: inset 0 0 0 1px #1f2937;";
+
+        const progressBar = document.createElement("div");
+        progressBar.id = "sftp-loader-progress-bar";
+        progressBar.style.cssText = "height: 100%; width: 0%; background: #10b981; transition: width 0.2s ease;";
+        progressBarBg.appendChild(progressBar);
+
+        const progressPercent = document.createElement("span");
+        progressPercent.id = "sftp-loader-progress-percent";
+        progressPercent.style.cssText = "min-width: 48px; text-align: right; font-variant-numeric: tabular-nums; color: #e5e7eb; font-weight: 600;";
+        progressPercent.textContent = "0%";
+
+        progressRow.appendChild(progressBarBg);
+        progressRow.appendChild(progressPercent);
+
+        const progressInfo = document.createElement("div");
+        progressInfo.id = "sftp-loader-progress-info";
+        progressInfo.style.cssText = "font-size: 12px; color: #cbd5e1; line-height: 1.4; text-align: left; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;";
+        progressInfo.textContent = "";
+
+        progressWrap.appendChild(progressRow);
+        progressWrap.appendChild(progressInfo);
+        box.appendChild(progressWrap);
+
+        overlay.appendChild(box);
+        this.container.appendChild(overlay);
+
+        this.loaderOverlay = overlay;
+        this.loaderText = text;
+        this.loaderProgressWrap = progressWrap;
+        this.loaderProgressBar = progressBar;
+        this.loaderProgressPercent = progressPercent;
+        this.loaderProgressInfo = progressInfo;
+
+        if (!document.getElementById("sftp-loader-spinner-style")) {
+            const style = document.createElement("style");
+            style.id = "sftp-loader-spinner-style";
+            style.textContent = "@keyframes spin { to { transform: rotate(360deg); } }";
+            document.head.appendChild(style);
+        }
+    }
+
+    showLoader(message = "Working...", withProgress = false) {
+        if (!this.loaderOverlay || !this.loaderText) return;
+        this.activeOps = Math.max(0, this.activeOps) + 1;
+        this.loaderText.textContent = message;
+        if (this.loaderProgressWrap) {
+            this.loaderProgressWrap.style.display = withProgress ? "flex" : "none";
+            this.resetLoaderProgress();
+        }
+        this.loaderOverlay.style.display = "flex";
+    }
+
+    setLoaderProgress(percent, infoText = "") {
+        if (!this.loaderProgressWrap || !this.loaderProgressBar || !this.loaderProgressInfo || !this.loaderProgressPercent) return;
+        this.loaderProgressWrap.style.display = "flex";
+        const clamped = Math.max(0, Math.min(100, percent ?? 0));
+        this.loaderProgressBar.style.width = `${clamped}%`;
+        this.loaderProgressPercent.textContent = `${clamped.toFixed(1)}%`;
+        this.loaderProgressInfo.textContent = infoText;
+    }
+
+    resetLoaderProgress() {
+        if (!this.loaderProgressWrap || !this.loaderProgressBar || !this.loaderProgressInfo || !this.loaderProgressPercent) return;
+        this.loaderProgressBar.style.width = "0%";
+        this.loaderProgressPercent.textContent = "0%";
+        this.loaderProgressInfo.textContent = "";
+    }
+
+    hideLoader(force = false) {
+        if (!this.loaderOverlay) return;
+        if (!force) {
+            this.activeOps = Math.max(0, this.activeOps - 1);
+        } else {
+            this.activeOps = 0;
+        }
+        if (this.activeOps <= 0) {
+            this.loaderOverlay.style.display = "none";
+            this.resetLoaderProgress();
+        }
+    }
+
+    handleDeleteResponse(msgId, success, message) {
+        // Stop any ongoing polling tied to this delete
+        this.stopDeletePolling(success);
+
+        if (success) {
+            console.log(`Delete successful: ${message}`);
+        } else {
+            console.error(`Delete failed: ${message}`);
+            this.browser.innerHTML = `<div class="sftp-item-loading" style="color: #f87171;">Delete Error: ${message}</div>`;
+            // Restore previous state after showing error
+            setTimeout(() => this.restorePreviousState(), 2000);
+        }
     }
 
     initUploadListener(fileInput, uploadBtn) {
@@ -522,23 +703,22 @@ export class SFTPBrowser {
             return;
         }
 
+        this.showLoader("Uploading...", true);
+
         const CHUNK_SIZE = 64 * 1024; // 64KB chunks
         const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
         const msgId = this.msgId++;
 
         console.log(`Starting upload: ${file.name} (${this.formatBytes(file.size)}) with msgId ${msgId}`);
 
-        // Create progress tracker
-        const progressEl = this.createUploadProgressElement(file.name, msgId, totalChunks);
-        this.browser.insertBefore(progressEl, this.browser.firstChild);
-        progressEl.scrollIntoView({ behavior: "smooth", block: "start" });
-
         let uploadedChunks = 0;
+        const startTime = Date.now();
 
-        for (let i = 0; i < totalChunks; i++) {
-            const start = i * CHUNK_SIZE;
-            const end = Math.min(start + CHUNK_SIZE, file.size);
-            const chunkData = new Uint8Array(await file.slice(start, end).arrayBuffer());
+        try {
+            for (let i = 0; i < totalChunks; i++) {
+                const start = i * CHUNK_SIZE;
+                const end = Math.min(start + CHUNK_SIZE, file.size);
+                const chunkData = new Uint8Array(await file.slice(start, end).arrayBuffer());
 
             const uploadChunk = {
                 filename: file.name,
@@ -564,70 +744,29 @@ export class SFTPBrowser {
                 msgId
             );
 
-            uploadedChunks++;
+                uploadedChunks++;
 
-            // Update progress
-            const progress = (uploadedChunks / totalChunks) * 100;
-            const progressBar = document.getElementById(`upload-progress-bar-${msgId}`);
-            const infoEl = document.getElementById(`upload-info-${msgId}`);
+                // Update progress in the loader overlay
+                const progress = (uploadedChunks / totalChunks) * 100;
 
-            if (progressBar) {
-                progressBar.style.width = `${progress}%`;
+                const uploadedBytes = uploadedChunks * CHUNK_SIZE;
+                const currentTime = Date.now();
+                const elapsedSeconds = (currentTime - startTime) / 1000;
+                const speed = elapsedSeconds > 0 ? uploadedBytes / elapsedSeconds : 0;
+                const infoText = `${this.formatBytes(uploadedBytes)} / ${this.formatBytes(file.size)} • ↑ ${this.formatBytes(speed)}/s`;
+
+                this.setLoaderProgress(progress, infoText);
+
+                // Add small delay to avoid overwhelming the connection
+                await new Promise(resolve => setTimeout(resolve, 10));
             }
-
-            if (infoEl) {
-                infoEl.textContent = `${uploadedChunks} / ${totalChunks} chunks (${this.formatBytes(uploadedChunks * CHUNK_SIZE)} / ${this.formatBytes(file.size)})`;
-            }
-
-            // Add small delay to avoid overwhelming the connection
-            await new Promise(resolve => setTimeout(resolve, 10));
+        } finally {
+            this.hideLoader();
         }
 
         console.log(`Upload complete: ${file.name}`);
 
-        // Remove progress indicator after 2 seconds
-        setTimeout(() => {
-            if (progressEl && progressEl.parentElement) {
-                progressEl.remove();
-            }
-        }, 2000);
-
         // Refresh directory listing to show the new file
         setTimeout(() => this.listDirectory(this.currentPath), 500);
-    }
-
-    createUploadProgressElement(filename, msgId, totalChunks) {
-        const container = document.createElement("div");
-        container.id = `upload-progress-${msgId}`;
-        container.style.cssText = "padding: 12px; margin-bottom: 8px; background-color: #1f2937; border-radius: 6px; border-left: 4px solid #10b981;";
-
-        const header = document.createElement("div");
-        header.style.cssText = "display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;";
-
-        const filename_el = document.createElement("span");
-        filename_el.textContent = `Uploading: ${filename}`;
-        filename_el.style.cssText = "font-weight: 500; color: #f9fafb;";
-
-        header.appendChild(filename_el);
-
-        const progress_bar_bg = document.createElement("div");
-        progress_bar_bg.style.cssText = "width: 100%; height: 8px; background-color: #374151; border-radius: 4px; overflow: hidden;";
-
-        const progress_bar = document.createElement("div");
-        progress_bar.id = `upload-progress-bar-${msgId}`;
-        progress_bar.style.cssText = "height: 100%; background-color: #10b981; transition: width 0.3s ease; width: 0%;";
-
-        progress_bar_bg.appendChild(progress_bar);
-
-        const info = document.createElement("div");
-        info.id = `upload-info-${msgId}`;
-        info.style.cssText = "margin-top: 4px; font-size: 12px; color: #9ca3af;";
-        info.textContent = "Initializing...";
-
-        container.appendChild(header);
-        container.appendChild(progress_bar_bg);
-        container.appendChild(info);
-
-        return container;
     }
 }
