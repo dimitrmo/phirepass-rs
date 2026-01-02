@@ -475,6 +475,9 @@ function connectSFTP() {
                     sftpBrowser.handleTunnelOpened(frame.data.web.sid);
                     log("SFTP tunnel established");
                     setStatus("SFTP Connected", "ok");
+                    // Enable upload button
+                    const sftpUploadBtn = document.getElementById("sftp-upload");
+                    if (sftpUploadBtn) sftpUploadBtn.disabled = false;
                 }
                 break;
             case "TunnelClosed":
@@ -482,6 +485,9 @@ function connectSFTP() {
                     log(`SFTP Tunnel closed - Session ID: ${frame.data.web.sid}`);
                     sftpBrowser.disconnect();
                     setStatus("SFTP Disconnected", "warn");
+                    // Disable upload button
+                    const sftpUploadBtn = document.getElementById("sftp-upload");
+                    if (sftpUploadBtn) sftpUploadBtn.disabled = true;
                 }
                 break;
             case "Error":
@@ -673,6 +679,23 @@ document.addEventListener("DOMContentLoaded", () => {
     connectBtn.addEventListener("click", connect);
     refreshBtnSsh.addEventListener("click", fetchNodes);
     refreshBtnSftp.addEventListener("click", fetchNodes);
+
+    // Setup SFTP upload button
+    const sftpUploadBtn = document.getElementById("sftp-upload");
+    const sftpFileInput = document.getElementById("sftp-file-input");
+
+    sftpUploadBtn.addEventListener("click", () => sftpFileInput.click());
+    sftpFileInput.addEventListener("change", (e) => {
+        if (sftpBrowser && sftpBrowser.socket && sftpBrowser.sessionId) {
+            const files = e.target.files;
+            if (files && files.length > 0) {
+                sftpBrowser.uploadFile(files[0]);
+            }
+        } else {
+            alert("Not connected to SFTP");
+        }
+        e.target.value = "";
+    });
 
     // Tab switching
     tabButtons.forEach(btn => {

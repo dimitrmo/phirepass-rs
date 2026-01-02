@@ -279,6 +279,38 @@ impl Channel {
         })
     }
 
+    pub fn send_sftp_upload(
+        &self,
+        node_id: String,
+        sid: u32,
+        path: String,
+        filename: String,
+        remote_path: String,
+        chunk_index: u32,
+        total_chunks: u32,
+        total_size: u64,
+        chunk_size: u32,
+        data: Vec<u8>,
+        msg_id: Option<u32>,
+    ) {
+        let chunk = phirepass_common::protocol::sftp::SFTPUploadChunk {
+            filename,
+            remote_path,
+            chunk_index,
+            total_chunks,
+            total_size,
+            chunk_size,
+            data,
+        };
+        self.send_frame_data(WebFrameData::SFTPUpload {
+            node_id,
+            path,
+            sid,
+            msg_id,
+            chunk,
+        })
+    }
+
     pub fn is_open(&self) -> bool {
         if let Some(socket) = self.state.borrow().socket.as_ref() {
             socket.ready_state() == WebSocket::OPEN

@@ -1,3 +1,4 @@
+use crate::protocol::sftp::SFTPUploadChunk;
 use crate::protocol::web::WebFrameData;
 use crate::stats::Stats;
 use serde::{Deserialize, Serialize};
@@ -70,6 +71,14 @@ pub enum NodeFrameData {
         msg_id: Option<u32>, // echo back the user supplied msg_id
     },
 
+    SFTPUpload {
+        cid: String,
+        path: String,
+        sid: u32,
+        msg_id: Option<u32>,
+        chunk: SFTPUploadChunk,
+    },
+
     Ping {
         sent_at: u64,
     },
@@ -101,6 +110,7 @@ impl NodeFrameData {
             NodeFrameData::SSHWindowResize { .. } => 30,
             NodeFrameData::SFTPList { .. } => 31,
             NodeFrameData::SFTPDownload { .. } => 32,
+            NodeFrameData::SFTPUpload { .. } => 33,
             NodeFrameData::Ping { .. } => 40,
             NodeFrameData::Pong { .. } => 41,
             NodeFrameData::WebFrame { .. } => 50,

@@ -428,7 +428,7 @@ export class SFTPBrowser {
 
         // Convert chunk data to Uint8Array (it comes as a regular array from JSON)
         const chunkData = new Uint8Array(chunk.data);
-        
+
         // Store chunk
         download.chunks.set(chunk.chunk_index, chunkData);
 
@@ -438,7 +438,7 @@ export class SFTPBrowser {
         const infoEl = document.getElementById(`download-info-${msgId}`);
 
         if (progressBar) {
-            progressBar.style.width = `${progress}`;
+            progressBar.style.width = `${progress}%`;
         }
 
         if (infoEl) {
@@ -498,5 +498,136 @@ export class SFTPBrowser {
 
         // Clean up
         this.activeDownloads.delete(msgId);
+    }
+
+    initUploadListener(fileInput, uploadBtn) {
+        uploadBtn.addEventListener("click", () => fileInput.click());
+        fileInput.addEventListener("change", (e) => this.handleFileSelect(e));
+    }
+
+    handleFileSelect(event) {
+        const files = event.target.files;
+        if (!files || files.length === 0) return;
+
+        const file = files[0];
+        this.uploadFile(file);
+
+        // Reset file input
+        event.target.value = "";
+    }
+
+    async uploadFile(file) {
+        if (!this.socket || !this.sessionId) {
+            alert("Not connected to SFTP");
+            return;
+        }
+
+        const CHUNK_SIZE = 64 * 1024; // 64KB chunks
+        const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+        const msgId = this.msgId++;
+
+        console.log(`Starting upload: ${file.name} (${this.formatBytes(file.size)}) with msgId ${msgId}`);
+
+        // Create progress tracker
+        const progressEl = this.createUploadProgressElement(file.name, msgId, totalChunks);
+        this.browser.insertBefore(progressEl, this.browser.firstChild);
+        progressEl.scrollIntoView({ behavior: "smooth", block: "start" });
+
+        let uploadedChunks = 0;
+
+        for (let i = 0; i < totalChunks; i++) {
+            const start = i * CHUNK_SIZE;
+            const end = Math.min(start + CHUNK_SIZE, file.size);
+            const chunkData = new Uint8Array(await file.slice(start, end).arrayBuffer());
+
+            const uploadChunk = {
+                filename: file.name,
+                remote_path: this.currentPath,
+                chunk_index: i,
+                total_chunks: totalChunks,
+                total_size: file.size,
+                chunk_size: chunkData.length,
+                data: Array.from(chunkData),
+            };
+
+            this.socket.send_sftp_upload(
+                this.selectedNode,
+                this.sessionId,
+                this.currentPath,
+                uploadChunk.filename,
+                uploadChunk.remote_path,
+                uploadChunk.chunk_index,
+                uploadChunk.total_chunks,
+                BigInt(uploadChunk.total_size),
+                uploadChunk.chunk_size,
+                uploadChunk.data,
+                msgId
+            );
+
+            uploadedChunks++;
+
+            // Update progress
+            const progress = (uploadedChunks / totalChunks) * 100;
+            const progressBar = document.getElementById(`upload-progress-bar-${msgId}`);
+            const infoEl = document.getElementById(`upload-info-${msgId}`);
+
+            if (progressBar) {
+                progressBar.style.width = `${progress}%`;
+            }
+
+            if (infoEl) {
+                infoEl.textContent = `${uploadedChunks} / ${totalChunks} chunks (${this.formatBytes(uploadedChunks * CHUNK_SIZE)} / ${this.formatBytes(file.size)})`;
+            }
+
+            // Add small delay to avoid overwhelming the connection
+            await new Promise(resolve => setTimeout(resolve, 10));
+        }
+
+        console.log(`Upload complete: ${file.name}`);
+
+        // Remove progress indicator after 2 seconds
+        setTimeout(() => {
+            if (progressEl && progressEl.parentElement) {
+                progressEl.remove();
+            }
+        }, 2000);
+
+        // Refresh directory listing to show the new file
+        setTimeout(() => this.listDirectory(this.currentPath), 500);
+    }
+
+    createUploadProgressElement(filename, msgId, totalChunks) {
+        const container = document.createElement("div");
+        container.id = `upload-progress-${msgId}`;
+        container.style.cssText = "padding: 12px; margin-bottom: 8px; background-color: #1f2937; border-radius: 6px; border-left: 4px solid #10b981;";
+
+        const header = document.createElement("div");
+        header.style.cssText = "display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;";
+
+        const filename_el = document.createElement("span");
+        filename_el.textContent = `Uploading: ${filename}`;
+        filename_el.style.cssText = "font-weight: 500; color: #f9fafb;";
+
+        header.appendChild(filename_el);
+
+        const progress_bar_bg = document.createElement("div");
+        progress_bar_bg.style.cssText = "width: 100%; height: 8px; background-color: #374151; border-radius: 4px; overflow: hidden;";
+
+        const progress_bar = document.createElement("div");
+        progress_bar.id = `upload-progress-bar-${msgId}`;
+        progress_bar.style.cssText = "height: 100%; background-color: #10b981; transition: width 0.3s ease; width: 0%;";
+
+        progress_bar_bg.appendChild(progress_bar);
+
+        const info = document.createElement("div");
+        info.id = `upload-info-${msgId}`;
+        info.style.cssText = "margin-top: 4px; font-size: 12px; color: #9ca3af;";
+        info.textContent = "Initializing...";
+
+        container.appendChild(header);
+        container.appendChild(progress_bar_bg);
+        container.appendChild(info);
+
+        return container;
     }
 }

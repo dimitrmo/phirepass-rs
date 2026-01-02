@@ -1,5 +1,5 @@
 use crate::protocol::common::FrameError;
-use crate::protocol::sftp::{SFTPFileChunk, SFTPListItem};
+use crate::protocol::sftp::{SFTPFileChunk, SFTPListItem, SFTPUploadChunk};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -63,6 +63,14 @@ pub enum WebFrameData {
         msg_id: Option<u32>, // echo back the user supplied msg_id
     },
 
+    SFTPUpload {
+        node_id: String,
+        path: String,
+        sid: u32,
+        msg_id: Option<u32>,
+        chunk: SFTPUploadChunk,
+    },
+
     SFTPFileChunk {
         sid: u32,
         msg_id: Option<u32>,
@@ -88,6 +96,7 @@ impl WebFrameData {
             WebFrameData::SFTPList { .. } => 40,
             WebFrameData::SFTPListItems { .. } => 41,
             WebFrameData::SFTPDownload { .. } => 42,
+            WebFrameData::SFTPUpload { .. } => 44,
             WebFrameData::SFTPFileChunk { .. } => 43,
             WebFrameData::Error { .. } => 50,
         }
