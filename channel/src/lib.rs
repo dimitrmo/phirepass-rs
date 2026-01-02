@@ -342,7 +342,8 @@ impl Channel {
             return;
         }
 
-        let frame: Frame = data.into();
+        // Use Protobuf encoding for better compression (50% smaller than JSON)
+        let frame = Frame::from_web_protobuf(data);
 
         match frame.to_bytes() {
             Ok(raw) => {

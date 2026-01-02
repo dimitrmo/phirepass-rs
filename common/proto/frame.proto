@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+package phirepass.frame;
+
+import "web.proto";
+import "node.proto";
+
+// Top-level frame wrapper
+message Frame {
+    oneof data {
+        phirepass.web.WebFrameData web = 1;
+        phirepass.node.NodeFrameData node = 2;
+    }
+}

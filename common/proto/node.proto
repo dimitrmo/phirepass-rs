@@ -1,0 +1,133 @@
+syntax = "proto3";
+
+package phirepass.node;
+
+import "web.proto";
+import "sftp.proto";
+
+message NodeFrameData {
+    oneof message {
+        Heartbeat heartbeat = 1;
+        Auth auth = 2;
+        AuthResponse auth_response = 3;
+        OpenTunnel open_tunnel = 4;
+        TunnelOpened tunnel_opened = 5;
+        TunnelData tunnel_data = 6;
+        TunnelClosed tunnel_closed = 7;
+        SSHWindowResize ssh_window_resize = 8;
+        SFTPList sftp_list = 9;
+        SFTPDownload sftp_download = 10;
+        SFTPUpload sftp_upload = 11;
+        SFTPDelete sftp_delete = 12;
+        Ping ping = 13;
+        Pong pong = 14;
+        WebFrame web_frame = 15;
+        ConnectionDisconnect connection_disconnect = 16;
+    }
+}
+
+message Heartbeat {
+    Stats stats = 1;
+}
+
+message Stats {
+    float host_cpu = 1;
+    uint64 host_mem_used_bytes = 2;
+    uint64 host_mem_total_bytes = 3;
+    uint64 network_bytes_sent = 4;
+    uint64 network_bytes_received = 5;
+    uint64 uptime_seconds = 6;
+}
+
+message Auth {
+    string token = 1;
+}
+
+message AuthResponse {
+    string node_id = 1;
+    bool success = 2;
+    string version = 3;
+}
+
+message OpenTunnel {
+    uint32 protocol = 1;
+    string cid = 2;
+    string username = 3;
+    string password = 4;
+    optional uint32 msg_id = 5;
+}
+
+message TunnelOpened {
+    uint32 protocol = 1;
+    string cid = 2;
+    uint32 sid = 3;
+    optional uint32 msg_id = 4;
+}
+
+message TunnelData {
+    uint32 protocol = 1;
+    string cid = 2;
+    uint32 sid = 3;
+    bytes data = 4;
+}
+
+message TunnelClosed {
+    uint32 protocol = 1;
+    string cid = 2;
+    uint32 sid = 3;
+    optional uint32 msg_id = 4;
+}
+
+message SSHWindowResize {
+    string cid = 1;
+    uint32 sid = 2;
+    uint32 cols = 3;
+    uint32 rows = 4;
+}
+
+message SFTPList {
+    string cid = 1;
+    string path = 2;
+    uint32 sid = 3;
+    optional uint32 msg_id = 4;
+}
+
+message SFTPDownload {
+    string cid = 1;
+    string path = 2;
+    string filename = 3;
+    uint32 sid = 4;
+    optional uint32 msg_id = 5;
+}
+
+message SFTPUpload {
+    string cid = 1;
+    string path = 2;
+    uint32 sid = 3;
+    optional uint32 msg_id = 4;
+    phirepass.sftp.SFTPUploadChunk chunk = 5;
+}
+
+message SFTPDelete {
+    string cid = 1;
+    uint32 sid = 2;
+    optional uint32 msg_id = 3;
+    phirepass.sftp.SFTPDelete data = 4;
+}
+
+message Ping {
+    uint64 sent_at = 1;
+}
+
+message Pong {
+    uint64 sent_at = 1;
+}
+
+message WebFrame {
+    phirepass.web.WebFrameData frame = 1;
+    uint32 sid = 2;
+}
+
+message ConnectionDisconnect {
+    string cid = 1;
+}

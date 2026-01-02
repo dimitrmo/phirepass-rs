@@ -6,6 +6,10 @@ use anyhow::anyhow;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt::Display;
 
+// Protobuf imports
+use prost::Message;
+use crate::protocol::generated::phirepass;
+
 const HEADER_SIZE: usize = 8;
 const FRAME_VERSION: u8 = 1;
 
@@ -37,6 +41,37 @@ impl From<WebFrameData> for Frame {
     }
 }
 
+impl Frame {
+    /// Create a new Frame with JSON encoding (for backward compatibility)
+    pub fn new_json(data: FrameData) -> Self {
+        Self {
+            version: Self::version(),
+            encoding: FrameEncoding::JSON,
+            data,
+        }
+    }
+
+    /// Create a new Frame with Protobuf encoding (optimized)
+    pub fn new_protobuf(data: FrameData) -> Self {
+        Self {
+            version: Self::version(),
+            encoding: FrameEncoding::Protobuf,
+            data,
+        }
+    }
+
+    /// Create a Frame from WebFrameData with Protobuf encoding
+    pub fn from_web_protobuf(data: WebFrameData) -> Self {
+        Self::new_protobuf(FrameData::Web(data))
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    /// Create a Frame from NodeFrameData with Protobuf encoding
+    pub fn from_node_protobuf(data: NodeFrameData) -> Self {
+        Self::new_protobuf(FrameData::Node(data))
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum FrameData {
     #[serde(rename = "web")]
@@ -50,12 +85,14 @@ pub enum FrameData {
 #[repr(u8)]
 pub enum FrameEncoding {
     JSON = 0,
+    Protobuf = 1,
 }
 
 impl Display for FrameEncoding {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             FrameEncoding::JSON => write!(f, "JSON"),
+            FrameEncoding::Protobuf => write!(f, "Protobuf"),
         }
     }
 }
@@ -66,7 +103,8 @@ impl TryFrom<u8> for FrameEncoding {
     fn try_from(code: u8) -> Result<Self, Self::Error> {
         match code {
             0 => Ok(FrameEncoding::JSON),
-            _ => Err(anyhow!("unknown frame type")),
+            1 => Ok(FrameEncoding::Protobuf),
+            _ => Err(anyhow!("unknown frame encoding: {}", code)),
         }
     }
 }
@@ -92,22 +130,37 @@ impl Frame {
 
         let payload = data[HEADER_SIZE..HEADER_SIZE + len].to_vec();
 
-        let data = match frame_kind {
-            0 => {
+        let data = match (frame_kind, encoding.clone()) {
+            (0, FrameEncoding::JSON) => {
                 let web = serde_json::from_slice::<WebFrameData>(&payload)?;
                 FrameData::Web(web)
             }
+            (0, FrameEncoding::Protobuf) => {
+                let proto_frame = phirepass::frame::Frame::decode(&payload[..])?;
+                let web = proto_frame.data
+                    .ok_or_else(|| anyhow!("empty protobuf frame data"))?
+                    .try_into()?;
+                FrameData::Web(web)
+            }
             #[cfg(not(target_arch = "wasm32"))]
-            1 => {
+            (1, FrameEncoding::JSON) => {
                 let node = serde_json::from_slice::<NodeFrameData>(&payload)?;
+                FrameData::Node(node)
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            (1, FrameEncoding::Protobuf) => {
+                let proto_frame = phirepass::frame::Frame::decode(&payload[..])?;
+                let node = proto_frame.data
+                    .ok_or_else(|| anyhow!("empty protobuf frame data"))?
+                    .try_into()?;
                 FrameData::Node(node)
             }
 
             #[cfg(target_arch = "wasm32")]
-            1_u8..=u8::MAX => anyhow::bail!("invalid frame type"),
+            (1_u8..=u8::MAX, _) => anyhow::bail!("invalid frame type"),
 
             #[cfg(not(target_arch = "wasm32"))]
-            2_u8..=u8::MAX => anyhow::bail!("invalid frame type"),
+            (2_u8..=u8::MAX, _) => anyhow::bail!("invalid frame type"),
         };
 
         Ok(Self {
@@ -120,17 +173,35 @@ impl Frame {
         let frame_encoding = frame.encoding.clone();
 
         let (data, kind, code) = match &frame.data {
-            FrameData::Web(data) => match frame_encoding {
+            FrameData::Web(web_data) => match frame_encoding {
                 FrameEncoding::JSON => {
-                    let raw = serde_json::to_vec(&data)?;
-                    (raw, 0, data.code())
+                    let raw = serde_json::to_vec(&web_data)?;
+                    (raw, 0, web_data.code())
+                }
+                FrameEncoding::Protobuf => {
+                    let proto_data: phirepass::frame::frame::Data = web_data.clone().try_into()?;
+                    let proto_frame = phirepass::frame::Frame {
+                        data: Some(proto_data),
+                    };
+                    let mut buf = Vec::new();
+                    proto_frame.encode(&mut buf)?;
+                    (buf, 0, web_data.code())
                 }
             },
             #[cfg(not(target_arch = "wasm32"))]
-            FrameData::Node(data) => match frame_encoding {
+            FrameData::Node(node_data) => match frame_encoding {
                 FrameEncoding::JSON => {
-                    let raw = serde_json::to_vec(&data)?;
-                    (raw, 1, data.code())
+                    let raw = serde_json::to_vec(&node_data)?;
+                    (raw, 1, node_data.code())
+                }
+                FrameEncoding::Protobuf => {
+                    let proto_data: phirepass::frame::frame::Data = node_data.clone().try_into()?;
+                    let proto_frame = phirepass::frame::Frame {
+                        data: Some(proto_data),
+                    };
+                    let mut buf = Vec::new();
+                    proto_frame.encode(&mut buf)?;
+                    (buf, 1, node_data.code())
                 }
             },
         };

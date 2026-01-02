@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package phirepass.sftp;
+
+// Simplified SFTP types - just wrapping the serialized data for now
+// This avoids complex protocol changes while still gaining compression benefits
+
+message SFTPListItem {
+    bytes data = 1;  // Serialized SFTPListItem
+}
+
+message SFTPFileChunk {
+    bytes data = 1;  // Serialized SFTPFileChunk
+}
+
+message SFTPUploadChunk {
+    bytes data = 1;  // Serialized SFTPUploadChunk
+}
+
+message SFTPDelete {
+    bytes data = 1;  // Serialized SFTPDelete
+}

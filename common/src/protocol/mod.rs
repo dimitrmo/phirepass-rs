@@ -1,4 +1,6 @@
 pub mod common;
+pub mod conversions;
+pub mod generated;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod node;
 pub mod sftp;

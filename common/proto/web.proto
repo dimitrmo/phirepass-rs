@@ -1,0 +1,110 @@
+syntax = "proto3";
+
+package phirepass.web;
+
+import "common.proto";
+import "sftp.proto";
+
+// Web client messages
+message WebFrameData {
+    oneof message {
+        Heartbeat heartbeat = 1;
+        OpenTunnel open_tunnel = 2;
+        TunnelOpened tunnel_opened = 3;
+        TunnelData tunnel_data = 4;
+        TunnelClosed tunnel_closed = 5;
+        SSHWindowResize ssh_window_resize = 6;
+        SFTPList sftp_list = 7;
+        SFTPListItems sftp_list_items = 8;
+        SFTPDownload sftp_download = 9;
+        SFTPFileChunk sftp_file_chunk = 10;
+        SFTPUpload sftp_upload = 11;
+        SFTPDelete sftp_delete = 12;
+        Error error = 13;
+    }
+}
+
+message Heartbeat {}
+
+message OpenTunnel {
+    uint32 protocol = 1;
+    string node_id = 2;
+    optional uint32 msg_id = 3;
+    optional string username = 4;
+    optional string password = 5;
+}
+
+message TunnelOpened {
+    uint32 protocol = 1;
+    uint32 sid = 2;
+    optional uint32 msg_id = 3;
+}
+
+message TunnelData {
+    uint32 protocol = 1;
+    string node_id = 2;
+    uint32 sid = 3;
+    bytes data = 4;
+}
+
+message TunnelClosed {
+    uint32 protocol = 1;
+    uint32 sid = 2;
+    optional uint32 msg_id = 3;
+}
+
+message SSHWindowResize {
+    string node_id = 1;
+    uint32 sid = 2;
+    uint32 cols = 3;
+    uint32 rows = 4;
+}
+
+message SFTPList {
+    string node_id = 1;
+    string path = 2;
+    uint32 sid = 3;
+    optional uint32 msg_id = 4;
+}
+
+message SFTPListItems {
+    string path = 1;
+    uint32 sid = 2;
+    sftp.SFTPListItem dir = 3;
+    optional uint32 msg_id = 4;
+}
+
+message SFTPDownload {
+    string node_id = 1;
+    string path = 2;
+    string filename = 3;
+    uint32 sid = 4;
+    optional uint32 msg_id = 5;
+}
+
+message SFTPFileChunk {
+    uint32 sid = 1;
+    optional uint32 msg_id = 2;
+    sftp.SFTPFileChunk chunk = 3;
+}
+
+message SFTPUpload {
+    string node_id = 1;
+    string path = 2;
+    uint32 sid = 3;
+    optional uint32 msg_id = 4;
+    sftp.SFTPUploadChunk chunk = 5;
+}
+
+message SFTPDelete {
+    string node_id = 1;
+    uint32 sid = 2;
+    optional uint32 msg_id = 3;
+    sftp.SFTPDelete data = 4;
+}
+
+message Error {
+    int32 kind = 1;
+    string message = 2;
+    optional uint32 msg_id = 3;
+}

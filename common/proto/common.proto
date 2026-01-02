@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+package phirepass.common;
+
+enum FrameEncoding {
+    JSON = 0;
+    PROTOBUF = 1;
+}
+
+enum FrameError {
+    GENERIC = 0;
+    REQUIRES_PASSWORD = 100;
+    REQUIRES_USERNAME_PASSWORD = 110;
+}

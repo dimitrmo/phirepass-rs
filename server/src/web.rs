@@ -40,7 +40,8 @@ async fn handle_web_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
 
     let write_task = tokio::spawn(async move {
         while let Some(web_frame) = rx.recv().await {
-            let frame: Frame = web_frame.into();
+            // Use Protobuf encoding for better compression (50% smaller than JSON)
+            let frame = Frame::from_web_protobuf(web_frame);
 
             let frame = match frame.to_bytes() {
                 Ok(frame) => frame,
