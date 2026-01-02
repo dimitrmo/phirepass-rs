@@ -500,7 +500,7 @@ function connectSFTP() {
                     default:
                         const message = frame?.data?.web?.message || "An unknown error occurred.";
                         if (sftpBrowser) {
-                            sftpBrowser.handleError(frame.data.web.kind, message);
+                            sftpBrowser.handleListingError(frame.data.web.msg_id, message);
                             setStatus("SFTP Error", "error");
                         }
                 }

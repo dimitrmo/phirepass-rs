@@ -1,5 +1,5 @@
 use log::{debug, info, warn};
-use phirepass_common::protocol::common::Frame;
+use phirepass_common::protocol::common::{Frame, FrameError};
 use phirepass_common::protocol::node::NodeFrameData;
 use phirepass_common::protocol::sftp::{SFTPListItem, SFTPListItemAttributes, SFTPListItemKind};
 use phirepass_common::protocol::web::WebFrameData;
@@ -155,6 +155,23 @@ async fn send_directory_listing(
         Ok(dir) => dir,
         Err(err) => {
             warn!("failed to list directory {path}: {err}");
+            // Send error to web client
+            if let Err(send_err) = tx
+                .send(
+                    NodeFrameData::WebFrame {
+                        frame: WebFrameData::Error {
+                            kind: FrameError::Generic,
+                            message: format!("Failed to list directory: {}", err),
+                            msg_id,
+                        },
+                        sid,
+                    }
+                    .into(),
+                )
+                .await
+            {
+                warn!("failed to send error frame for directory listing: {send_err}");
+            }
             return;
         }
     };

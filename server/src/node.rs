@@ -147,7 +147,8 @@ async fn handle_node_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
                         sid,
                         msg_id,
                     } => {
-                        handle_tunnel_closed(&state, protocol, cid.as_str(), sid, &id, msg_id).await;
+                        handle_tunnel_closed(&state, protocol, cid.as_str(), sid, &id, msg_id)
+                            .await;
                     }
                     o => warn!("unhandled node frame: {o:?}"),
                 }

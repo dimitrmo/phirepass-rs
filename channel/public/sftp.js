@@ -12,6 +12,8 @@ export class SFTPBrowser {
         this.awaitingCredentials = false;
         this.credentialsBuffer = { username: "", password: "" };
         this.currentItems = [];
+        this.previousState = null; // Store previous successful state for error recovery
+        this.errorMessage = null; // Store current error for recovery
 
         this.setupElements();
         this.setupEventListeners();
@@ -89,7 +91,13 @@ export class SFTPBrowser {
         // Only render if this is the current path being viewed
         if (path === this.currentPath) {
             this.currentItems = listing.items;
+            this.errorMessage = null; // Clear any previous error on successful listing
             this.renderBrowser();
+            // Save successful state for recovery
+            this.previousState = {
+                path: path,
+                items: [...listing.items]
+            };
         }
     }
 
@@ -97,6 +105,14 @@ export class SFTPBrowser {
         if (!this.socket || !this.sessionId) {
             this.browser.innerHTML = '<div class="sftp-item-loading">Not connected</div>';
             return;
+        }
+
+        // Save current state before attempting to load new directory
+        if (this.currentItems.length > 0) {
+            this.previousState = {
+                path: this.currentPath,
+                items: [...this.currentItems]
+            };
         }
 
         this.currentPath = path;
@@ -231,6 +247,65 @@ export class SFTPBrowser {
             this.showCredentialsModal();
         } else {
             this.browser.innerHTML = `<div class="sftp-item-loading" style="color: #f87171;">Error: ${message}</div>`;
+        }
+    }
+
+    handleListingError(msgId, message) {
+        this.errorMessage = message;
+        // If there's a msg_id, check if it matches the current pending listing
+        if (msgId !== null && msgId !== undefined && this.pendingListings.has(msgId)) {
+            this.pendingListings.delete(msgId);
+        }
+
+        // Display error with dismiss button and recovery option
+        this.browser.innerHTML = `
+            <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; padding: 20px;">
+                <div style="color: #f87171; font-weight: bold; font-size: 16px; margin-bottom: 10px;">Error</div>
+                <div style="color: #f87171; text-align: center; margin-bottom: 20px; word-break: break-word;">${message}</div>
+                <div style="display: flex; gap: 10px;">
+                    ${this.previousState ? '<button id="sftp-error-back-btn" style="padding: 8px 16px; background-color: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer;">Go Back</button>' : ''}
+                    <button id="sftp-error-close-btn" style="padding: 8px 16px; background-color: #6b7280; color: white; border: none; border-radius: 4px; cursor: pointer;">Dismiss</button>
+                </div>
+            </div>
+        `;
+
+        // Add event listeners for error buttons
+        const closeBtn = this.browser.querySelector('#sftp-error-close-btn');
+        if (closeBtn) {
+            closeBtn.addEventListener('click', () => this.dismissError());
+        }
+
+        if (this.previousState) {
+            const backBtn = this.browser.querySelector('#sftp-error-back-btn');
+            if (backBtn) {
+                backBtn.addEventListener('click', () => this.restorePreviousState());
+            }
+        }
+    }
+
+    dismissError() {
+        this.errorMessage = null;
+        if (this.previousState) {
+            // Restore previous state
+            this.currentPath = this.previousState.path;
+            this.currentItems = this.previousState.items;
+            this.pathInput.value = this.currentPath;
+            this.backBtn.disabled = this.currentPath === "/";
+            this.renderBrowser();
+        } else {
+            // No previous state, clear the browser
+            this.browser.innerHTML = '<div class="sftp-item-loading">Empty directory</div>';
+        }
+    }
+
+    restorePreviousState() {
+        if (this.previousState) {
+            this.currentPath = this.previousState.path;
+            this.currentItems = this.previousState.items;
+            this.pathInput.value = this.currentPath;
+            this.backBtn.disabled = this.currentPath === "/";
+            this.errorMessage = null;
+            this.renderBrowser();
         }
     }
 
