@@ -8,6 +8,7 @@ export class SFTPBrowser {
         this.sessionId = null;
         this.breadcrumb = ["/"];
         this.pendingListings = new Map(); // msgId -> { path, items, timer }
+        this.activeDownloads = new Map(); // msgId -> { filename, chunks: Map, total_chunks, total_size }
         this.msgId = 1;
         this.awaitingCredentials = false;
         this.credentialsBuffer = { username: "", password: "" };
@@ -169,6 +170,18 @@ export class SFTPBrowser {
                 size.className = "sftp-item-size";
                 size.textContent = this.formatBytes(item.size);
                 itemEl.appendChild(size);
+
+                // Add download button for files
+                const downloadBtn = document.createElement("button");
+                downloadBtn.className = "sftp-download-btn";
+                downloadBtn.textContent = "⬇";
+                downloadBtn.title = "Download";
+                downloadBtn.style.cssText = "margin-left: auto; padding: 4px 12px; background-color: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px;";
+                downloadBtn.addEventListener("click", (e) => {
+                    e.stopPropagation();
+                    this.downloadFile(item.name);
+                });
+                itemEl.appendChild(downloadBtn);
             }
 
             if (item.is_dir) {
@@ -328,5 +341,162 @@ export class SFTPBrowser {
             unit = units.shift();
         }
         return `${size.toFixed(1)} ${unit}`;
+    }
+
+    downloadFile(filename) {
+        if (!this.socket || !this.sessionId) {
+            console.error("Cannot download: not connected");
+            return;
+        }
+
+        const msgId = this.msgId++;
+        console.log(`Starting download for ${filename} with msgId ${msgId}`);
+
+        // Initialize download tracking
+        this.activeDownloads.set(msgId, {
+            filename: filename,
+            chunks: new Map(),
+            total_chunks: null,
+            total_size: null,
+            progressElement: null
+        });
+
+        // Create progress indicator
+        const progressEl = this.createDownloadProgressElement(filename, msgId);
+        this.browser.insertBefore(progressEl, this.browser.firstChild);
+        this.activeDownloads.get(msgId).progressElement = progressEl;
+
+        // Send download request
+        this.socket.send_sftp_download(this.selectedNode, this.sessionId, this.currentPath, filename, msgId);
+    }
+
+    createDownloadProgressElement(filename, msgId) {
+        const container = document.createElement("div");
+        container.id = `download-progress-${msgId}`;
+        container.style.cssText = "padding: 12px; margin-bottom: 8px; background-color: #1f2937; border-radius: 6px; border-left: 4px solid #3b82f6;";
+
+        const header = document.createElement("div");
+        header.style.cssText = "display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;";
+
+        const filename_el = document.createElement("span");
+        filename_el.textContent = `Downloading: ${filename}`;
+        filename_el.style.cssText = "font-weight: 500; color: #f9fafb;";
+
+        const cancel_btn = document.createElement("button");
+        cancel_btn.textContent = "✕";
+        cancel_btn.title = "Cancel";
+        cancel_btn.style.cssText = "padding: 2px 8px; background-color: #ef4444; color: white; border: none; border-radius: 4px; cursor: pointer;";
+        cancel_btn.addEventListener("click", () => this.cancelDownload(msgId));
+
+        header.appendChild(filename_el);
+        header.appendChild(cancel_btn);
+
+        const progress_bar_bg = document.createElement("div");
+        progress_bar_bg.style.cssText = "width: 100%; height: 8px; background-color: #374151; border-radius: 4px; overflow: hidden;";
+
+        const progress_bar = document.createElement("div");
+        progress_bar.id = `download-progress-bar-${msgId}`;
+        progress_bar.style.cssText = "height: 100%; background-color: #3b82f6; transition: width 0.3s ease; width: 0%;";
+
+        progress_bar_bg.appendChild(progress_bar);
+
+        const info = document.createElement("div");
+        info.id = `download-info-${msgId}`;
+        info.style.cssText = "margin-top: 4px; font-size: 12px; color: #9ca3af;";
+        info.textContent = "Initializing...";
+
+        container.appendChild(header);
+        container.appendChild(progress_bar_bg);
+        container.appendChild(info);
+
+        return container;
+    }
+
+    handleFileChunk(msgId, chunk) {
+        const download = this.activeDownloads.get(msgId);
+        if (!download) {
+            console.warn(`Received chunk for unknown download msgId: ${msgId}`);
+            return;
+        }
+
+        // Update metadata if this is the first chunk
+        if (download.total_chunks === null) {
+            download.total_chunks = chunk.total_chunks;
+            download.total_size = chunk.total_size;
+            console.log(`Download ${download.filename}: ${download.total_chunks} chunks, ${this.formatBytes(download.total_size)}`);
+        }
+
+        // Convert chunk data to Uint8Array (it comes as a regular array from JSON)
+        const chunkData = new Uint8Array(chunk.data);
+        
+        // Store chunk
+        download.chunks.set(chunk.chunk_index, chunkData);
+
+        // Update progress
+        const progress = (download.chunks.size / download.total_chunks) * 100;
+        const progressBar = document.getElementById(`download-progress-bar-${msgId}`);
+        const infoEl = document.getElementById(`download-info-${msgId}`);
+
+        if (progressBar) {
+            progressBar.style.width = `${progress}`;
+        }
+
+        if (infoEl) {
+            const receivedSize = Array.from(download.chunks.values()).reduce((sum, data) => sum + data.length, 0);
+            infoEl.textContent = `${download.chunks.size} / ${download.total_chunks} chunks (${this.formatBytes(receivedSize)} / ${this.formatBytes(download.total_size)})`;
+        }
+
+        // Check if download is complete
+        if (download.chunks.size === download.total_chunks) {
+            console.log(`Download complete: ${download.filename}`);
+            this.finalizeDownload(msgId);
+        }
+    }
+
+    finalizeDownload(msgId) {
+        const download = this.activeDownloads.get(msgId);
+        if (!download) return;
+
+        // Reconstruct file from chunks in order
+        const sortedChunks = Array.from(download.chunks.entries())
+            .sort((a, b) => a[0] - b[0])
+            .map(([_, data]) => data);
+
+        // Convert chunks to Blob
+        const blob = new Blob(sortedChunks, { type: "application/octet-stream" });
+
+        // Create download link
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = download.filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        // Remove progress indicator
+        if (download.progressElement) {
+            download.progressElement.remove();
+        }
+
+        // Clean up
+        this.activeDownloads.delete(msgId);
+        console.log(`Download finalized and cleaned up: ${download.filename}`);
+    }
+
+    cancelDownload(msgId) {
+        const download = this.activeDownloads.get(msgId);
+        if (!download) return;
+
+        console.log(`Cancelling download: ${download.filename}`);
+
+        // Remove progress indicator
+        if (download.progressElement) {
+            download.progressElement.remove();
+        }
+
+        // Clean up
+        this.activeDownloads.delete(msgId);
     }
 }

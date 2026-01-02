@@ -434,7 +434,6 @@ function connectSFTP() {
     });
 
     channel.on_protocol_message((frame) => {
-        console.log('#received SFTP frame', frame);
         switch (frame.data.web.type) {
             case "SFTPListItems":
                 if (sftpBrowser && currentTab === "sftp") {
@@ -455,6 +454,14 @@ function connectSFTP() {
                                 frame.data.web.dir.path
                             );
                         });
+                    }
+                }
+                break;
+            case "SFTPFileChunk":
+                if (sftpBrowser && currentTab === "sftp") {
+                    const chunk = frame.data.web.chunk;
+                    if (chunk) {
+                        sftpBrowser.handleFileChunk(frame.data.web.msg_id, chunk);
                     }
                 }
                 break;
