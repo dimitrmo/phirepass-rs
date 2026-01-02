@@ -25,21 +25,78 @@
                     <button id="fullscreen">Fullscreen</button>
                 </div>
             </header>
-            <div
-                style="
-                    display: flex;
-                    justify-content: space-between;
-                    align-items: center;
-                    margin-bottom: 6px;
-                    gap: 12px;
-                "
-            >
-                <div style="font-weight: 600; color: #cbd5e1">Nodes</div>
-                <button id="refresh-nodes">Refresh</button>
+
+            <!-- Tab Navigation -->
+            <div id="tab-navigation" style="margin-bottom: 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); display: flex; flex-direction: row; gap: 4px;">
+                <button id="tab-ssh" class="tab-button active" data-tab="ssh">SSH</button>
+                <button id="tab-sftp" class="tab-button" data-tab="sftp">SFTP</button>
             </div>
-            <div id="nodes"></div>
-            <div id="log" aria-live="polite"></div>
-            <div id="terminal"></div>
+
+            <!-- SSH Tab -->
+            <div id="tab-content-ssh" class="tab-content active">
+                <div
+                    style="
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                        margin-bottom: 6px;
+                        gap: 12px;
+                    "
+                >
+                    <div style="font-weight: 600; color: #cbd5e1">SSH Nodes</div>
+                    <button id="refresh-nodes-ssh">Refresh</button>
+                </div>
+                <div id="nodes-ssh" style="margin-bottom: 12px;"></div>
+                <div id="log" aria-live="polite"></div>
+                <div id="terminal"></div>
+            </div>
+
+            <!-- SFTP Tab -->
+            <div id="tab-content-sftp" class="tab-content">
+                <div
+                    style="
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                        margin-bottom: 6px;
+                        gap: 12px;
+                    "
+                >
+                    <div style="font-weight: 600; color: #cbd5e1">SFTP Nodes</div>
+                    <button id="refresh-nodes-sftp">Refresh</button>
+                </div>
+                <div id="nodes-sftp" style="margin-bottom: 12px;"></div>
+                <div id="sftp-container" style="display: none; height: 520px; display: flex; flex-direction: column;">
+                    <!-- Credentials Modal -->
+                    <div id="sftp-credentials-modal" style="display: none; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 1000; background: rgba(15, 23, 42, 0.95); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 12px; padding: 24px; min-width: 320px;">
+                        <div style="font-size: 16px; font-weight: 600; margin-bottom: 16px;">SFTP Credentials Required</div>
+                        <div style="margin-bottom: 16px;">
+                            <label style="display: block; margin-bottom: 6px; font-size: 14px;">Username:</label>
+                            <input id="sftp-username" type="text" style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.2); background: rgba(255, 255, 255, 0.05); color: #e5e7eb; box-sizing: border-box;">
+                        </div>
+                        <div style="margin-bottom: 16px;">
+                            <label style="display: block; margin-bottom: 6px; font-size: 14px;">Password:</label>
+                            <input id="sftp-password" type="password" style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.2); background: rgba(255, 255, 255, 0.05); color: #e5e7eb; box-sizing: border-box;">
+                        </div>
+                        <div style="display: flex; gap: 8px;">
+                            <button id="sftp-creds-submit" style="flex: 1;">Connect</button>
+                            <button id="sftp-creds-cancel" style="flex: 1; background: linear-gradient(135deg, #f87171, #fca5a5);">Cancel</button>
+                        </div>
+                    </div>
+
+                    <!-- SFTP Browser -->
+                    <div style="display: flex; gap: 12px; margin-bottom: 12px; align-items: center;">
+                        <button id="sftp-back" disabled style="padding: 6px 8px; font-size: 12px;">← Back</button>
+                        <input id="sftp-path" type="text" readonly style="flex: 1; padding: 8px 12px; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.2); background: rgba(15, 23, 42, 0.8); color: #cbd5e1; font-family: monospace; font-size: 13px;">
+                        <button id="sftp-refresh" style="padding: 6px 8px; font-size: 12px;">Refresh</button>
+                    </div>
+
+                    <!-- File Browser -->
+                    <div id="sftp-browser" style="flex: 1; overflow-y: auto; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; background: rgba(15, 23, 42, 0.5); padding: 8px;">
+                        <div style="color: #cbd5e1; text-align: center; padding: 20px;">Select a node to browse files</div>
+                    </div>
+                </div>
+            </div>
         </main>
         <script src="xterm.min.js"></script>
         <script src="xterm-addon-fit.js"></script>

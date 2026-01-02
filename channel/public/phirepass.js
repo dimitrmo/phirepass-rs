@@ -2,6 +2,7 @@ import init, {
     ErrorType,
     Channel as PhirepassChannel,
 } from "/pkg/debug/phirepass-channel.js";
+import { SFTPBrowser } from "./sftp.js";
 
 async function setup() {
     await init(); // Load WebAssembly module
@@ -11,9 +12,13 @@ const statusEl = document.getElementById("status");
 const logEl = document.getElementById("log");
 const connectBtn = document.getElementById("connect");
 const terminalHost = document.getElementById("terminal");
-const nodesEl = document.getElementById("nodes");
-const refreshBtn = document.getElementById("refresh-nodes");
+const nodesSshEl = document.getElementById("nodes-ssh");
+const nodesSftpEl = document.getElementById("nodes-sftp");
+const refreshBtnSsh = document.getElementById("refresh-nodes-ssh");
+const refreshBtnSftp = document.getElementById("refresh-nodes-sftp");
 const fullscreenBtn = document.getElementById("fullscreen");
+const tabNavigation = document.getElementById("tab-navigation");
+const tabButtons = document.querySelectorAll(".tab-button");
 
 const wsScheme = window.location.protocol === "https:" ? "wss" : "ws";
 
@@ -21,12 +26,17 @@ const wsEndpoint = `${wsScheme}://${window.location.hostname}:8080`;
 const httpEndpoint = `${window.location.protocol}//${window.location.hostname}:8080`;
 
 let term, fitAddon;
-let socket;
+let socket; // SSH socket
+let sftpSocket; // Separate SFTP socket
 let nodes = [];
-let selected_node_id = null;
+let nodesSftp = [];
+let selected_node_id = null; // SSH selected node
+let selected_node_id_sftp = null; // SFTP selected node
 let session_id = null;
 let isIntentionallyClosed = false;
 let isSshConnected = false;
+let sftpBrowser = null;
+let currentTab = "ssh"; // Track current active tab
 
 let credentialMode = null; // "username" | "password"
 let usernameBuffer = "";
@@ -67,27 +77,56 @@ const formatBytes = (bytes) => {
     return `${size.toFixed(1)} ${unit}`;
 };
 
+const switchTab = (tabName) => {
+    currentTab = tabName;
+
+    // Update button states
+    tabButtons.forEach(btn => {
+        btn.classList.toggle("active", btn.dataset.tab === tabName);
+    });
+
+    // Update content visibility
+    const sshContent = document.getElementById("tab-content-ssh");
+    const sftpContent = document.getElementById("tab-content-sftp");
+
+    if (tabName === "ssh") {
+        sshContent.classList.add("active");
+        sftpContent.classList.remove("active");
+        if (term) fitAddon.fit();
+    } else if (tabName === "sftp") {
+        sshContent.classList.remove("active");
+        sftpContent.classList.add("active");
+    }
+};
+
 const fetchNodes = async () => {
     try {
+        // Fetch nodes for both SSH and SFTP tabs
         const res = await fetch(`${httpEndpoint}/api/nodes`);
         if (!res.ok) {
             log(`Failed to fetch nodes`);
             return;
         }
-        nodes = await res.json();
-        renderNodes(nodes);
+        const nodeList = await res.json();
+
+        // Use same node list for both SSH and SFTP
+        nodes = nodeList;
+        nodesSftp = nodeList;
+
+        renderNodes(nodes, nodesSshEl, 'ssh');
+        renderNodes(nodesSftp, nodesSftpEl, 'sftp');
     } catch (err) {
         log(`Failed to fetch nodes: ${err.message}`);
     }
 };
 
-const renderNodes = (list) => {
-    nodesEl.innerHTML = "";
+const renderNodes = (list, containerEl, tabType) => {
+    containerEl.innerHTML = "";
     if (!list.length) {
         const empty = document.createElement("div");
         empty.style.color = "#94a3b8";
         empty.textContent = "No nodes connected.";
-        nodesEl.appendChild(empty);
+        containerEl.appendChild(empty);
         return;
     }
 
@@ -118,42 +157,76 @@ const renderNodes = (list) => {
         card.appendChild(meta);
 
         card.addEventListener("click", () => {
-            // Check if there's an active websocket connection
-            if (socket && socket.is_open()) {
-                // Already connected, warn user
-                const confirmed = confirm(
-                    `You are currently connected to a node. Do you want to disconnect and switch to ${node.id}?`
-                );
-                if (!confirmed) {
-                    // User canceled - do nothing
-                    return;
+            if (tabType === "ssh") {
+                // Check if there's an active SSH connection
+                if (socket && socket.is_open()) {
+                    const confirmed = confirm(
+                        `You are currently connected via SSH. Do you want to disconnect and switch to ${node.id}?`
+                    );
+                    if (!confirmed) {
+                        return;
+                    }
                 }
-            }
 
-            selected_node_id = node.id;
-            Array.from(nodesEl.children).forEach((el) =>
-                el.classList.toggle("selected", el.dataset.nodeId === node.id)
-            );
-            log(`Selected node ${node.id}`);
-            socket = connect();
+                selected_node_id = node.id;
+                Array.from(nodesSshEl.children).forEach((el) =>
+                    el.classList.toggle("selected", el.dataset.nodeId === node.id)
+                );
+                log(`Selected SSH node ${node.id}`);
+
+                socket = connect();
+            } else if (tabType === "sftp") {
+                // Check if there's an active SFTP connection
+                if (sftpSocket && sftpSocket.is_open()) {
+                    const confirmed = confirm(
+                        `You are currently connected via SFTP. Do you want to disconnect and switch to ${node.id}?`
+                    );
+                    if (!confirmed) {
+                        return;
+                    }
+                }
+
+                selected_node_id_sftp = node.id;
+                Array.from(nodesSftpEl.children).forEach((el) =>
+                    el.classList.toggle("selected", el.dataset.nodeId === node.id)
+                );
+                log(`Selected SFTP node ${node.id}`);
+
+                // Create SFTP socket connection
+                if (!sftpBrowser) {
+                    sftpBrowser = new SFTPBrowser(wsEndpoint);
+                }
+                sftpSocket = connectSFTP();
+            }
         });
 
-        nodesEl.appendChild(card);
+        containerEl.appendChild(card);
     });
 };
 
 const cleanup = () => {
+    // Close SSH socket
     if (socket) {
         isIntentionallyClosed = true;
         socket.disconnect();
         socket = null;
     }
 
+    // Close SFTP socket
+    if (sftpSocket) {
+        sftpSocket.disconnect();
+        sftpSocket = null;
+    }
+
+    if (sftpBrowser) {
+        sftpBrowser.disconnect();
+    }
+
     resetCredentialCapture();
     session_username = "";
     session_id = null;
     isSshConnected = false;
-    fitAddon.fit();
+    if (fitAddon) fitAddon.fit();
 };
 
 const resetCredentialCapture = () => {
@@ -296,6 +369,155 @@ function socket_healthy() {
     return false;
 }
 
+function sftp_socket_healthy() {
+    if (sftpSocket) {
+        if (sftpSocket.is_open()) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function connectSFTP() {
+    if (!selected_node_id_sftp) {
+        log("Select a node before connecting to SFTP");
+        return;
+    }
+
+    // Close any existing SFTP connection
+    if (sftpSocket) {
+        sftpSocket.disconnect();
+    }
+
+    setStatus("Connecting to SFTP...");
+    log("Establishing SFTP connection...");
+
+    const channel = new PhirepassChannel(`${wsEndpoint}/api/web/ws`);
+
+    channel.on_connection_open(() => {
+        channel.start_heartbeat();
+        // Don't open tunnel here - wait for credentials
+        log("SFTP WebSocket connected");
+        setStatus("Awaiting credentials...", "info");
+
+        // Show credentials modal immediately
+        if (!sftpBrowser) {
+            sftpBrowser = new SFTPBrowser(wsEndpoint);
+        }
+        sftpBrowser.socket = channel;
+        sftpBrowser.selectedNode = selected_node_id_sftp;
+        sftpBrowser.container.style.display = "flex";
+        sftpBrowser.showCredentialsModal();
+    });
+
+    channel.on_connection_message((_event) => {
+        // console.log(">> on connection message", event);
+    });
+
+    channel.on_connection_error((event) => {
+        setStatus("SFTP Error", "error");
+        log(`SFTP Socket error: ${event.message ?? "unknown error"}`);
+        sftpSocket = null;
+    });
+
+    channel.on_connection_close((event) => {
+        if (currentTab === "sftp") {
+            setStatus("SFTP Disconnected", "warn");
+            const reason = event.reason || `code ${event.code}`;
+            log(`SFTP Socket closed (${reason})`);
+            if (sftpBrowser) {
+                sftpBrowser.disconnect();
+            }
+        }
+        sftpSocket = null;
+    });
+
+    channel.on_protocol_message((frame) => {
+        console.log('#received SFTP frame', frame);
+        switch (frame.data.web.type) {
+            case "SFTPListItems":
+                if (sftpBrowser && currentTab === "sftp") {
+                    // frame.data.web.dir is a SFTPListItem object with an 'items' array
+                    // Process each item in the directory
+                    const dirItem = frame.data.web.dir;
+                    if (dirItem && dirItem.items && Array.isArray(dirItem.items)) {
+                        dirItem.items.forEach(item => {
+                            // Convert item to expected format
+                            const formattedItem = {
+                                name: item.name,
+                                is_dir: item.kind === "Folder" || item.kind === 1,
+                                size: item.attributes ? item.attributes.size : 0
+                            };
+                            sftpBrowser.handleListItems(
+                                frame.data.web.msg_id,
+                                formattedItem,
+                                frame.data.web.dir.path
+                            );
+                        });
+                    }
+                }
+                break;
+            case "TunnelOpened":
+                if (currentTab === "sftp") {
+                    if (!sftpBrowser) {
+                        sftpBrowser = new SFTPBrowser(wsEndpoint);
+                    }
+                    sftpBrowser.socket = channel;
+                    sftpBrowser.selectedNode = selected_node_id_sftp;
+                    sftpBrowser.handleTunnelOpened(frame.data.web.sid);
+                    log("SFTP tunnel established");
+                    setStatus("SFTP Connected", "ok");
+                }
+                break;
+            case "TunnelClosed":
+                if (currentTab === "sftp") {
+                    log(`SFTP Tunnel closed - Session ID: ${frame.data.web.sid}`);
+                    sftpBrowser.disconnect();
+                    setStatus("SFTP Disconnected", "warn");
+                }
+                break;
+            case "Error":
+                const isSftpContext = currentTab === "sftp";
+                if (!isSftpContext) break;
+
+                switch (frame.data.web.kind) {
+                    case ErrorType.RequiresUsernamePassword:
+                        if (sftpBrowser) {
+                            sftpBrowser.showCredentialsModal();
+                            setStatus("SFTP Credentials required", "warn");
+                            log("SFTP username and password are required.");
+                        }
+                        break;
+                    case ErrorType.RequiresPassword:
+                        if (sftpBrowser) {
+                            sftpBrowser.showCredentialsModal();
+                            setStatus("SFTP Password required", "warn");
+                            log("SFTP password is required.");
+                        }
+                        break;
+                    case ErrorType.Generic:
+                    default:
+                        const message = frame?.data?.web?.message || "An unknown error occurred.";
+                        if (sftpBrowser) {
+                            sftpBrowser.handleError(frame.data.web.kind, message);
+                            setStatus("SFTP Error", "error");
+                        }
+                }
+                break;
+            default:
+                const msg = frame?.data?.web?.message || "An unknown error occurred.";
+                if (currentTab === "sftp" && sftpBrowser) {
+                    sftpBrowser.handleError(null, msg);
+                }
+        }
+    });
+
+    channel.connect();
+
+    return channel;
+}
+
 function connect() {
     if (!selected_node_id) {
         log("Select a node before connecting");
@@ -341,12 +563,8 @@ function connect() {
     });
 
     channel.on_protocol_message((frame) => {
-        console.log('#received frame', frame);
+        console.log('#received SSH frame', frame);
         switch (frame.data.web.type) {
-            case "SFTPListItems":
-                // todo: Render items in sftp gui
-                console.log('sftp root dir items', frame.data.web.dir);
-                break;
             case "TunnelData":
                 if (!isSshConnected) {
                     isSshConnected = true;
@@ -355,11 +573,10 @@ function connect() {
                     setStatus("Connected", "ok");
                     term.reset();
                 }
-
                 term.write(new Uint8Array(frame.data.web.data));
                 break;
             case "TunnelOpened":
-                log(`Tunnel opened - Session ID: ${frame.data.web.sid}`);
+                log(`SSH Tunnel opened - Session ID: ${frame.data.web.sid}`);
                 setStatus("Tunnel established", "info");
                 session_id = frame.data.web.sid;
                 if (socket_healthy()) {
@@ -367,7 +584,7 @@ function connect() {
                 }
                 break;
             case "TunnelClosed":
-                log(`Tunnel closed - Session ID: ${frame.data.web.sid}`);
+                log(`SSH Tunnel closed - Session ID: ${frame.data.web.sid}`);
                 setStatus("Tunnel closed", "warn");
                 term.reset();
                 cleanup();
@@ -393,9 +610,7 @@ function connect() {
                     case ErrorType.Generic:
                     default:
                         term.reset();
-                        const message =
-                            frame?.data?.web?.message ||
-                            "An unknown error occurred.";
+                        const message = frame?.data?.web?.message || "An unknown error occurred.";
                         setStatus("Error", "error");
                         log(message);
                         session_username = "";
@@ -405,9 +620,7 @@ function connect() {
                 break;
             default:
                 term.reset();
-                const message =
-                    frame?.data?.web?.message ||
-                    "An unknown error occurred.";
+                const message = frame?.data?.web?.message || "An unknown error occurred.";
                 setStatus("Auth failed", "error");
                 log(message);
                 session_username = "";
@@ -451,7 +664,26 @@ function setup_terminal() {
 
 document.addEventListener("DOMContentLoaded", () => {
     connectBtn.addEventListener("click", connect);
-    refreshBtn.addEventListener("click", fetchNodes);
+    refreshBtnSsh.addEventListener("click", fetchNodes);
+    refreshBtnSftp.addEventListener("click", fetchNodes);
+
+    // Tab switching
+    tabButtons.forEach(btn => {
+        btn.addEventListener("click", () => {
+            const tabName = btn.dataset.tab;
+            switchTab(tabName);
+
+            // Create separate socket for SFTP when switching to SFTP tab
+            if (tabName === "sftp" && selected_node_id) {
+                if (!sftpSocket) {
+                    if (!sftpBrowser) {
+                        sftpBrowser = new SFTPBrowser(wsEndpoint);
+                    }
+                    sftpSocket = connectSFTP();
+                }
+            }
+        });
+    });
 
     fullscreenBtn.addEventListener("click", () => {
         const container = document.documentElement;
