@@ -432,7 +432,7 @@ export class SFTPBrowser {
                     download.total_size = total_size;
                     download.total_chunks = total_chunks;
                     console.log(`Download ${filename}: ${total_chunks} chunks, ${this.formatBytes(total_size)}`);
-                    
+
                     // Request all chunks from the daemon
                     this.requestAllDownloadChunks(msgId, download_id, total_chunks);
                 }
@@ -456,43 +456,6 @@ export class SFTPBrowser {
                     msgId
                 );
             }, i * 100); // 100ms delay between chunk requests
-        }
-    }
-
-    handleFileChunk(msgId, chunk) {
-        const download = this.activeDownloads.get(msgId);
-        if (!download) {
-            console.warn(`Received chunk for unknown download msgId: ${msgId}`);
-            return;
-        }
-
-        // Update metadata if this is the first chunk
-        if (download.total_chunks === null) {
-            download.total_chunks = chunk.total_chunks;
-            download.total_size = chunk.total_size;
-            console.log(`Download ${download.filename}: ${download.total_chunks} chunks, ${this.formatBytes(download.total_size)}`);
-        }
-
-        // Convert chunk data to Uint8Array (it comes as a regular array from JSON)
-        const chunkData = new Uint8Array(chunk.data);
-
-        // Store chunk
-        download.chunks.set(chunk.chunk_index, chunkData);
-
-        // Update progress solely in the loader overlay
-        const progress = (download.chunks.size / download.total_chunks) * 100;
-        const receivedSize = Array.from(download.chunks.values()).reduce((sum, data) => sum + data.length, 0);
-        const currentTime = Date.now();
-        const elapsedSeconds = (currentTime - download.startTime) / 1000;
-        const speed = elapsedSeconds > 0 ? receivedSize / elapsedSeconds : 0;
-        const infoText = `${this.formatBytes(receivedSize)} / ${this.formatBytes(download.total_size)} • ↓ ${this.formatBytes(speed)}/s`;
-
-        this.setLoaderProgress(progress, infoText);
-
-        // Check if download is complete
-        if (download.chunks.size === download.total_chunks) {
-            console.log(`Download complete: ${download.filename}`);
-            this.finalizeDownload(msgId);
         }
     }
 

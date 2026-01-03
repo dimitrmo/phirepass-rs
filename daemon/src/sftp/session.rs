@@ -8,11 +8,6 @@ use tokio::sync::oneshot;
 #[derive(Clone, Debug)]
 pub(crate) enum SFTPCommand {
     List(String, Option<u32>),
-    Download {
-        path: String,
-        filename: String,
-        msg_id: Option<u32>,
-    },
     DownloadStart {
         download: SFTPDownloadStart,
         msg_id: Option<u32>,

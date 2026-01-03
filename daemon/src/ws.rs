@@ -408,19 +408,6 @@ async fn handle_message(
                 warn!("failed to forward sftp list data: {err}");
             }
         }
-        NodeFrameData::SFTPDownload {
-            cid,
-            path,
-            filename,
-            sid,
-            msg_id,
-        } => {
-            if let Err(err) =
-                send_sftp_download_data(cid, sid, path, filename, &sessions, msg_id).await
-            {
-                warn!("failed to forward sftp download data: {err}");
-            }
-        }
         NodeFrameData::SFTPUploadStart {
             cid,
             sid,
@@ -509,40 +496,6 @@ async fn send_sftp_list_data(
         .map_err(|err| anyhow!(err))
 }
 
-async fn send_sftp_download_data(
-    cid: String,
-    sid: u32,
-    path: String,
-    filename: String,
-    sessions: &TunnelSessions,
-    msg_id: Option<u32>,
-) -> anyhow::Result<()> {
-    let connection_id = cid.clone();
-
-    let stdin = {
-        let sessions = sessions.lock().await;
-        sessions.get(&(cid, sid)).map(|s| s.get_stdin())
-    };
-
-    let Some(stdin) = stdin else {
-        anyhow::bail!(format!("no session found for connection {connection_id}"))
-    };
-
-    let SessionCommand::SFTP(stdin) = stdin else {
-        anyhow::bail!(format!(
-            "no sftp tunnel found for connection {connection_id}"
-        ))
-    };
-
-    stdin
-        .send(SFTPCommand::Download {
-            path,
-            filename,
-            msg_id,
-        })
-        .await
-        .map_err(|err| anyhow!(err))
-}
 
 async fn send_sftp_upload_start_data(
     cid: String,

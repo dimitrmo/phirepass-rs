@@ -12,19 +12,6 @@ use std::time::SystemTime;
 use tokio::io::AsyncReadExt;
 use tokio::sync::mpsc::Sender;
 
-pub async fn send_file_chunks(
-    tx: &Sender<Frame>,
-    sftp_session: &SftpSession,
-    path: &str,
-    filename: &str,
-    sid: u32,
-    msg_id: Option<u32>,
-) {
-    // Legacy function - now we use start_download for two-phase approach
-    // Keeping this for backward compatibility
-    debug!("send_file_chunks called (legacy)");
-}
-
 pub async fn start_download(
     tx: &Sender<Frame>,
     sftp_session: &SftpSession,

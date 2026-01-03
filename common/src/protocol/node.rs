@@ -65,14 +65,6 @@ pub enum NodeFrameData {
         msg_id: Option<u32>, // echo back the user supplied msg_id
     },
 
-    SFTPDownload {
-        cid: String,
-        path: String,
-        filename: String,
-        sid: u32,
-        msg_id: Option<u32>, // echo back the user supplied msg_id
-    },
-
     SFTPDownloadStart {
         cid: String,
         sid: u32,
@@ -138,12 +130,11 @@ impl NodeFrameData {
             NodeFrameData::TunnelClosed { .. } => 23,
             NodeFrameData::SSHWindowResize { .. } => 30,
             NodeFrameData::SFTPList { .. } => 31,
-            NodeFrameData::SFTPDownload { .. } => 32,
-            NodeFrameData::SFTPDownloadStart { .. } => 33,
-            NodeFrameData::SFTPDownloadChunk { .. } => 34,
-            NodeFrameData::SFTPUploadStart { .. } => 35,
-            NodeFrameData::SFTPUpload { .. } => 36,
-            NodeFrameData::SFTPDelete { .. } => 37,
+            NodeFrameData::SFTPDownloadStart { .. } => 32,
+            NodeFrameData::SFTPDownloadChunk { .. } => 33,
+            NodeFrameData::SFTPUploadStart { .. } => 34,
+            NodeFrameData::SFTPUpload { .. } => 35,
+            NodeFrameData::SFTPDelete { .. } => 36,
             NodeFrameData::Ping { .. } => 40,
             NodeFrameData::Pong { .. } => 41,
             NodeFrameData::WebFrame { .. } => 50,

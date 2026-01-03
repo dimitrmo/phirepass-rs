@@ -262,23 +262,6 @@ impl Channel {
         })
     }
 
-    pub fn send_sftp_download(
-        &self,
-        node_id: String,
-        sid: u32,
-        path: String,
-        filename: String,
-        msg_id: Option<u32>,
-    ) {
-        self.send_frame_data(WebFrameData::SFTPDownload {
-            node_id,
-            path,
-            filename,
-            sid,
-            msg_id,
-        })
-    }
-
     pub fn send_sftp_download_start(
         &self,
         node_id: String,

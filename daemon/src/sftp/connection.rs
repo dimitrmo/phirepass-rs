@@ -1,7 +1,6 @@
 use crate::sftp::{SFTPActiveDownloads, SFTPActiveUploads};
 use crate::sftp::actions::delete::delete_file;
 use crate::sftp::actions::download;
-use crate::sftp::actions::download::send_file_chunks;
 use crate::sftp::actions::list_dir::send_directory_listing;
 use crate::sftp::actions::upload::{start_upload, upload_file_chunk};
 use crate::sftp::client::SFTPClient;
@@ -105,10 +104,6 @@ impl SFTPConnection {
                         SFTPCommand::List(folder, msg_id) => {
                             debug!("sftp list command received for folder {folder}: {msg_id:?}");
                             send_directory_listing(&tx, &sftp, &folder, sid, msg_id).await;
-                        }
-                        SFTPCommand::Download { path, filename, msg_id } => {
-                            debug!("sftp download command received for {path}/{filename}: {msg_id:?}");
-                            send_file_chunks(&tx, &sftp, &path, &filename, sid, msg_id).await;
                         }
                         SFTPCommand::DownloadStart { download, msg_id } => {
                             debug!("sftp download start command received for {}/{}: {msg_id:?}", download.path, download.filename);

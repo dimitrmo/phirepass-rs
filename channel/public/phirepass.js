@@ -457,14 +457,6 @@ function connectSFTP() {
                     }
                 }
                 break;
-            case "SFTPFileChunk":
-                if (sftpBrowser && currentTab === "sftp") {
-                    const chunk = frame.data.web.chunk;
-                    if (chunk) {
-                        sftpBrowser.handleFileChunk(frame.data.web.msg_id, chunk);
-                    }
-                }
-                break;
             case "SFTPDownloadStartResponse":
                 if (sftpBrowser && currentTab === "sftp") {
                     const response = frame.data.web.response;

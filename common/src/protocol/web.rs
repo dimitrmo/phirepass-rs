@@ -1,7 +1,7 @@
 use crate::protocol::common::FrameError;
 use crate::protocol::sftp::{
     SFTPDelete, SFTPDownloadChunk, SFTPDownloadStart, SFTPDownloadStartResponse,
-    SFTPFileChunk, SFTPListItem, SFTPUploadChunk, SFTPUploadStart,
+    SFTPListItem, SFTPUploadChunk, SFTPUploadStart,
     SFTPUploadStartResponse,
 };
 use serde::{Deserialize, Serialize};
@@ -59,14 +59,6 @@ pub enum WebFrameData {
         msg_id: Option<u32>, // echo back the user supplied msg_id
     },
 
-    SFTPDownload {
-        node_id: String,
-        path: String,
-        filename: String,
-        sid: u32,
-        msg_id: Option<u32>, // echo back the user supplied msg_id
-    },
-
     SFTPDownloadStart {
         node_id: String,
         sid: u32,
@@ -113,12 +105,6 @@ pub enum WebFrameData {
         data: SFTPDelete,
     },
 
-    SFTPFileChunk {
-        sid: u32,
-        msg_id: Option<u32>,
-        chunk: SFTPFileChunk,
-    },
-
     Error {
         kind: FrameError,
         message: String,
@@ -137,16 +123,14 @@ impl WebFrameData {
             WebFrameData::SSHWindowResize { .. } => 30,
             WebFrameData::SFTPList { .. } => 40,
             WebFrameData::SFTPListItems { .. } => 41,
-            WebFrameData::SFTPDownload { .. } => 42,
-            WebFrameData::SFTPDownloadStart { .. } => 43,
-            WebFrameData::SFTPDownloadStartResponse { .. } => 44,
-            WebFrameData::SFTPDownloadChunk { .. } => 45,
-            WebFrameData::SFTPFileChunk { .. } => 46,
-            WebFrameData::SFTPUploadStart { .. } => 47,
-            WebFrameData::SFTPUploadStartResponse { .. } => 48,
-            WebFrameData::SFTPUpload { .. } => 49,
-            WebFrameData::SFTPDelete { .. } => 50,
-            WebFrameData::Error { .. } => 51,
+            WebFrameData::SFTPDownloadStart { .. } => 42,
+            WebFrameData::SFTPDownloadStartResponse { .. } => 43,
+            WebFrameData::SFTPDownloadChunk { .. } => 44,
+            WebFrameData::SFTPUploadStart { .. } => 45,
+            WebFrameData::SFTPUploadStartResponse { .. } => 46,
+            WebFrameData::SFTPUpload { .. } => 47,
+            WebFrameData::SFTPDelete { .. } => 48,
+            WebFrameData::Error { .. } => 49,
         }
     }
 }
