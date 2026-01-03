@@ -21,7 +21,7 @@ impl From<NodeFrameData> for Frame {
     fn from(data: NodeFrameData) -> Self {
         Self {
             version: Self::version(),
-            encoding: FrameEncoding::JSON,
+            encoding: FrameEncoding::MessagePack,
             data: FrameData::Node(data),
         }
     }
@@ -31,7 +31,7 @@ impl From<WebFrameData> for Frame {
     fn from(data: WebFrameData) -> Self {
         Self {
             version: Self::version(),
-            encoding: FrameEncoding::JSON,
+            encoding: FrameEncoding::MessagePack,
             data: FrameData::Web(data),
         }
     }
@@ -46,16 +46,18 @@ pub enum FrameData {
     Node(NodeFrameData),
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 #[repr(u8)]
 pub enum FrameEncoding {
     JSON = 0,
+    MessagePack = 1,
 }
 
 impl Display for FrameEncoding {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             FrameEncoding::JSON => write!(f, "JSON"),
+            FrameEncoding::MessagePack => write!(f, "MessagePack"),
         }
     }
 }
@@ -66,7 +68,8 @@ impl TryFrom<u8> for FrameEncoding {
     fn try_from(code: u8) -> Result<Self, Self::Error> {
         match code {
             0 => Ok(FrameEncoding::JSON),
-            _ => Err(anyhow!("unknown frame type")),
+            1 => Ok(FrameEncoding::MessagePack),
+            _ => Err(anyhow!("unknown frame encoding: {}", code)),
         }
     }
 }
@@ -90,16 +93,22 @@ impl Frame {
             anyhow::bail!("corrupt frame data")
         }
 
-        let payload = data[HEADER_SIZE..HEADER_SIZE + len].to_vec();
+        let payload = &data[HEADER_SIZE..HEADER_SIZE + len];
 
         let data = match frame_kind {
             0 => {
-                let web = serde_json::from_slice::<WebFrameData>(&payload)?;
+                let web = match encoding {
+                    FrameEncoding::JSON => serde_json::from_slice::<WebFrameData>(payload)?,
+                    FrameEncoding::MessagePack => rmp_serde::from_slice::<WebFrameData>(payload)?,
+                };
                 FrameData::Web(web)
             }
             #[cfg(not(target_arch = "wasm32"))]
             1 => {
-                let node = serde_json::from_slice::<NodeFrameData>(&payload)?;
+                let node = match encoding {
+                    FrameEncoding::JSON => serde_json::from_slice::<NodeFrameData>(payload)?,
+                    FrameEncoding::MessagePack => rmp_serde::from_slice::<NodeFrameData>(payload)?,
+                };
                 FrameData::Node(node)
             }
 
@@ -116,23 +125,26 @@ impl Frame {
             data,
         })
     }
+
     pub fn encode(frame: &Frame) -> anyhow::Result<Vec<u8>> {
-        let frame_encoding = frame.encoding.clone();
+        let frame_encoding = frame.encoding;
 
         let (data, kind, code) = match &frame.data {
-            FrameData::Web(data) => match frame_encoding {
-                FrameEncoding::JSON => {
-                    let raw = serde_json::to_vec(&data)?;
-                    (raw, 0, data.code())
-                }
-            },
+            FrameData::Web(data) => {
+                let raw = match frame_encoding {
+                    FrameEncoding::JSON => serde_json::to_vec(&data)?,
+                    FrameEncoding::MessagePack => rmp_serde::to_vec(&data)?,
+                };
+                (raw, 0, data.code())
+            }
             #[cfg(not(target_arch = "wasm32"))]
-            FrameData::Node(data) => match frame_encoding {
-                FrameEncoding::JSON => {
-                    let raw = serde_json::to_vec(&data)?;
-                    (raw, 1, data.code())
-                }
-            },
+            FrameData::Node(data) => {
+                let raw = match frame_encoding {
+                    FrameEncoding::JSON => serde_json::to_vec(&data)?,
+                    FrameEncoding::MessagePack => rmp_serde::to_vec(&data)?,
+                };
+                (raw, 1, data.code())
+            }
         };
 
         let mut buf = Vec::with_capacity(HEADER_SIZE + data.len());

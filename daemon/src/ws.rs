@@ -162,7 +162,7 @@ impl WebSocketConnection {
             node_id,
             read,
             self.writer.clone(),
-            config.clone(),
+            Arc::clone(&config),
             self.sessions.clone(),
             self.uploads.clone(),
             self.downloads.clone(),

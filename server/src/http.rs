@@ -13,11 +13,25 @@ use std::time::SystemTime;
 use tower_http::cors::{Any, CorsLayer};
 use ulid::Ulid;
 
+/// Composite key for tunnel sessions: (node_id, session_id)
+/// This avoids string formatting on every tunnel operation
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TunnelSessionKey {
+    pub node_id: Ulid,
+    pub sid: u32,
+}
+
+impl TunnelSessionKey {
+    pub fn new(node_id: Ulid, sid: u32) -> Self {
+        Self { node_id, sid }
+    }
+}
+
 pub type Nodes = Arc<tokio::sync::RwLock<HashMap<Ulid, NodeConnection>>>;
 
 pub type Connections = Arc<tokio::sync::RwLock<HashMap<Ulid, WebConnection>>>;
 
-pub type TunnelSessions = Arc<tokio::sync::RwLock<HashMap<String, (Ulid, Ulid)>>>;
+pub type TunnelSessions = Arc<tokio::sync::RwLock<HashMap<TunnelSessionKey, (Ulid, Ulid)>>>;
 
 #[derive(Clone)]
 pub(crate) struct AppState {
@@ -87,8 +101,8 @@ pub async fn list_nodes(State(state): State<AppState>) -> impl IntoResponse {
         .iter()
         .map(|(id, info)| {
             json!({
-                "id": id.to_string(),
-                "ip": info.node.ip.to_string(),
+                "id": id,
+                "ip": info.node.ip,
                 "connected_for_secs": now
                     .duration_since(info.node.connected_at)
                     .unwrap()
@@ -97,7 +111,7 @@ pub async fn list_nodes(State(state): State<AppState>) -> impl IntoResponse {
                     .duration_since(info.node.last_heartbeat)
                     .unwrap()
                     .as_secs(),
-                "stats": info.node.last_stats.clone(),
+                "stats": &info.node.last_stats,
             })
         })
         .collect();

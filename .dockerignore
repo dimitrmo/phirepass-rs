@@ -1,7 +1,8 @@
-.devcontainer
-.github
-target
+.devcontainer/
+.github/
+target/
 Makefile
-README.md
-TASKS.md
-
+*.md
+.git
+.vscode/
+.idea/

@@ -271,7 +271,11 @@ async fn get_node_id_by_cid(
     node_id: String,
     sid: u32,
 ) -> anyhow::Result<Ulid> {
-    let key = format!("{}-{}", node_id, sid);
+    // Parse the node_id string to Ulid for the composite key
+    let node_ulid =
+        Ulid::from_string(&node_id).map_err(|_| anyhow::anyhow!("invalid node_id format"))?;
+
+    let key = crate::http::TunnelSessionKey::new(node_ulid, sid);
     let sessions = state.tunnel_sessions.read().await;
     let (client_id, node_id) = match sessions.get(&key) {
         Some((client_id, node_id)) => (client_id, node_id),

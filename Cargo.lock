@@ -2293,6 +2293,7 @@ dependencies = [
  "mac_address",
  "netstat2",
  "os_info",
+ "rmp-serde",
  "serde",
  "serde_json",
  "sysinfo",

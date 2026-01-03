@@ -94,12 +94,12 @@ impl Stats {
                     .or_else(System::host_name)
                     .unwrap_or_else(|| "unknown".into())
             })
-            .to_string();
+            .clone();
 
-        let host_ip = HOST_IP.get_or_init(resolve_host_ip).to_string();
+        let host_ip = HOST_IP.get_or_init(resolve_host_ip).clone();
         let host_os_info = HOST_OS_INFO
             .get_or_init(|| format!("{}", os_info::get()))
-            .to_string();
+            .clone();
 
         let host_load_average = Self::loadavg();
         let host_connections = Self::connections().unwrap_or(0);
@@ -121,7 +121,7 @@ impl Stats {
             host_mem_total_bytes: sys.total_memory(),
             host_uptime_secs: System::uptime(),
             host_load_average,
-            host_os_info: host_os_info.to_string(),
+            host_os_info,
             host_connections,
             host_processes,
         })
@@ -232,7 +232,7 @@ impl Stats {
     }
 
     pub fn encoded(&self) -> anyhow::Result<String> {
-        serde_json::to_string_pretty(&self).map_err(|e| e.into())
+        serde_json::to_string_pretty(&self).map_err(Into::into)
     }
 }
 

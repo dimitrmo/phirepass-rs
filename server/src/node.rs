@@ -165,7 +165,7 @@ async fn get_connection_id_by_sid(
     sid: u32,
     target: &Ulid,
 ) -> anyhow::Result<Ulid> {
-    let key = format!("{}-{}", target, sid);
+    let key = crate::http::TunnelSessionKey::new(*target, sid);
     let sessions = state.tunnel_sessions.read().await;
     let (client_id, node_id) = match sessions.get(&key) {
         Some((client_id, node_id)) => (client_id, node_id),
@@ -243,7 +243,7 @@ async fn handle_tunnel_closed(
     };
 
     {
-        let key = format!("{node_id}-{sid}");
+        let key = crate::http::TunnelSessionKey::new(*node_id, sid);
         let mut tunnel_sessions = state.tunnel_sessions.write().await;
         tunnel_sessions.remove(&key);
     }
@@ -279,7 +279,7 @@ async fn handle_tunnel_opened(
     };
 
     {
-        let key = format!("{node_id}-{sid}");
+        let key = crate::http::TunnelSessionKey::new(*node_id, sid);
         let mut tunnel_sessions = state.tunnel_sessions.write().await;
         tunnel_sessions.insert(key, (cid, *node_id));
     }

@@ -8,6 +8,7 @@ license-file = { workspace = true }
 [dependencies]
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
+rmp-serde = { workspace = true, optional = true }
 sysinfo = { version = "0.37.2", optional = true}
 get_if_addrs = { version = "0.5.3", optional = true }
 env_logger = { workspace = true }
@@ -26,7 +27,7 @@ env = []
 ip = ["dep:axum"]
 logger = ["dep:serde", "stats"]
 node = ["dep:serde", "dep:ulid", "stats"]
-protocol = ["dep:anyhow", "dep:serde", "dep:serde_json"]
+protocol = ["dep:anyhow", "dep:serde", "dep:serde_json", "dep:rmp-serde"]
 stats = [
     "dep:get_if_addrs",
     "dep:mac_address",

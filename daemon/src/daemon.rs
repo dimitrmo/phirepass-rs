@@ -75,7 +75,7 @@ fn start_ws_connection(
     state: &AppState,
     mut shutdown: broadcast::Receiver<()>,
 ) -> tokio::task::JoinHandle<()> {
-    let env = state.env.clone();
+    let env = Arc::clone(&state.env);
     tokio::spawn(async move {
         let mut attempt: u32 = 0;
 
@@ -83,7 +83,7 @@ fn start_ws_connection(
             let conn = ws::WebSocketConnection::new();
 
             tokio::select! {
-                res = conn.connect(env.clone()) => {
+                res = conn.connect(Arc::clone(&env)) => {
                     match res {
                         Ok(()) => warn!("ws connection ended, attempting reconnect"),
                         Err(err) => warn!("ws client error: {err}, attempting reconnect"),
