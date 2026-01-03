@@ -459,17 +459,25 @@ function connectSFTP() {
                 break;
             case "SFTPDownloadStartResponse":
                 if (sftpBrowser && currentTab === "sftp") {
-                    const response = frame.data.web.response;
-                    if (response && response.download_id !== undefined) {
-                        sftpBrowser.handleDownloadStartResponse(frame.data.web.msg_id, response.download_id, response.total_size, response.total_chunks);
+                    try {
+                        const response = frame.data.web.response;
+                        if (response && response.download_id !== undefined) {
+                            sftpBrowser.handleDownloadStartResponse(frame.data.web.msg_id, response.download_id, response.total_size, response.total_chunks);
+                        }
+                    } catch (err) {
+                        console.error("Error handling download start response:", err);
                     }
                 }
                 break;
             case "SFTPDownloadChunk":
                 if (sftpBrowser && currentTab === "sftp") {
-                    const chunk = frame.data.web.chunk;
-                    if (chunk) {
-                        sftpBrowser.handleDownloadChunk(frame.data.web.msg_id, chunk);
+                    try {
+                        const chunk = frame.data.web.chunk;
+                        if (chunk) {
+                            sftpBrowser.handleDownloadChunk(frame.data.web.msg_id, chunk);
+                        }
+                    } catch (err) {
+                        console.error("Error handling download chunk:", err);
                     }
                 }
                 break;

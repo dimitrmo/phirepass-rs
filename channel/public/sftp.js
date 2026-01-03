@@ -385,6 +385,7 @@ export class SFTPBrowser {
     downloadFile(filename) {
         if (!this.socket || !this.sessionId) {
             console.error("Cannot download: not connected");
+            alert("Please connect to the SFTP session first");
             return;
         }
 
@@ -420,28 +421,35 @@ export class SFTPBrowser {
             this.pendingDownloadStarts.set(msgId, { resolve, reject, timeout });
         });
 
-        // Send download start request
-        this.socket.send_sftp_download_start(this.selectedNode, this.sessionId, this.currentPath, filename, msgId);
+        try {
+            // Send download start request
+            this.socket.send_sftp_download_start(this.selectedNode, this.sessionId, this.currentPath, filename, msgId);
 
-        // Handle the response
-        startPromise
-            .then(({ download_id, total_size, total_chunks }) => {
-                const download = this.activeDownloads.get(msgId);
-                if (download) {
-                    download.download_id = download_id;
-                    download.total_size = total_size;
-                    download.total_chunks = total_chunks;
-                    console.log(`Download ${filename}: ${total_chunks} chunks, ${this.formatBytes(total_size)}`);
+            // Handle the response
+            startPromise
+                .then(({ download_id, total_size, total_chunks }) => {
+                    const download = this.activeDownloads.get(msgId);
+                    if (download) {
+                        download.download_id = download_id;
+                        download.total_size = total_size;
+                        download.total_chunks = total_chunks;
+                        console.log(`Download ${filename}: ${total_chunks} chunks, ${this.formatBytes(total_size)}`);
 
-                    // Request all chunks from the daemon
-                    this.requestAllDownloadChunks(msgId, download_id, total_chunks);
-                }
-            })
-            .catch(err => {
-                console.error(`Download start failed: ${err}`);
-                this.activeDownloads.delete(msgId);
-                this.hideLoader();
-            });
+                        // Request all chunks from the daemon
+                        this.requestAllDownloadChunks(msgId, download_id, total_chunks);
+                    }
+                })
+                .catch(err => {
+                    console.error(`Download start failed: ${err}`);
+                    this.activeDownloads.delete(msgId);
+                    this.hideLoader();
+                });
+        } catch (err) {
+            console.error(`Error initiating download: ${err}`);
+            this.activeDownloads.delete(msgId);
+            this.hideLoader();
+            alert(`Failed to start download: ${err.message}`);
+        }
     }
 
     requestAllDownloadChunks(msgId, download_id, total_chunks) {
