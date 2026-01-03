@@ -1,50 +1,17 @@
-use log::{debug, info, warn};
-use phirepass_common::protocol::Protocol;
-use phirepass_common::protocol::common::Frame;
-use phirepass_common::protocol::node::NodeFrameData;
-use phirepass_common::protocol::web::WebFrameData;
-use russh::client::Handle;
-use russh::keys::*;
-use russh::*;
 use std::borrow::Cow;
 use std::io::Cursor;
 use std::sync::Arc;
+use log::{debug, info, warn};
+use russh::client::Handle;
+use russh::{client, kex, ChannelMsg, Disconnect, Preferred};
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::oneshot;
-
-#[derive(Clone, Debug)]
-pub(crate) enum SSHCommand {
-    Data(Vec<u8>),
-    Resize { cols: u32, rows: u32 },
-}
-
-#[derive(Debug)]
-pub(crate) struct SSHSessionHandle {
-    pub stdin: Sender<SSHCommand>,
-    pub stop: Option<oneshot::Sender<()>>,
-}
-
-impl SSHSessionHandle {
-    pub async fn shutdown(mut self) {
-        if let Some(stop) = self.stop.take() {
-            let _ = stop.send(());
-            debug!("ssh self stopped sent");
-        }
-    }
-}
-
-struct SSHClient {}
-
-impl client::Handler for SSHClient {
-    type Error = russh::Error;
-
-    async fn check_server_key(
-        &mut self,
-        _server_public_key: &PublicKey,
-    ) -> anyhow::Result<bool, Self::Error> {
-        Ok(true)
-    }
-}
+use phirepass_common::protocol::common::Frame;
+use phirepass_common::protocol::node::NodeFrameData;
+use phirepass_common::protocol::Protocol;
+use phirepass_common::protocol::web::WebFrameData;
+use crate::ssh::client::SSHClient;
+use crate::ssh::session::SSHCommand;
 
 #[derive(Clone)]
 pub(crate) enum SSHConfigAuth {
@@ -92,7 +59,7 @@ impl SSHConnection {
                 client_handler.authenticate_password(username, password)
             }
         }
-        .await?;
+            .await?;
 
         if !auth_res.success() {
             anyhow::bail!("SSH authentication failed. Please check your password.");

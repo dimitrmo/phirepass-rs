@@ -9,7 +9,7 @@ client:
 
 daemon: client
 
-web:
+web: wasm-dev
 	npx http-server -c-1 -p 8083 channel
 
 build:

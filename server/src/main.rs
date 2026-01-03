@@ -5,7 +5,6 @@ mod connection;
 mod env;
 mod http;
 mod node;
-mod state;
 mod web;
 
 #[tokio::main]

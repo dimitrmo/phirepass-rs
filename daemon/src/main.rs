@@ -2,10 +2,9 @@ mod cli;
 mod daemon;
 mod env;
 mod http;
-mod sftp;
-mod ssh;
-mod state;
 mod ws;
+mod ssh;
+mod sftp;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

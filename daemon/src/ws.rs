@@ -1,8 +1,5 @@
 use crate::env::{Env, SSHAuthMethod};
-use crate::sftp::{
-    SFTPActiveUploads, SFTPCommand, SFTPConfig, SFTPConfigAuth, SFTPConnection, SFTPSessionHandle,
-};
-use crate::ssh::{SSHCommand, SSHConfig, SSHConfigAuth, SSHConnection, SSHSessionHandle};
+use crate::sftp::{SFTPActiveUploads};
 use anyhow::anyhow;
 use futures_util::stream::SplitStream;
 use futures_util::{SinkExt, StreamExt};
@@ -25,6 +22,10 @@ use tokio::sync::{Mutex, oneshot};
 use tokio_tungstenite::{
     MaybeTlsStream, WebSocketStream, connect_async, tungstenite::protocol::Message,
 };
+use crate::sftp::connection::{SFTPConfig, SFTPConfigAuth, SFTPConnection};
+use crate::sftp::session::{SFTPCommand, SFTPSessionHandle};
+use crate::ssh::connection::{SSHConfig, SSHConfigAuth, SSHConnection};
+use crate::ssh::session::{SSHCommand, SSHSessionHandle};
 
 type TunnelSessions = Arc<Mutex<HashMap<(String, u32), SessionHandle>>>;
 

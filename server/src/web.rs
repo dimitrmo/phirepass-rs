@@ -1,5 +1,4 @@
 use crate::connection::WebConnection;
-use crate::state::AppState;
 use axum::extract::ws::{Message, WebSocket};
 use axum::extract::{State, WebSocketUpgrade};
 use axum::http::HeaderMap;
@@ -13,6 +12,7 @@ use std::net::IpAddr;
 use std::time::{Duration, SystemTime};
 use tokio::sync::mpsc;
 use ulid::Ulid;
+use crate::http::AppState;
 
 pub(crate) async fn ws_web_handler(
     State(state): State<AppState>,

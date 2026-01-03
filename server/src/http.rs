@@ -1,5 +1,6 @@
+use std::collections::HashMap;
+use std::sync::Arc;
 use crate::env;
-use crate::state::AppState;
 use axum::Json;
 use axum::extract::State;
 use axum::http::{HeaderValue, Method};
@@ -8,6 +9,23 @@ use phirepass_common::stats::Stats;
 use serde_json::json;
 use std::time::SystemTime;
 use tower_http::cors::{Any, CorsLayer};
+use ulid::Ulid;
+use crate::connection::{NodeConnection, WebConnection};
+use crate::env::Env;
+
+pub type Nodes = Arc<tokio::sync::RwLock<HashMap<Ulid, NodeConnection>>>;
+
+pub type Connections = Arc<tokio::sync::RwLock<HashMap<Ulid, WebConnection>>>;
+
+pub type TunnelSessions = Arc<tokio::sync::RwLock<HashMap<String, (Ulid, Ulid)>>>;
+
+#[derive(Clone)]
+pub(crate) struct AppState {
+    pub(crate) env: Arc<Env>,
+    pub(crate) nodes: Nodes,
+    pub(crate) connections: Connections,
+    pub(crate) tunnel_sessions: TunnelSessions,
+}
 
 pub fn build_cors(state: &AppState) -> CorsLayer {
     let mut cors = CorsLayer::new()
