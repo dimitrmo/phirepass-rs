@@ -2278,7 +2278,6 @@ dependencies = [
  "mac_address",
  "netstat2",
  "os_info",
- "russh-sftp",
  "serde",
  "serde_json",
  "sysinfo",
