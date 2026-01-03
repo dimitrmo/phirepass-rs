@@ -576,7 +576,6 @@ function connect() {
     });
 
     channel.on_protocol_message((frame) => {
-        console.log('#received SSH frame', frame);
         switch (frame.data.web.type) {
             case "TunnelData":
                 if (!isSshConnected) {
