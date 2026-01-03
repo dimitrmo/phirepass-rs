@@ -96,7 +96,7 @@ impl Stats {
             })
             .to_string();
 
-        let host_ip = HOST_IP.get_or_init(|| resolve_host_ip()).to_string();
+        let host_ip = HOST_IP.get_or_init(resolve_host_ip).to_string();
         let host_os_info = HOST_OS_INFO
             .get_or_init(|| format!("{}", os_info::get()))
             .to_string();
@@ -121,7 +121,7 @@ impl Stats {
             host_mem_total_bytes: sys.total_memory(),
             host_uptime_secs: System::uptime(),
             host_load_average,
-            host_os_info: format!("{}", host_os_info),
+            host_os_info: host_os_info.to_string(),
             host_connections,
             host_processes,
         })

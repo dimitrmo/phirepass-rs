@@ -26,8 +26,9 @@ use tokio::sync::{Mutex, oneshot};
 use tokio_tungstenite::{
     MaybeTlsStream, WebSocketStream, connect_async, tungstenite::protocol::Message,
 };
+use ulid::Ulid;
 
-type TunnelSessions = Arc<Mutex<HashMap<(String, u32), SessionHandle>>>;
+type TunnelSessions = Arc<Mutex<HashMap<(Ulid, u32), SessionHandle>>>;
 
 type WebSocketReader = SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>;
 
@@ -339,7 +340,7 @@ async fn handle_message(
                         start_sftp_tunnel(
                             sender,
                             node_id,
-                            &cid,
+                            cid,
                             config,
                             SFTPConfigAuth::UsernamePassword(username, password),
                             sessions,
@@ -355,7 +356,7 @@ async fn handle_message(
                         start_ssh_tunnel(
                             sender,
                             node_id,
-                            &cid,
+                            cid,
                             config,
                             SSHConfigAuth::UsernamePassword(username, password),
                             sessions,
@@ -374,8 +375,8 @@ async fn handle_message(
         }
         NodeFrameData::ConnectionDisconnect { cid } => {
             info!("received connection disconnect for {cid}");
-            close_tunnels_for_cid(&cid, &sessions).await;
-            close_uploads_for_cid(&cid, &uploads).await;
+            close_tunnels_for_cid(cid, sessions).await;
+            close_uploads_for_cid(cid, uploads).await;
         }
         NodeFrameData::SSHWindowResize {
             cid,
@@ -383,7 +384,7 @@ async fn handle_message(
             cols,
             rows,
         } => {
-            if let Err(err) = send_ssh_forward_resize(cid, sid, cols, rows, &sessions).await {
+            if let Err(err) = send_ssh_forward_resize(cid, sid, cols, rows, sessions).await {
                 warn!("failed to forward resize: {err}");
             }
         }
@@ -394,7 +395,7 @@ async fn handle_message(
             data,
         } => {
             if protocol == Protocol::SSH as u8 {
-                if let Err(err) = send_ssh_tunnel_data(cid, sid, data, &sessions).await {
+                if let Err(err) = send_ssh_tunnel_data(cid, sid, data, sessions).await {
                     warn!("failed to forward tunnel data: {err}");
                 }
             } else {
@@ -407,7 +408,7 @@ async fn handle_message(
             sid,
             msg_id,
         } => {
-            if let Err(err) = send_sftp_list_data(cid, sid, path, &sessions, msg_id).await {
+            if let Err(err) = send_sftp_list_data(cid, sid, path, sessions, msg_id).await {
                 warn!("failed to forward sftp list data: {err}");
             }
         }
@@ -417,7 +418,7 @@ async fn handle_message(
             msg_id,
             upload,
         } => {
-            if let Err(err) = send_sftp_upload_start_data(cid, sid, msg_id, upload, &sessions).await
+            if let Err(err) = send_sftp_upload_start_data(cid, sid, msg_id, upload, sessions).await
             {
                 warn!("failed to forward sftp upload start data: {err}");
             }
@@ -428,7 +429,7 @@ async fn handle_message(
             msg_id,
             chunk,
         } => {
-            if let Err(err) = send_sftp_upload_data(cid, sid, msg_id, chunk, &sessions).await {
+            if let Err(err) = send_sftp_upload_data(cid, sid, msg_id, chunk, sessions).await {
                 warn!("failed to forward sftp upload data: {err}");
             }
         }
@@ -439,7 +440,7 @@ async fn handle_message(
             download,
         } => {
             if let Err(err) =
-                send_sftp_download_start_data(cid, sid, msg_id, download, &sessions).await
+                send_sftp_download_start_data(cid, sid, msg_id, download, sessions).await
             {
                 warn!("failed to forward sftp download start data: {err}");
             }
@@ -457,7 +458,7 @@ async fn handle_message(
                 msg_id,
                 download_id,
                 chunk_index,
-                &sessions,
+                sessions,
             )
             .await
             {
@@ -471,7 +472,7 @@ async fn handle_message(
             chunk,
         } => {
             if let Err(err) =
-                send_sftp_download_chunk_data(cid, sid, msg_id, chunk, &sessions).await
+                send_sftp_download_chunk_data(cid, sid, msg_id, chunk, sessions).await
             {
                 warn!("failed to forward sftp download chunk data: {err}");
             }
@@ -482,7 +483,7 @@ async fn handle_message(
             msg_id,
             data,
         } => {
-            if let Err(err) = send_sftp_delete_data(cid, sid, msg_id, data, &sessions).await {
+            if let Err(err) = send_sftp_delete_data(cid, sid, msg_id, data, sessions).await {
                 warn!("failed to forward sftp delete data: {err}");
             }
         }
@@ -491,26 +492,24 @@ async fn handle_message(
 }
 
 async fn send_sftp_list_data(
-    cid: String,
+    cid: Ulid,
     sid: u32,
     path: String,
     sessions: &TunnelSessions,
     msg_id: Option<u32>,
 ) -> anyhow::Result<()> {
-    let connection_id = cid.clone();
-
     let stdin = {
         let sessions = sessions.lock().await;
         sessions.get(&(cid, sid)).map(|s| s.get_stdin())
     };
 
     let Some(stdin) = stdin else {
-        anyhow::bail!(format!("no session found for connection {connection_id}"))
+        anyhow::bail!(format!("no session found for connection {cid}"))
     };
 
     let SessionCommand::SFTP(stdin) = stdin else {
         anyhow::bail!(format!(
-            "no sftp tunnel found for connection {connection_id}"
+            "no sftp tunnel found for connection {cid}"
         ))
     };
 
@@ -521,26 +520,24 @@ async fn send_sftp_list_data(
 }
 
 async fn send_sftp_upload_start_data(
-    cid: String,
+    cid: Ulid,
     sid: u32,
     msg_id: Option<u32>,
     upload: phirepass_common::protocol::sftp::SFTPUploadStart,
     sessions: &TunnelSessions,
 ) -> anyhow::Result<()> {
-    let connection_id = cid.clone();
-
     let stdin = {
         let sessions = sessions.lock().await;
         sessions.get(&(cid, sid)).map(|s| s.get_stdin())
     };
 
     let Some(stdin) = stdin else {
-        anyhow::bail!(format!("no session found for connection {connection_id}"))
+        anyhow::bail!(format!("no session found for connection {cid}"))
     };
 
     let SessionCommand::SFTP(stdin) = stdin else {
         anyhow::bail!(format!(
-            "no sftp tunnel found for connection {connection_id}"
+            "no sftp tunnel found for connection {cid}"
         ))
     };
 
@@ -551,26 +548,24 @@ async fn send_sftp_upload_start_data(
 }
 
 async fn send_sftp_upload_data(
-    cid: String,
+    cid: Ulid,
     sid: u32,
     msg_id: Option<u32>,
     chunk: phirepass_common::protocol::sftp::SFTPUploadChunk,
     sessions: &TunnelSessions,
 ) -> anyhow::Result<()> {
-    let connection_id = cid.clone();
-
     let stdin = {
         let sessions = sessions.lock().await;
         sessions.get(&(cid, sid)).map(|s| s.get_stdin())
     };
 
     let Some(stdin) = stdin else {
-        anyhow::bail!(format!("no session found for connection {connection_id}"))
+        anyhow::bail!(format!("no session found for connection {cid}"))
     };
 
     let SessionCommand::SFTP(stdin) = stdin else {
         anyhow::bail!(format!(
-            "no sftp tunnel found for connection {connection_id}"
+            "no sftp tunnel found for connection {cid}"
         ))
     };
 
@@ -581,26 +576,24 @@ async fn send_sftp_upload_data(
 }
 
 async fn send_sftp_delete_data(
-    cid: String,
+    cid: Ulid,
     sid: u32,
     msg_id: Option<u32>,
     data: phirepass_common::protocol::sftp::SFTPDelete,
     sessions: &TunnelSessions,
 ) -> anyhow::Result<()> {
-    let connection_id = cid.clone();
-
     let stdin = {
         let sessions = sessions.lock().await;
         sessions.get(&(cid, sid)).map(|s| s.get_stdin())
     };
 
     let Some(stdin) = stdin else {
-        anyhow::bail!(format!("no session found for connection {connection_id}"))
+        anyhow::bail!(format!("no session found for connection {cid}"))
     };
 
     let SessionCommand::SFTP(stdin) = stdin else {
         anyhow::bail!(format!(
-            "no sftp tunnel found for connection {connection_id}"
+            "no sftp tunnel found for connection {cid}"
         ))
     };
 
@@ -611,26 +604,24 @@ async fn send_sftp_delete_data(
 }
 
 async fn send_sftp_download_start_data(
-    cid: String,
+    cid: Ulid,
     sid: u32,
     msg_id: Option<u32>,
     download: phirepass_common::protocol::sftp::SFTPDownloadStart,
     sessions: &TunnelSessions,
 ) -> anyhow::Result<()> {
-    let connection_id = cid.clone();
-
     let stdin = {
         let sessions = sessions.lock().await;
         sessions.get(&(cid, sid)).map(|s| s.get_stdin())
     };
 
     let Some(stdin) = stdin else {
-        anyhow::bail!(format!("no session found for connection {connection_id}"))
+        anyhow::bail!(format!("no session found for connection {cid}"))
     };
 
     let SessionCommand::SFTP(stdin) = stdin else {
         anyhow::bail!(format!(
-            "no sftp tunnel found for connection {connection_id}"
+            "no sftp tunnel found for connection {cid}"
         ))
     };
 
@@ -641,27 +632,25 @@ async fn send_sftp_download_start_data(
 }
 
 async fn send_sftp_download_chunk_request(
-    cid: String,
+    cid: Ulid,
     sid: u32,
     msg_id: Option<u32>,
     download_id: u32,
     chunk_index: u32,
     sessions: &TunnelSessions,
 ) -> anyhow::Result<()> {
-    let connection_id = cid.clone();
-
     let stdin = {
         let sessions = sessions.lock().await;
         sessions.get(&(cid, sid)).map(|s| s.get_stdin())
     };
 
     let Some(stdin) = stdin else {
-        anyhow::bail!(format!("no session found for connection {connection_id}"))
+        anyhow::bail!(format!("no session found for connection {cid}"))
     };
 
     let SessionCommand::SFTP(stdin) = stdin else {
         anyhow::bail!(format!(
-            "no sftp tunnel found for connection {connection_id}"
+            "no sftp tunnel found for connection {cid}"
         ))
     };
 
@@ -679,26 +668,24 @@ async fn send_sftp_download_chunk_request(
 }
 
 async fn send_sftp_download_chunk_data(
-    cid: String,
+    cid: Ulid,
     sid: u32,
     msg_id: Option<u32>,
     chunk: phirepass_common::protocol::sftp::SFTPDownloadChunk,
     sessions: &TunnelSessions,
 ) -> anyhow::Result<()> {
-    let connection_id = cid.clone();
-
     let stdin = {
         let sessions = sessions.lock().await;
         sessions.get(&(cid, sid)).map(|s| s.get_stdin())
     };
 
     let Some(stdin) = stdin else {
-        anyhow::bail!(format!("no session found for connection {connection_id}"))
+        anyhow::bail!(format!("no session found for connection {cid}"))
     };
 
     let SessionCommand::SFTP(stdin) = stdin else {
         anyhow::bail!(format!(
-            "no sftp tunnel found for connection {connection_id}"
+            "no sftp tunnel found for connection {cid}"
         ))
     };
 
@@ -709,7 +696,7 @@ async fn send_sftp_download_chunk_data(
 }
 
 async fn send_ssh_tunnel_data(
-    cid: String,
+    cid: Ulid,
     sid: u32,
     data: Vec<u8>,
     sessions: &TunnelSessions,
@@ -738,26 +725,24 @@ async fn send_ssh_tunnel_data(
 }
 
 async fn send_ssh_forward_resize(
-    cid: String,
+    cid: Ulid,
     sid: u32,
     cols: u32,
     rows: u32,
     sessions: &TunnelSessions,
 ) -> anyhow::Result<()> {
-    let connection_id = cid.clone();
-
     let stdin = {
         let sessions = sessions.lock().await;
         sessions.get(&(cid, sid)).map(|s| s.get_stdin())
     };
 
     let Some(stdin) = stdin else {
-        anyhow::bail!(format!("no session found for connection {connection_id}"))
+        anyhow::bail!(format!("no session found for connection {cid}"))
     };
 
     let SessionCommand::SSH(stdin) = stdin else {
         anyhow::bail!(format!(
-            "no ssh tunnel found for connection {connection_id}"
+            "no ssh tunnel found for connection {cid}"
         ))
     };
 
@@ -767,14 +752,14 @@ async fn send_ssh_forward_resize(
         .map_err(|err| anyhow!(err))
 }
 
-async fn close_uploads_for_cid(cid: &String, uploads: &SFTPActiveUploads) {
+async fn close_uploads_for_cid(cid: Ulid, uploads: &SFTPActiveUploads) {
     info!("closing uploads for connection {cid}");
 
-    let keys_to_remove: Vec<(String, u32)> = {
+    let keys_to_remove: Vec<(Ulid, u32)> = {
         let entries = uploads.lock().await;
         entries
             .iter()
-            .filter(|entry| entry.0.0.eq(cid))
+            .filter(|entry| entry.0.0.eq(&cid))
             .map(|entry| entry.0.clone())
             .collect()
     };
@@ -789,14 +774,14 @@ async fn close_uploads_for_cid(cid: &String, uploads: &SFTPActiveUploads) {
     }
 }
 
-async fn close_tunnels_for_cid(cid: &String, sessions: &TunnelSessions) {
+async fn close_tunnels_for_cid(cid: Ulid, sessions: &TunnelSessions) {
     info!("closing tunnels for connection {cid}");
 
-    let keys_to_remove: Vec<(String, u32)> = {
+    let keys_to_remove: Vec<(Ulid, u32)> = {
         let sessions = sessions.lock().await;
         sessions
             .iter()
-            .filter(|entry| entry.0.0.eq(cid))
+            .filter(|entry| entry.0.0.eq(&cid))
             .map(|entry| entry.0.clone())
             .collect()
     };
@@ -822,7 +807,7 @@ async fn send_frame_data(sender: &Sender<Frame>, data: NodeFrameData) {
 async fn start_sftp_tunnel(
     tx: &Sender<Frame>,
     node_id: &String,
-    cid: &String,
+    cid: Ulid,
     config: &Arc<Env>,
     credentials: SFTPConfigAuth,
     sessions: &TunnelSessions,
@@ -934,7 +919,7 @@ async fn start_sftp_tunnel(
 async fn start_ssh_tunnel(
     tx: &Sender<Frame>,
     node_id: &String,
-    cid: &String,
+    cid: Ulid,
     config: &Arc<Env>,
     credentials: SSHConfigAuth,
     sessions: &TunnelSessions,

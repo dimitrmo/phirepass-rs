@@ -62,7 +62,7 @@ async fn handle_web_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
         let msg = match msg {
             Ok(msg) => msg,
             Err(_) => {
-                disconnect_web_client(&state, &cid).await;
+                disconnect_web_client(&state, cid).await;
                 return;
             }
         };
@@ -97,7 +97,7 @@ async fn handle_web_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
                         password,
                     } => {
                         handle_web_open_tunnel(
-                            &state, &cid, protocol, target, msg_id, username, password,
+                            &state, cid, protocol, target, msg_id, username, password,
                         )
                         .await;
                     }
@@ -111,7 +111,7 @@ async fn handle_web_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
                         node_id,
                         data,
                     } => {
-                        handle_web_tunnel_data(&state, &cid, protocol, sid, node_id, data).await;
+                        handle_web_tunnel_data(&state, cid, protocol, sid, node_id, data).await;
                     }
                     WebFrameData::TunnelClosed { .. } => {
                         warn!(
@@ -125,7 +125,7 @@ async fn handle_web_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
                         cols,
                         rows,
                     } => {
-                        handle_web_resize(&state, &cid, sid, node_id, cols, rows).await;
+                        handle_web_resize(&state, cid, sid, node_id, cols, rows).await;
                     }
                     WebFrameData::SFTPList {
                         path,
@@ -133,7 +133,7 @@ async fn handle_web_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
                         node_id,
                         msg_id,
                     } => {
-                        handle_sftp_list(&state, &cid, sid, node_id, path, msg_id).await;
+                        handle_sftp_list(&state, cid, sid, node_id, path, msg_id).await;
                     }
                     WebFrameData::SFTPDownloadStart {
                         sid,
@@ -141,7 +141,7 @@ async fn handle_web_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
                         msg_id,
                         download,
                     } => {
-                        handle_sftp_download_start(&state, &cid, sid, node_id, msg_id, download)
+                        handle_sftp_download_start(&state, cid, sid, node_id, msg_id, download)
                             .await;
                     }
                     WebFrameData::SFTPDownloadChunkRequest {
@@ -153,7 +153,7 @@ async fn handle_web_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
                     } => {
                         handle_sftp_download_chunk_request(
                             &state,
-                            &cid,
+                            cid,
                             sid,
                             node_id,
                             msg_id,
@@ -175,7 +175,7 @@ async fn handle_web_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
                         msg_id,
                         upload,
                     } => {
-                        handle_sftp_upload_start(&state, &cid, sid, node_id, msg_id, upload).await;
+                        handle_sftp_upload_start(&state, cid, sid, node_id, msg_id, upload).await;
                     }
                     WebFrameData::SFTPUpload {
                         sid,
@@ -183,7 +183,7 @@ async fn handle_web_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
                         msg_id,
                         chunk,
                     } => {
-                        handle_sftp_upload(&state, &cid, sid, node_id, msg_id, chunk).await;
+                        handle_sftp_upload(&state, cid, sid, node_id, msg_id, chunk).await;
                     }
                     WebFrameData::SFTPDelete {
                         sid,
@@ -191,7 +191,7 @@ async fn handle_web_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
                         msg_id,
                         data,
                     } => {
-                        handle_sftp_delete(&state, &cid, sid, node_id, msg_id, data).await;
+                        handle_sftp_delete(&state, cid, sid, node_id, msg_id, data).await;
                     }
                     WebFrameData::SFTPListItems { .. } => {
                         warn!("received sftp list items which is invalid if sent by web client");
@@ -220,7 +220,7 @@ async fn handle_web_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
                     None => warn!("web client {cid} disconnected"),
                     Some(err) => warn!("web client {cid} disconnected: {:?}", err),
                 }
-                disconnect_web_client(&state, &cid).await;
+                disconnect_web_client(&state, cid).await;
                 return;
             }
             _ => {
@@ -229,13 +229,13 @@ async fn handle_web_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
         }
     }
 
-    disconnect_web_client(&state, &cid).await;
+    disconnect_web_client(&state, cid).await;
     write_task.abort();
 }
 
-async fn disconnect_web_client(state: &AppState, cid: &Ulid) {
+async fn disconnect_web_client(state: &AppState, cid: Ulid) {
     let mut connections = state.connections.write().await;
-    if let Some(info) = connections.remove(cid) {
+    if let Some(info) = connections.remove(&cid) {
         let alive = info.connected_at.elapsed();
         info!(
             "web client {cid} ({}) removed after {:.1?} (total: {})",
@@ -289,7 +289,7 @@ async fn get_node_id_by_cid(
 
 async fn handle_web_tunnel_data(
     state: &AppState,
-    cid: &Ulid,
+    cid: Ulid,
     protocol: u8,
     sid: u32,
     node_id: String,
@@ -297,7 +297,7 @@ async fn handle_web_tunnel_data(
 ) {
     debug!("tunnel data received: {} bytes", data.len());
 
-    let node_id = match get_node_id_by_cid(state, cid, node_id, sid).await {
+    let node_id = match get_node_id_by_cid(state, &cid, node_id, sid).await {
         Ok(node_id) => node_id,
         Err(err) => {
             warn!("error getting node id: {err}");
@@ -317,7 +317,7 @@ async fn handle_web_tunnel_data(
 
     if tx
         .send(NodeFrameData::TunnelData {
-            cid: cid.to_string(),
+            cid,
             protocol,
             sid,
             data,
@@ -333,7 +333,7 @@ async fn handle_web_tunnel_data(
 
 async fn handle_sftp_list(
     state: &AppState,
-    cid: &Ulid,
+    cid: Ulid,
     sid: u32,
     target: String,
     path: String,
@@ -341,7 +341,7 @@ async fn handle_sftp_list(
 ) {
     debug!("handle sftp list request");
 
-    let node_id = match get_node_id_by_cid(state, cid, target, sid).await {
+    let node_id = match get_node_id_by_cid(state, &cid, target, sid).await {
         Ok(id) => id,
         Err(err) => {
             warn!("error getting node id: {err}");
@@ -361,7 +361,7 @@ async fn handle_sftp_list(
 
     match tx
         .send(NodeFrameData::SFTPList {
-            cid: cid.to_string(),
+            cid,
             path,
             sid,
             msg_id,
@@ -375,7 +375,7 @@ async fn handle_sftp_list(
 
 async fn handle_sftp_download_start(
     state: &AppState,
-    cid: &Ulid,
+    cid: Ulid,
     sid: u32,
     target: String,
     msg_id: Option<u32>,
@@ -383,7 +383,7 @@ async fn handle_sftp_download_start(
 ) {
     debug!("handle sftp download start request");
 
-    let node_id = match get_node_id_by_cid(state, cid, target, sid).await {
+    let node_id = match get_node_id_by_cid(state, &cid, target, sid).await {
         Ok(id) => id,
         Err(err) => {
             warn!("error getting node id: {err}");
@@ -403,7 +403,7 @@ async fn handle_sftp_download_start(
 
     match tx
         .send(NodeFrameData::SFTPDownloadStart {
-            cid: cid.to_string(),
+            cid,
             sid,
             msg_id,
             download,
@@ -417,7 +417,7 @@ async fn handle_sftp_download_start(
 
 async fn handle_sftp_download_chunk_request(
     state: &AppState,
-    cid: &Ulid,
+    cid: Ulid,
     sid: u32,
     target: String,
     msg_id: Option<u32>,
@@ -426,7 +426,7 @@ async fn handle_sftp_download_chunk_request(
 ) {
     debug!("handle sftp download chunk request");
 
-    let node_id = match get_node_id_by_cid(state, cid, target, sid).await {
+    let node_id = match get_node_id_by_cid(state, &cid, target, sid).await {
         Ok(id) => id,
         Err(err) => {
             warn!("error getting node id: {err}");
@@ -446,7 +446,7 @@ async fn handle_sftp_download_chunk_request(
 
     match tx
         .send(NodeFrameData::SFTPDownloadChunkRequest {
-            cid: cid.to_string(),
+            cid,
             sid,
             msg_id,
             download_id,
@@ -463,7 +463,7 @@ async fn handle_sftp_download_chunk_request(
 
 async fn handle_sftp_upload_start(
     state: &AppState,
-    cid: &Ulid,
+    cid: Ulid,
     sid: u32,
     target: String,
     msg_id: Option<u32>,
@@ -471,7 +471,7 @@ async fn handle_sftp_upload_start(
 ) {
     debug!("handle sftp upload start request");
 
-    let node_id = match get_node_id_by_cid(state, cid, target, sid).await {
+    let node_id = match get_node_id_by_cid(state, &cid, target, sid).await {
         Ok(id) => id,
         Err(err) => {
             warn!("error getting node id: {err}");
@@ -491,7 +491,7 @@ async fn handle_sftp_upload_start(
 
     match tx
         .send(NodeFrameData::SFTPUploadStart {
-            cid: cid.to_string(),
+            cid,
             sid,
             msg_id,
             upload,
@@ -505,7 +505,7 @@ async fn handle_sftp_upload_start(
 
 async fn handle_sftp_upload(
     state: &AppState,
-    cid: &Ulid,
+    cid: Ulid,
     sid: u32,
     target: String,
     msg_id: Option<u32>,
@@ -513,7 +513,7 @@ async fn handle_sftp_upload(
 ) {
     debug!("handle sftp upload request");
 
-    let node_id = match get_node_id_by_cid(state, cid, target, sid).await {
+    let node_id = match get_node_id_by_cid(state, &cid, target, sid).await {
         Ok(id) => id,
         Err(err) => {
             warn!("error getting node id: {err}");
@@ -533,7 +533,7 @@ async fn handle_sftp_upload(
 
     match tx
         .send(NodeFrameData::SFTPUpload {
-            cid: cid.to_string(),
+            cid,
             sid,
             msg_id,
             chunk,
@@ -547,7 +547,7 @@ async fn handle_sftp_upload(
 
 async fn handle_sftp_delete(
     state: &AppState,
-    cid: &Ulid,
+    cid: Ulid,
     sid: u32,
     target: String,
     msg_id: Option<u32>,
@@ -555,7 +555,7 @@ async fn handle_sftp_delete(
 ) {
     debug!("handle sftp delete request");
 
-    let node_id = match get_node_id_by_cid(state, cid, target, sid).await {
+    let node_id = match get_node_id_by_cid(state, &cid, target, sid).await {
         Ok(id) => id,
         Err(err) => {
             warn!("error getting node id: {err}");
@@ -575,7 +575,7 @@ async fn handle_sftp_delete(
 
     match tx
         .send(NodeFrameData::SFTPDelete {
-            cid: cid.to_string(),
+            cid,
             sid,
             msg_id,
             data,
@@ -589,7 +589,7 @@ async fn handle_sftp_delete(
 
 async fn handle_web_resize(
     state: &AppState,
-    cid: &Ulid,
+    cid: Ulid,
     sid: u32,
     target: String,
     cols: u32,
@@ -597,7 +597,7 @@ async fn handle_web_resize(
 ) {
     debug!("tunnel ssh resize received");
 
-    let node_id = match get_node_id_by_cid(state, cid, target, sid).await {
+    let node_id = match get_node_id_by_cid(state, &cid, target, sid).await {
         Ok(id) => id,
         Err(err) => {
             warn!("error getting node id: {err}");
@@ -617,7 +617,7 @@ async fn handle_web_resize(
 
     match tx
         .send(NodeFrameData::SSHWindowResize {
-            cid: cid.to_string(),
+            cid,
             sid,
             cols,
             rows,
@@ -631,7 +631,7 @@ async fn handle_web_resize(
 
 async fn handle_web_open_tunnel(
     state: &AppState,
-    cid: &Ulid,
+    cid: Ulid,
     protocol: u8,
     target: String,
     msg_id: Option<u32>,
@@ -663,20 +663,20 @@ async fn handle_web_open_tunnel(
 
     let Some(username) = username else {
         warn!("username not found");
-        let _ = send_requires_username_password_error(&state, cid, msg_id).await;
+        let _ = send_requires_username_password_error(&state, &cid, msg_id).await;
         return;
     };
 
     let Some(password) = password else {
         warn!("password not found");
-        let _ = send_requires_password_error(&state, cid, msg_id).await;
+        let _ = send_requires_password_error(&state, &cid, msg_id).await;
         return;
     };
 
     if tx
         .send(NodeFrameData::OpenTunnel {
             protocol,
-            cid: cid.to_string(),
+            cid,
             username,
             password,
             msg_id,
@@ -735,13 +735,13 @@ async fn send_requires_password_error(
     Ok(())
 }
 
-async fn notify_nodes_client_disconnect(state: &AppState, cid: &Ulid) {
+async fn notify_nodes_client_disconnect(state: &AppState, cid: Ulid) {
     let nodes = state.nodes.read().await;
     for (node_id, conn) in nodes.iter() {
         match conn
             .tx
             .send(NodeFrameData::ConnectionDisconnect {
-                cid: cid.to_string(),
+                cid,
             })
             .await
         {

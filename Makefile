@@ -13,10 +13,10 @@ web: wasm-dev
 	npx http-server -c-1 -p 8083 channel
 
 build:
-	cargo build --all
+	cargo build --all --all-features
 
 prod:
-	cargo build --all --release
+	cargo build --all --release --all-features
 
 arm:
 	cross build --all --target aarch64-unknown-linux-musl --release
@@ -26,6 +26,9 @@ format:
 
 db:
 	docker run --rm -it --name phirepass-valkey -p 6379:6379 valkey/valkey:9
+
+lint:
+	cargo clippy --all --all-targets -- -D warnings -D dead_code
 
 docker-server:
 	docker buildx build \

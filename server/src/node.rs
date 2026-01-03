@@ -12,7 +12,6 @@ use phirepass_common::protocol::node::NodeFrameData;
 use phirepass_common::protocol::web::WebFrameData;
 use phirepass_common::stats::Stats;
 use std::net::IpAddr;
-use std::str::FromStr;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
 use ulid::Ulid;
@@ -133,7 +132,7 @@ async fn handle_node_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
                         sid,
                         msg_id,
                     } => {
-                        handle_tunnel_opened(&state, protocol, cid.as_str(), sid, &id, msg_id)
+                        handle_tunnel_opened(&state, protocol, cid, sid, &id, msg_id)
                             .await;
                     }
                     // daemon notified server with data for web
@@ -147,7 +146,7 @@ async fn handle_node_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
                         sid,
                         msg_id,
                     } => {
-                        handle_tunnel_closed(&state, protocol, cid.as_str(), sid, &id, msg_id)
+                        handle_tunnel_closed(&state, protocol, cid, sid, &id, msg_id)
                             .await;
                     }
                     o => warn!("unhandled node frame: {o:?}"),
@@ -232,13 +231,12 @@ async fn handle_frame_response(state: &AppState, frame: Frame, nid: String, cid:
 async fn handle_tunnel_closed(
     state: &AppState,
     protocol: u8,
-    cid: &str,
+    cid: Ulid,
     sid: u32,
     node_id: &Ulid,
     msg_id: Option<u32>,
 ) {
     debug!("handling tunnel closed for connection {cid} with session {sid}");
-    let cid = Ulid::from_str(cid).unwrap();
 
     let connections = state.connections.read().await;
     let Some(connection) = connections.get(&cid) else {
@@ -269,13 +267,12 @@ async fn handle_tunnel_closed(
 async fn handle_tunnel_opened(
     state: &AppState,
     protocol: u8,
-    cid: &str,
+    cid: Ulid,
     sid: u32,
     node_id: &Ulid,
     msg_id: Option<u32>,
 ) {
     debug!("handling tunnel opened for connection {cid} with session {sid}");
-    let cid = Ulid::from_str(cid).unwrap();
 
     let connections = state.connections.read().await;
     let Some(connection) = connections.get(&cid) else {

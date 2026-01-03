@@ -6,12 +6,13 @@ use phirepass_common::protocol::sftp::SFTPDelete;
 use phirepass_common::protocol::web::WebFrameData;
 use russh_sftp::client::SftpSession;
 use tokio::sync::mpsc::Sender;
+use ulid::Ulid;
 
 pub async fn delete_file(
     tx: &Sender<Frame>,
     sftp_session: &SftpSession,
     data: &SFTPDelete,
-    cid: &String,
+    cid: Ulid,
     sid: u32,
     msg_id: Option<u32>,
     uploads: &SFTPActiveUploads,
@@ -34,7 +35,7 @@ pub async fn delete_file(
         let mut uploads = uploads.lock().await;
         // Remove all uploads for this cid that match the temp_path
         uploads.retain(|(upload_cid, _), file_upload| {
-            !(upload_cid == cid && file_upload.temp_path == temp_path)
+            !(upload_cid == &cid && file_upload.temp_path == temp_path)
         });
     }
 

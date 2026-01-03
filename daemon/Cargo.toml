@@ -22,3 +22,4 @@ rustls = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 russh-sftp = { workspace = true }
+ulid = { workspace = true }

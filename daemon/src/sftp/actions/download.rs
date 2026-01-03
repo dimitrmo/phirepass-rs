@@ -13,12 +13,13 @@ use russh_sftp::client::SftpSession;
 use std::time::SystemTime;
 use tokio::io::AsyncReadExt;
 use tokio::sync::mpsc::Sender;
+use ulid::Ulid;
 
 pub async fn start_download(
     tx: &Sender<Frame>,
     sftp_session: &SftpSession,
     download: &SFTPDownloadStart,
-    cid: &String,
+    cid: Ulid,
     sid: u32,
     msg_id: Option<u32>,
     downloads: &SFTPActiveDownloads,
@@ -128,7 +129,7 @@ pub async fn start_download(
 
 pub async fn download_file_chunk(
     tx: &Sender<Frame>,
-    cid: &String,
+    cid: Ulid,
     sid: u32,
     msg_id: Option<u32>,
     download_id: u32,
@@ -136,7 +137,7 @@ pub async fn download_file_chunk(
     downloads: &SFTPActiveDownloads,
 ) {
     let mut downloads = downloads.lock().await;
-    let key = (cid.clone(), download_id);
+    let key = (cid, download_id);
 
     match downloads.get_mut(&key) {
         Some(download) => {

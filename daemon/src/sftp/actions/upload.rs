@@ -8,12 +8,13 @@ use russh_sftp::client::SftpSession;
 use russh_sftp::protocol::OpenFlags;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc::Sender;
+use ulid::Ulid;
 
 pub async fn start_upload(
     tx: &Sender<Frame>,
     sftp_session: &SftpSession,
     upload: &SFTPUploadStart,
-    cid: &String,
+    cid: Ulid,
     sid: u32,
     msg_id: Option<u32>,
     uploads: &SFTPActiveUploads,
@@ -51,7 +52,7 @@ pub async fn start_upload(
                 // Store the file handle and metadata for subsequent chunks
                 let mut uploads = uploads.lock().await;
                 uploads.insert(
-                    (cid.clone(), upload_id),
+                    (cid, upload_id),
                     FileUpload {
                         filename: upload.filename.clone(),
                         remote_path: upload.remote_path.clone(),
@@ -107,7 +108,7 @@ pub async fn upload_file_chunk(
     tx: &Sender<Frame>,
     sftp_session: &SftpSession,
     chunk: &SFTPUploadChunk,
-    cid: &String,
+    cid: Ulid,
     sid: u32,
     msg_id: Option<u32>,
     uploads: &SFTPActiveUploads,

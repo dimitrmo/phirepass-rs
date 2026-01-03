@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, SystemTime};
 use tokio::sync::Mutex;
+use ulid::Ulid;
 
 pub const CHUNK_SIZE: usize = 64 * 1024; // 64KB chunks
 
@@ -32,8 +33,8 @@ pub struct FileDownload {
     pub last_updated: SystemTime,
 }
 
-pub type SFTPActiveUploads = Arc<Mutex<HashMap<(String, u32), FileUpload>>>;
-pub type SFTPActiveDownloads = Arc<Mutex<HashMap<(String, u32), FileDownload>>>;
+pub type SFTPActiveUploads = Arc<Mutex<HashMap<(Ulid, u32), FileUpload>>>;
+pub type SFTPActiveDownloads = Arc<Mutex<HashMap<(Ulid, u32), FileDownload>>>;
 
 static UPLOAD_ID_COUNTER: AtomicU32 = AtomicU32::new(1);
 static DOWNLOAD_ID_COUNTER: AtomicU32 = AtomicU32::new(1);
@@ -52,7 +53,7 @@ pub async fn cleanup_abandoned_uploads(uploads: &SFTPActiveUploads) {
     const TIMEOUT: Duration = Duration::from_secs(15 * 60); // 15 minutes
 
     let now = SystemTime::now();
-    let keys_to_remove: Vec<(String, u32)> = {
+    let keys_to_remove: Vec<(Ulid, u32)> = {
         let entries = uploads.lock().await;
         entries
             .iter()
@@ -70,7 +71,7 @@ pub async fn cleanup_abandoned_uploads(uploads: &SFTPActiveUploads) {
     if !keys_to_remove.is_empty() {
         let mut uploads = uploads.lock().await;
         for key in keys_to_remove {
-            log::info!("cleaning up abandoned upload: {:?}", key);
+            info!("cleaning up abandoned upload: {:?}", key);
             if let Some(file_upload) = uploads.remove(&key) {
                 let _ = file_upload.sftp_file.sync_all().await;
             }
@@ -84,7 +85,7 @@ pub async fn cleanup_abandoned_downloads(downloads: &SFTPActiveDownloads) {
     const TIMEOUT: Duration = Duration::from_secs(15 * 60); // 15 minutes
 
     let now = SystemTime::now();
-    let keys_to_remove: Vec<(String, u32)> = {
+    let keys_to_remove: Vec<(Ulid, u32)> = {
         let entries = downloads.lock().await;
         entries
             .iter()
@@ -102,7 +103,7 @@ pub async fn cleanup_abandoned_downloads(downloads: &SFTPActiveDownloads) {
     if !keys_to_remove.is_empty() {
         let mut downloads = downloads.lock().await;
         for key in keys_to_remove {
-            log::info!("cleaning up abandoned download: {:?}", key);
+            info!("cleaning up abandoned download: {:?}", key);
             if let Some(file_download) = downloads.remove(&key) {
                 let _ = file_download.sftp_file.sync_all().await;
             }

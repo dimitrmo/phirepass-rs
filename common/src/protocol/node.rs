@@ -4,6 +4,7 @@ use crate::protocol::sftp::{
 use crate::protocol::web::WebFrameData;
 use crate::stats::Stats;
 use serde::{Deserialize, Serialize};
+use ulid::Ulid;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(tag = "type")]
@@ -24,7 +25,7 @@ pub enum NodeFrameData {
 
     OpenTunnel {
         protocol: u8,
-        cid: String,
+        cid: Ulid,
         username: String,
         password: String,
         msg_id: Option<u32>, // custom web user supplied. easier to track responses and map them to requests
@@ -32,48 +33,48 @@ pub enum NodeFrameData {
 
     TunnelOpened {
         protocol: u8,
-        cid: String,
+        cid: Ulid,
         sid: u32,
         msg_id: Option<u32>, // custom web user supplied. easier to track responses and map them to requests
     },
 
     TunnelData {
         protocol: u8,
-        cid: String,
+        cid: Ulid,
         sid: u32,
         data: Vec<u8>,
     },
 
     TunnelClosed {
         protocol: u8,
-        cid: String,
+        cid: Ulid,
         sid: u32,
         msg_id: Option<u32>, // echo back the user supplied msg_id
     }, // notify web that tunnel is closed
 
     SSHWindowResize {
-        cid: String,
+        cid: Ulid,
         sid: u32,
         cols: u32,
         rows: u32,
     },
 
     SFTPList {
-        cid: String,
+        cid: Ulid,
         path: String,
         sid: u32,
         msg_id: Option<u32>, // echo back the user supplied msg_id
     },
 
     SFTPDownloadStart {
-        cid: String,
+        cid: Ulid,
         sid: u32,
         msg_id: Option<u32>,
         download: SFTPDownloadStart,
     },
 
     SFTPDownloadChunkRequest {
-        cid: String,
+        cid: Ulid,
         sid: u32,
         msg_id: Option<u32>,
         download_id: u32,
@@ -81,28 +82,28 @@ pub enum NodeFrameData {
     },
 
     SFTPDownloadChunk {
-        cid: String,
+        cid: Ulid,
         sid: u32,
         msg_id: Option<u32>,
         chunk: SFTPDownloadChunk,
     },
 
     SFTPUploadStart {
-        cid: String,
+        cid: Ulid,
         sid: u32,
         msg_id: Option<u32>,
         upload: SFTPUploadStart,
     },
 
     SFTPUpload {
-        cid: String,
+        cid: Ulid,
         sid: u32,
         msg_id: Option<u32>,
         chunk: SFTPUploadChunk,
     },
 
     SFTPDelete {
-        cid: String,
+        cid: Ulid,
         sid: u32,
         msg_id: Option<u32>,
         data: SFTPDelete,
@@ -122,7 +123,7 @@ pub enum NodeFrameData {
     },
 
     ConnectionDisconnect {
-        cid: String,
+        cid: Ulid,
     },
 }
 

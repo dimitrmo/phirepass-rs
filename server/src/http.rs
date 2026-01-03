@@ -114,8 +114,8 @@ pub async fn list_connections(State(state): State<AppState>) -> impl IntoRespons
         .iter()
         .map(|(id, info)| {
             json!({
-                "id": id.to_string(),
-                "ip": info.ip.to_string(),
+                "id": id,
+                "ip": info.ip,
                 "connected_for_secs": now
                     .duration_since(info.connected_at)
                     .unwrap()
