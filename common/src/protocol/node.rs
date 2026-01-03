@@ -1,4 +1,6 @@
-use crate::protocol::sftp::{SFTPDelete, SFTPUploadChunk, SFTPUploadStart};
+use crate::protocol::sftp::{
+    SFTPDelete, SFTPDownloadChunk, SFTPDownloadStart, SFTPUploadChunk, SFTPUploadStart,
+};
 use crate::protocol::web::WebFrameData;
 use crate::stats::Stats;
 use serde::{Deserialize, Serialize};
@@ -71,6 +73,20 @@ pub enum NodeFrameData {
         msg_id: Option<u32>, // echo back the user supplied msg_id
     },
 
+    SFTPDownloadStart {
+        cid: String,
+        sid: u32,
+        msg_id: Option<u32>,
+        download: SFTPDownloadStart,
+    },
+
+    SFTPDownloadChunk {
+        cid: String,
+        sid: u32,
+        msg_id: Option<u32>,
+        chunk: SFTPDownloadChunk,
+    },
+
     SFTPUploadStart {
         cid: String,
         sid: u32,
@@ -123,9 +139,11 @@ impl NodeFrameData {
             NodeFrameData::SSHWindowResize { .. } => 30,
             NodeFrameData::SFTPList { .. } => 31,
             NodeFrameData::SFTPDownload { .. } => 32,
-            NodeFrameData::SFTPUploadStart { .. } => 33,
-            NodeFrameData::SFTPUpload { .. } => 34,
-            NodeFrameData::SFTPDelete { .. } => 35,
+            NodeFrameData::SFTPDownloadStart { .. } => 33,
+            NodeFrameData::SFTPDownloadChunk { .. } => 34,
+            NodeFrameData::SFTPUploadStart { .. } => 35,
+            NodeFrameData::SFTPUpload { .. } => 36,
+            NodeFrameData::SFTPDelete { .. } => 37,
             NodeFrameData::Ping { .. } => 40,
             NodeFrameData::Pong { .. } => 41,
             NodeFrameData::WebFrame { .. } => 50,

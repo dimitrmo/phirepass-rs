@@ -144,6 +144,24 @@ async fn handle_web_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
                         handle_sftp_download(&state, cid, sid, node_id, path, filename, msg_id)
                             .await;
                     }
+                    WebFrameData::SFTPDownloadStart {
+                        sid,
+                        node_id,
+                        msg_id,
+                        download,
+                    } => {
+                        handle_sftp_download_start(&state, cid, sid, node_id, msg_id, download)
+                            .await;
+                    }
+                    WebFrameData::SFTPDownloadChunk {
+                        sid,
+                        msg_id,
+                        chunk,
+                    } => {
+                        // Download chunks are sent from daemon to web client, not web client to daemon
+                        warn!("received sftp download chunk which is invalid if sent by web client");
+                        break;
+                    }
                     WebFrameData::SFTPUploadStart {
                         sid,
                         node_id,
@@ -178,8 +196,18 @@ async fn handle_web_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
                         );
                         break;
                     }
+                    WebFrameData::SFTPDownloadStartResponse { .. } => {
+                        warn!(
+                            "received sftp download start response which is invalid if sent by web client"
+                        );
+                        break;
+                    }
                     WebFrameData::SFTPFileChunk { .. } => {
                         warn!("received sftp file chunk which is invalid if sent by web client");
+                        break;
+                    }
+                    WebFrameData::SFTPDownloadChunk { .. } => {
+                        warn!("received sftp download chunk which is invalid if sent by web client");
                         break;
                     }
                     WebFrameData::Error { .. } => {
@@ -387,6 +415,90 @@ async fn handle_sftp_download(
     {
         Ok(_) => info!("sent sftp download request to {node_id}"),
         Err(err) => warn!("failed to forward sftp download to node {node_id}: {err}"),
+    }
+}
+
+async fn handle_sftp_download_start(
+    state: &AppState,
+    cid: Ulid,
+    sid: u32,
+    target: String,
+    msg_id: Option<u32>,
+    download: phirepass_common::protocol::sftp::SFTPDownloadStart,
+) {
+    debug!("handle sftp download start request");
+
+    let node_id = match get_node_id_by_cid(state, &cid, target, sid).await {
+        Ok(id) => id,
+        Err(err) => {
+            warn!("error getting node id: {err}");
+            return;
+        }
+    };
+
+    let tx = {
+        let nodes = state.nodes.read().await;
+        nodes.get(&node_id).map(|info| info.tx.clone())
+    };
+
+    let Some(tx) = tx else {
+        warn!("tx for node not found {node_id}");
+        return;
+    };
+
+    match tx
+        .send(NodeFrameData::SFTPDownloadStart {
+            cid: cid.to_string(),
+            sid,
+            msg_id,
+            download,
+        })
+        .await
+    {
+        Ok(_) => info!("sent sftp download start request to {node_id}"),
+        Err(err) => warn!("failed to forward sftp download start to node {node_id}: {err}"),
+    }
+}
+
+async fn handle_sftp_download_chunk(
+    state: &AppState,
+    cid: Ulid,
+    sid: u32,
+    target: String,
+    msg_id: Option<u32>,
+    chunk: phirepass_common::protocol::sftp::SFTPDownloadChunk,
+) {
+    debug!("handle sftp download chunk request");
+
+    let node_id = match get_node_id_by_cid(state, &cid, target, sid).await {
+        Ok(id) => id,
+        Err(err) => {
+            warn!("error getting node id: {err}");
+            return;
+        }
+    };
+
+    let tx = {
+        let nodes = state.nodes.read().await;
+        nodes.get(&node_id).map(|info| info.tx.clone())
+    };
+
+    let Some(tx) = tx else {
+        warn!("tx for node not found {node_id}");
+        return;
+    };
+
+    match tx
+        .send(NodeFrameData::SFTPDownloadChunk {
+            cid: cid.to_string(),
+            sid,
+            msg_id,
+            chunk,
+        })
+        .await
+    {
+        Ok(_) => info!("sent sftp download chunk request to {node_id}"),
+        Err(err) => warn!("failed to forward sftp download chunk to node {node_id}: {err}"),
     }
 }
 

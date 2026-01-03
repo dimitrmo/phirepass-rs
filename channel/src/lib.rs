@@ -279,6 +279,44 @@ impl Channel {
         })
     }
 
+    pub fn send_sftp_download_start(
+        &self,
+        node_id: String,
+        sid: u32,
+        path: String,
+        filename: String,
+        msg_id: Option<u32>,
+    ) {
+        let download = phirepass_common::protocol::sftp::SFTPDownloadStart { path, filename };
+        self.send_frame_data(WebFrameData::SFTPDownloadStart {
+            node_id,
+            sid,
+            msg_id,
+            download,
+        })
+    }
+
+    pub fn send_sftp_download_chunk(
+        &self,
+        node_id: String,
+        sid: u32,
+        download_id: u32,
+        chunk_index: u32,
+        msg_id: Option<u32>,
+    ) {
+        let chunk = phirepass_common::protocol::sftp::SFTPDownloadChunk {
+            download_id,
+            chunk_index,
+            chunk_size: 0, // Server will set the actual size
+            data: vec![],
+        };
+        self.send_frame_data(WebFrameData::SFTPDownloadChunk {
+            sid,
+            msg_id,
+            chunk,
+        })
+    }
+
     pub fn send_sftp_upload_start(
         &self,
         node_id: String,

@@ -1,5 +1,6 @@
-use crate::sftp::SFTPActiveUploads;
+use crate::sftp::{SFTPActiveDownloads, SFTPActiveUploads};
 use crate::sftp::actions::delete::delete_file;
+use crate::sftp::actions::download;
 use crate::sftp::actions::download::send_file_chunks;
 use crate::sftp::actions::list_dir::send_directory_listing;
 use crate::sftp::actions::upload::{start_upload, upload_file_chunk};
@@ -77,6 +78,7 @@ impl SFTPConnection {
         sid: u32,
         tx: &Sender<Frame>,
         uploads: &SFTPActiveUploads,
+        downloads: &SFTPActiveDownloads,
         mut cmd_rx: Receiver<SFTPCommand>,
         mut shutdown_rx: oneshot::Receiver<()>,
     ) -> anyhow::Result<()> {
@@ -107,6 +109,14 @@ impl SFTPConnection {
                         SFTPCommand::Download { path, filename, msg_id } => {
                             debug!("sftp download command received for {path}/{filename}: {msg_id:?}");
                             send_file_chunks(&tx, &sftp, &path, &filename, sid, msg_id).await;
+                        }
+                        SFTPCommand::DownloadStart { download, msg_id } => {
+                            debug!("sftp download start command received for {}/{}: {msg_id:?}", download.path, download.filename);
+                            download::start_download(&tx, &sftp, &download, &cid, sid, msg_id, downloads).await;
+                        }
+                        SFTPCommand::DownloadChunk { chunk, msg_id } => {
+                            debug!("sftp download chunk command received for download_id {}: {msg_id:?}", chunk.download_id);
+                            download::download_file_chunk(&tx, &cid, sid, msg_id, chunk.download_id, chunk.chunk_index, downloads).await;
                         }
                         SFTPCommand::UploadStart { upload, msg_id } => {
                             debug!("sftp upload start command received for {}/{}: {msg_id:?}", upload.remote_path, upload.filename);

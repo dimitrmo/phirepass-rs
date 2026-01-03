@@ -1,5 +1,5 @@
 use crate::env::{Env, SSHAuthMethod};
-use crate::sftp::SFTPActiveUploads;
+use crate::sftp::{SFTPActiveDownloads, SFTPActiveUploads};
 use crate::sftp::connection::{SFTPConfig, SFTPConfigAuth, SFTPConnection};
 use crate::sftp::session::{SFTPCommand, SFTPSessionHandle};
 use crate::ssh::connection::{SSHConfig, SSHConfigAuth, SSHConnection};
@@ -80,6 +80,7 @@ pub(crate) struct WebSocketConnection {
     reader: Receiver<Frame>,
     sessions: TunnelSessions,
     uploads: SFTPActiveUploads,
+    downloads: SFTPActiveDownloads,
 }
 
 fn generate_server_endpoint(mode: Mode, server_host: String, server_port: u16) -> String {
@@ -110,6 +111,7 @@ impl WebSocketConnection {
             writer: tx,
             sessions: Arc::new(Mutex::new(HashMap::new())),
             uploads: Arc::new(Mutex::new(HashMap::new())),
+            downloads: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -162,6 +164,7 @@ impl WebSocketConnection {
             config.clone(),
             self.sessions.clone(),
             self.uploads.clone(),
+            self.downloads.clone(),
         )
         .await;
 
@@ -188,6 +191,7 @@ async fn spawn_reader_task(
     config: Arc<Env>,
     sessions: TunnelSessions,
     uploads: SFTPActiveUploads,
+    downloads: SFTPActiveDownloads,
 ) -> tokio::task::JoinHandle<()> {
     let target = target.clone();
     tokio::spawn(async move {
@@ -212,7 +216,7 @@ async fn spawn_reader_task(
 
                     debug!("received node frame: {data:?}");
 
-                    handle_message(&target, data, &sender, &config, &sessions, &uploads).await;
+                    handle_message(&target, data, &sender, &config, &sessions, &uploads, &downloads).await;
                 }
                 Ok(Message::Close(reason)) => {
                     info!("received close message: {reason:?}");
@@ -313,6 +317,7 @@ async fn handle_message(
     config: &Arc<Env>,
     sessions: &TunnelSessions,
     uploads: &SFTPActiveUploads,
+    downloads: &SFTPActiveDownloads,
 ) {
     debug!("handling message: {data:?}");
 
@@ -336,6 +341,7 @@ async fn handle_message(
                             SFTPConfigAuth::UsernamePassword(username, password),
                             sessions,
                             uploads,
+                            downloads,
                             msg_id,
                         )
                         .await;
@@ -434,6 +440,29 @@ async fn handle_message(
         } => {
             if let Err(err) = send_sftp_upload_data(cid, sid, msg_id, chunk, &sessions).await {
                 warn!("failed to forward sftp upload data: {err}");
+            }
+        }
+        NodeFrameData::SFTPDownloadStart {
+            cid,
+            sid,
+            msg_id,
+            download,
+        } => {
+            if let Err(err) =
+                send_sftp_download_start_data(cid, sid, msg_id, download, &sessions).await
+            {
+                warn!("failed to forward sftp download start data: {err}");
+            }
+        }
+        NodeFrameData::SFTPDownloadChunk {
+            cid,
+            sid,
+            msg_id,
+            chunk,
+        } => {
+            if let Err(err) = send_sftp_download_chunk_data(cid, sid, msg_id, chunk, &sessions).await
+            {
+                warn!("failed to forward sftp download chunk data: {err}");
             }
         }
         NodeFrameData::SFTPDelete {
@@ -605,6 +634,66 @@ async fn send_sftp_delete_data(
         .map_err(|err| anyhow!(err))
 }
 
+async fn send_sftp_download_start_data(
+    cid: String,
+    sid: u32,
+    msg_id: Option<u32>,
+    download: phirepass_common::protocol::sftp::SFTPDownloadStart,
+    sessions: &TunnelSessions,
+) -> anyhow::Result<()> {
+    let connection_id = cid.clone();
+
+    let stdin = {
+        let sessions = sessions.lock().await;
+        sessions.get(&(cid, sid)).map(|s| s.get_stdin())
+    };
+
+    let Some(stdin) = stdin else {
+        anyhow::bail!(format!("no session found for connection {connection_id}"))
+    };
+
+    let SessionCommand::SFTP(stdin) = stdin else {
+        anyhow::bail!(format!(
+            "no sftp tunnel found for connection {connection_id}"
+        ))
+    };
+
+    stdin
+        .send(SFTPCommand::DownloadStart { download, msg_id })
+        .await
+        .map_err(|err| anyhow!(err))
+}
+
+async fn send_sftp_download_chunk_data(
+    cid: String,
+    sid: u32,
+    msg_id: Option<u32>,
+    chunk: phirepass_common::protocol::sftp::SFTPDownloadChunk,
+    sessions: &TunnelSessions,
+) -> anyhow::Result<()> {
+    let connection_id = cid.clone();
+
+    let stdin = {
+        let sessions = sessions.lock().await;
+        sessions.get(&(cid, sid)).map(|s| s.get_stdin())
+    };
+
+    let Some(stdin) = stdin else {
+        anyhow::bail!(format!("no session found for connection {connection_id}"))
+    };
+
+    let SessionCommand::SFTP(stdin) = stdin else {
+        anyhow::bail!(format!(
+            "no sftp tunnel found for connection {connection_id}"
+        ))
+    };
+
+    stdin
+        .send(SFTPCommand::DownloadChunk { chunk, msg_id })
+        .await
+        .map_err(|err| anyhow!(err))
+}
+
 async fn send_ssh_tunnel_data(
     cid: String,
     sid: u32,
@@ -724,6 +813,7 @@ async fn start_sftp_tunnel(
     credentials: SFTPConfigAuth,
     sessions: &TunnelSessions,
     uploads: &SFTPActiveUploads,
+    downloads: &SFTPActiveDownloads,
     msg_id: Option<u32>,
 ) {
     let (stdin_tx, stdin_rx) = channel::<SFTPCommand>(512);
@@ -750,6 +840,7 @@ async fn start_sftp_tunnel(
     );
 
     let uploads = uploads.clone();
+    let downloads = downloads.clone();
     let _sftp_task = tokio::spawn(async move {
         info!("sftp task started for connection {cid_for_task}");
 
@@ -771,6 +862,7 @@ async fn start_sftp_tunnel(
                 session_id,
                 &sender,
                 &uploads,
+                &downloads,
                 stdin_rx,
                 stop_rx,
             )
