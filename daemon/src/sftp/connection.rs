@@ -73,7 +73,6 @@ impl SFTPConnection {
 
     pub async fn connect(
         &self,
-        _node_id: String,
         cid: Ulid,
         sid: u32,
         tx: &Sender<Frame>,

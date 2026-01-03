@@ -379,10 +379,10 @@ impl Channel {
 
         match frame.to_bytes() {
             Ok(raw) => {
-                if let Some(socket) = self.state.borrow().socket.as_ref() {
-                    if let Err(err) = socket.send_with_u8_array(raw.as_slice()) {
-                        console_warn!("{}", format!("Failed to send raw frame: {err:?}"));
-                    }
+                if let Some(socket) = self.state.borrow().socket.as_ref()
+                    && let Err(err) = socket.send_with_u8_array(raw.as_slice())
+                {
+                    console_warn!("{}", format!("Failed to send raw frame: {err:?}"));
                 }
             }
             Err(err) => {

@@ -18,7 +18,7 @@ pub enum NodeFrameData {
     },
 
     AuthResponse {
-        node_id: String,
+        node_id: Ulid,
         success: bool,
         version: String,
     },

@@ -36,39 +36,39 @@ static SESSION_ID: AtomicU32 = AtomicU32::new(1);
 
 #[derive(Debug)]
 enum SessionHandle {
-    SSH(SSHSessionHandle),
-    SFTP(SFTPSessionHandle),
+    Ssh(SSHSessionHandle),
+    Sftp(SFTPSessionHandle),
 }
 
 impl Display for SessionHandle {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            SessionHandle::SSH(_) => write!(f, "SSHSessionHandle"),
-            SessionHandle::SFTP(_) => write!(f, "SFTPSessionHandle"),
+            SessionHandle::Ssh(_) => write!(f, "SSHSessionHandle"),
+            SessionHandle::Sftp(_) => write!(f, "SFTPSessionHandle"),
         }
     }
 }
 
 enum SessionCommand {
-    SSH(Sender<SSHCommand>),
-    SFTP(Sender<SFTPCommand>),
+    Ssh(Sender<SSHCommand>),
+    Sftp(Sender<SFTPCommand>),
 }
 
 impl SessionHandle {
     pub fn get_stdin(&self) -> SessionCommand {
         match self {
-            SessionHandle::SSH(ssh_handle) => SessionCommand::SSH(ssh_handle.stdin.clone()),
-            SessionHandle::SFTP(sftp_handle) => SessionCommand::SFTP(sftp_handle.stdin.clone()),
+            SessionHandle::Ssh(ssh_handle) => SessionCommand::Ssh(ssh_handle.stdin.clone()),
+            SessionHandle::Sftp(sftp_handle) => SessionCommand::Sftp(sftp_handle.stdin.clone()),
         }
     }
 
     pub async fn shutdown(self) {
         match self {
-            SessionHandle::SSH(ssh_handle) => {
+            SessionHandle::Ssh(ssh_handle) => {
                 info!("shutting down ssh handle");
                 ssh_handle.shutdown().await;
             }
-            SessionHandle::SFTP(sftp_handle) => {
+            SessionHandle::Sftp(sftp_handle) => {
                 info!("shutting down sftp handle");
                 sftp_handle.shutdown().await;
             }
@@ -150,16 +150,16 @@ impl WebSocketConnection {
         let mut rx = self.reader;
         let write_task = tokio::spawn(async move {
             while let Some(frame) = rx.recv().await {
-                if let Ok(data) = frame.to_bytes() {
-                    if let Err(err) = write.send(Message::Binary(data.into())).await {
-                        warn!("failed to send frame: {}", err);
-                    }
+                if let Ok(data) = frame.to_bytes()
+                    && let Err(err) = write.send(Message::Binary(data.into())).await
+                {
+                    warn!("failed to send frame: {}", err);
                 }
             }
         });
 
         let reader_task = spawn_reader_task(
-            &node_id,
+            node_id,
             read,
             self.writer.clone(),
             config.clone(),
@@ -186,7 +186,7 @@ impl WebSocketConnection {
 }
 
 async fn spawn_reader_task(
-    target: &str,
+    target: Ulid,
     mut reader: WebSocketReader,
     sender: Sender<Frame>,
     config: Arc<Env>,
@@ -194,7 +194,6 @@ async fn spawn_reader_task(
     uploads: SFTPActiveUploads,
     downloads: SFTPActiveDownloads,
 ) -> tokio::task::JoinHandle<()> {
-    let target = target.to_owned();
     tokio::spawn(async move {
         while let Some(frame) = reader.next().await {
             match frame {
@@ -218,7 +217,7 @@ async fn spawn_reader_task(
                     debug!("received node frame: {data:?}");
 
                     handle_message(
-                        &target, data, &sender, &config, &sessions, &uploads, &downloads,
+                        target, data, &sender, &config, &sessions, &uploads, &downloads,
                     )
                     .await;
                 }
@@ -260,7 +259,7 @@ async fn spawn_heartbeat_task(sender: Sender<Frame>, interval: u64) -> tokio::ta
     })
 }
 
-async fn read_auth_response(reader: &mut WebSocketReader) -> anyhow::Result<(String, String)> {
+async fn read_auth_response(reader: &mut WebSocketReader) -> anyhow::Result<(Ulid, String)> {
     match read_next_frame(reader).await {
         None => anyhow::bail!("failed to read auth response"),
         Some(frame) => {
@@ -286,36 +285,33 @@ async fn read_auth_response(reader: &mut WebSocketReader) -> anyhow::Result<(Str
 }
 
 async fn read_next_frame(reader: &mut WebSocketReader) -> Option<NodeFrameData> {
-    match reader.next().await {
-        Some(Ok(Message::Binary(data))) => {
-            let frame = match Frame::decode(&data) {
-                Ok(frame) => frame,
-                Err(err) => {
-                    warn!("received malformed frame: {err}");
-                    return None;
-                }
-            };
+    if let Some(Ok(Message::Binary(data))) = reader.next().await {
+        let frame = match Frame::decode(&data) {
+            Ok(frame) => frame,
+            Err(err) => {
+                warn!("received malformed frame: {err}");
+                return None;
+            }
+        };
 
-            let node_frame = match frame.data {
-                FrameData::Node(data) => data,
-                FrameData::Web(_) => {
-                    warn!("received web frame, but expected a node frame");
-                    return None;
-                }
-            };
+        let node_frame = match frame.data {
+            FrameData::Node(data) => data,
+            FrameData::Web(_) => {
+                warn!("received web frame, but expected a node frame");
+                return None;
+            }
+        };
 
-            info!("received node frame: {node_frame:?}");
+        info!("received node frame: {node_frame:?}");
 
-            return Some(node_frame);
-        }
-        _ => {}
+        return Some(node_frame);
     }
 
     None
 }
 
 async fn handle_message(
-    node_id: &str,
+    node_id: Ulid,
     data: NodeFrameData,
     sender: &Sender<Frame>,
     config: &Arc<Env>,
@@ -339,7 +335,6 @@ async fn handle_message(
                     SSHAuthMethod::CredentialsPrompt => {
                         start_sftp_tunnel(
                             sender,
-                            node_id,
                             cid,
                             config,
                             SFTPConfigAuth::UsernamePassword(username, password),
@@ -506,7 +501,7 @@ async fn send_sftp_list_data(
         anyhow::bail!(format!("no session found for connection {cid}"))
     };
 
-    let SessionCommand::SFTP(stdin) = stdin else {
+    let SessionCommand::Sftp(stdin) = stdin else {
         anyhow::bail!(format!("no sftp tunnel found for connection {cid}"))
     };
 
@@ -532,7 +527,7 @@ async fn send_sftp_upload_start_data(
         anyhow::bail!(format!("no session found for connection {cid}"))
     };
 
-    let SessionCommand::SFTP(stdin) = stdin else {
+    let SessionCommand::Sftp(stdin) = stdin else {
         anyhow::bail!(format!("no sftp tunnel found for connection {cid}"))
     };
 
@@ -558,7 +553,7 @@ async fn send_sftp_upload_data(
         anyhow::bail!(format!("no session found for connection {cid}"))
     };
 
-    let SessionCommand::SFTP(stdin) = stdin else {
+    let SessionCommand::Sftp(stdin) = stdin else {
         anyhow::bail!(format!("no sftp tunnel found for connection {cid}"))
     };
 
@@ -584,7 +579,7 @@ async fn send_sftp_delete_data(
         anyhow::bail!(format!("no session found for connection {cid}"))
     };
 
-    let SessionCommand::SFTP(stdin) = stdin else {
+    let SessionCommand::Sftp(stdin) = stdin else {
         anyhow::bail!(format!("no sftp tunnel found for connection {cid}"))
     };
 
@@ -610,7 +605,7 @@ async fn send_sftp_download_start_data(
         anyhow::bail!(format!("no session found for connection {cid}"))
     };
 
-    let SessionCommand::SFTP(stdin) = stdin else {
+    let SessionCommand::Sftp(stdin) = stdin else {
         anyhow::bail!(format!("no sftp tunnel found for connection {cid}"))
     };
 
@@ -637,7 +632,7 @@ async fn send_sftp_download_chunk_request(
         anyhow::bail!(format!("no session found for connection {cid}"))
     };
 
-    let SessionCommand::SFTP(stdin) = stdin else {
+    let SessionCommand::Sftp(stdin) = stdin else {
         anyhow::bail!(format!("no sftp tunnel found for connection {cid}"))
     };
 
@@ -670,7 +665,7 @@ async fn send_sftp_download_chunk_data(
         anyhow::bail!(format!("no session found for connection {cid}"))
     };
 
-    let SessionCommand::SFTP(stdin) = stdin else {
+    let SessionCommand::Sftp(stdin) = stdin else {
         anyhow::bail!(format!("no sftp tunnel found for connection {cid}"))
     };
 
@@ -695,7 +690,7 @@ async fn send_ssh_tunnel_data(
         anyhow::bail!(format!("no session found for connection {cid}"))
     };
 
-    let SessionCommand::SSH(stdin) = stdin else {
+    let SessionCommand::Ssh(stdin) = stdin else {
         anyhow::bail!(format!("no ssh tunnel found for connection {cid}"))
     };
 
@@ -721,7 +716,7 @@ async fn send_ssh_forward_resize(
         anyhow::bail!(format!("no session found for connection {cid}"))
     };
 
-    let SessionCommand::SSH(stdin) = stdin else {
+    let SessionCommand::Ssh(stdin) = stdin else {
         anyhow::bail!(format!("no ssh tunnel found for connection {cid}"))
     };
 
@@ -785,7 +780,6 @@ async fn send_frame_data(sender: &Sender<Frame>, data: NodeFrameData) {
 
 async fn start_sftp_tunnel(
     tx: &Sender<Frame>,
-    node_id: &str,
     cid: Ulid,
     config: &Arc<Env>,
     credentials: SFTPConfigAuth,
@@ -801,7 +795,6 @@ async fn start_sftp_tunnel(
     // let sessions_for_task = sessions.clone();
     let tx_for_opened = tx.clone();
     // let config_for_task = config.clone();
-    let node_id_for_task = node_id.to_owned();
 
     let conn = SFTPConnection::new(SFTPConfig {
         host: config.ssh_host.clone(),
@@ -832,14 +825,7 @@ async fn start_sftp_tunnel(
 
         match conn
             .connect(
-                node_id_for_task,
-                cid,
-                session_id,
-                &sender,
-                &uploads,
-                &downloads,
-                stdin_rx,
-                stop_rx,
+                cid, session_id, &sender, &uploads, &downloads, stdin_rx, stop_rx,
             )
             .await
         {
@@ -874,7 +860,7 @@ async fn start_sftp_tunnel(
         }
     });
 
-    let handle = SessionHandle::SFTP(SFTPSessionHandle {
+    let handle = SessionHandle::Sftp(SFTPSessionHandle {
         stop: Some(stop_tx),
         stdin: stdin_tx,
     });
@@ -894,7 +880,7 @@ async fn start_sftp_tunnel(
 
 async fn start_ssh_tunnel(
     tx: &Sender<Frame>,
-    node_id: &str,
+    node_id: Ulid,
     cid: Ulid,
     config: &Arc<Env>,
     credentials: SSHConfigAuth,
@@ -908,7 +894,6 @@ async fn start_ssh_tunnel(
     // let sessions_for_task = sessions.clone();
     let tx_for_opened = tx.clone();
     // let config_for_task = config.clone();
-    let node_id_for_task = node_id.to_owned();
 
     let conn = SSHConnection::new(SSHConfig {
         host: config.ssh_host.clone(),
@@ -936,14 +921,7 @@ async fn start_ssh_tunnel(
         .await;
 
         match conn
-            .connect(
-                node_id_for_task,
-                cid,
-                session_id,
-                &sender,
-                stdin_rx,
-                stop_rx,
-            )
+            .connect(node_id, cid, session_id, &sender, stdin_rx, stop_rx)
             .await
         {
             Ok(_) => {
@@ -977,7 +955,7 @@ async fn start_ssh_tunnel(
         }
     });
 
-    let handle = SessionHandle::SSH(SSHSessionHandle {
+    let handle = SessionHandle::Ssh(SSHSessionHandle {
         stop: Some(stop_tx),
         stdin: stdin_tx,
     });

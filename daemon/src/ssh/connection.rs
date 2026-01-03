@@ -71,7 +71,7 @@ impl SSHConnection {
 
     pub async fn connect(
         &self,
-        node_id: String,
+        node_id: Ulid,
         cid: Ulid,
         sid: u32,
         tx: &Sender<Frame>,
@@ -128,7 +128,7 @@ impl SSHConnection {
                                     NodeFrameData::WebFrame {
                                         frame: WebFrameData::TunnelData {
                                             protocol: Protocol::SSH as u8,
-                                            node_id: node_id.clone(),
+                                            node_id: node_id.to_string(),
                                             sid,
                                             data: data.to_vec(),
                                         },

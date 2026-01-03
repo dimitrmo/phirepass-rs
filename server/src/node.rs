@@ -102,7 +102,7 @@ async fn handle_node_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
                         info!("node {id} is asking to be authenticated");
 
                         let resp = NodeFrameData::AuthResponse {
-                            node_id: id.to_string(),
+                            node_id: id,
                             success: true,
                             version: env::version().to_string(),
                         };

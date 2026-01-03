@@ -18,7 +18,7 @@ impl TryFrom<u8> for Protocol {
         match value {
             0 => Ok(Self::SSH),
             1 => Ok(Self::SFTP),
-            2_u8..=u8::MAX => todo!(),
+            2_u8..=u8::MAX => unreachable!("invalid protocol variant"),
         }
     }
 }
