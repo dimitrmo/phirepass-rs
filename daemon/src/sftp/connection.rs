@@ -1,19 +1,19 @@
-use std::borrow::Cow;
-use std::sync::Arc;
-use log::{debug, info};
-use russh::{Preferred, client, kex};
-use russh::client::Handle;
-use russh_sftp::client::SftpSession;
-use tokio::sync::oneshot;
-use phirepass_common::protocol::common::Frame;
-use tokio::sync::mpsc::{Receiver, Sender};
+use crate::sftp::SFTPActiveUploads;
 use crate::sftp::actions::delete::delete_file;
 use crate::sftp::actions::download::send_file_chunks;
 use crate::sftp::actions::list_dir::send_directory_listing;
-use crate::sftp::actions::upload::upload_file_chunk;
+use crate::sftp::actions::upload::{start_upload, upload_file_chunk};
 use crate::sftp::client::SFTPClient;
 use crate::sftp::session::SFTPCommand;
-use crate::sftp::SFTPActiveUploads;
+use log::{debug, info};
+use phirepass_common::protocol::common::Frame;
+use russh::client::Handle;
+use russh::{Preferred, client, kex};
+use russh_sftp::client::SftpSession;
+use std::borrow::Cow;
+use std::sync::Arc;
+use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::oneshot;
 
 #[derive(Clone)]
 pub(crate) enum SFTPConfigAuth {
@@ -61,7 +61,7 @@ impl SFTPConnection {
                 client_handler.authenticate_password(username, password)
             }
         }
-            .await?;
+        .await?;
 
         if !auth_res.success() {
             anyhow::bail!("SFTP authentication failed. Please check your password.");
@@ -108,13 +108,17 @@ impl SFTPConnection {
                             debug!("sftp download command received for {path}/{filename}: {msg_id:?}");
                             send_file_chunks(&tx, &sftp, &path, &filename, sid, msg_id).await;
                         }
+                        SFTPCommand::UploadStart { upload, msg_id } => {
+                            debug!("sftp upload start command received for {}/{}: {msg_id:?}", upload.remote_path, upload.filename);
+                            start_upload(&tx, &sftp, &upload, &cid, sid, msg_id, uploads).await;
+                        }
                         SFTPCommand::Upload { chunk, msg_id } => {
-                            debug!("sftp upload command received for {}/{}: {msg_id:?}", chunk.remote_path, chunk.filename);
-                            upload_file_chunk(&tx, &sftp, &chunk, sid, msg_id, uploads).await;
+                            debug!("sftp upload chunk command received for upload_id {}: {msg_id:?}", chunk.upload_id);
+                            upload_file_chunk(&tx, &sftp, &chunk, &cid, sid, msg_id, uploads).await;
                         }
                         SFTPCommand::Delete { data, msg_id } => {
                             debug!("sftp delete command received for {}/{}: {msg_id:?}", data.path, data.filename);
-                            delete_file(&tx, &sftp, &data, sid, msg_id, uploads).await;
+                            delete_file(&tx, &sftp, &data, &cid, sid, msg_id, uploads).await;
                         }
                     }
                 }

@@ -465,6 +465,14 @@ function connectSFTP() {
                     }
                 }
                 break;
+            case "SFTPUploadStartResponse":
+                if (sftpBrowser && currentTab === "sftp") {
+                    const response = frame.data.web.response;
+                    if (response && response.upload_id !== undefined) {
+                        sftpBrowser.handleUploadStartResponse(frame.data.web.msg_id, response.upload_id);
+                    }
+                }
+                break;
             case "TunnelOpened":
                 if (currentTab === "sftp") {
                     if (!sftpBrowser) {

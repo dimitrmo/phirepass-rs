@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::env::Env;
-use crate::http::{build_cors, get_stats, get_version, list_connections, list_nodes, AppState};
+use crate::http::{AppState, build_cors, get_stats, get_version, list_connections, list_nodes};
 use crate::node::ws_node_handler;
 use crate::web::ws_web_handler;
 use axum::Router;

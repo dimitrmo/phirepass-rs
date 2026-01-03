@@ -1,5 +1,6 @@
 use crate::connection::NodeConnection;
 use crate::env;
+use crate::http::AppState;
 use axum::extract::ws::{Message, WebSocket};
 use axum::extract::{State, WebSocketUpgrade};
 use axum::http::HeaderMap;
@@ -15,7 +16,6 @@ use std::str::FromStr;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
 use ulid::Ulid;
-use crate::http::AppState;
 
 pub(crate) async fn ws_node_handler(
     State(state): State<AppState>,

@@ -1,5 +1,5 @@
 use crate::env::Env;
-use crate::http::{get_version, AppState};
+use crate::http::{AppState, get_version};
 use crate::ws;
 use axum::Router;
 use axum::routing::get;

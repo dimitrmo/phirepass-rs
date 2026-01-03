@@ -1,17 +1,17 @@
+use crate::ssh::client::SSHClient;
+use crate::ssh::session::SSHCommand;
+use log::{debug, info, warn};
+use phirepass_common::protocol::Protocol;
+use phirepass_common::protocol::common::Frame;
+use phirepass_common::protocol::node::NodeFrameData;
+use phirepass_common::protocol::web::WebFrameData;
+use russh::client::Handle;
+use russh::{ChannelMsg, Disconnect, Preferred, client, kex};
 use std::borrow::Cow;
 use std::io::Cursor;
 use std::sync::Arc;
-use log::{debug, info, warn};
-use russh::client::Handle;
-use russh::{client, kex, ChannelMsg, Disconnect, Preferred};
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::oneshot;
-use phirepass_common::protocol::common::Frame;
-use phirepass_common::protocol::node::NodeFrameData;
-use phirepass_common::protocol::Protocol;
-use phirepass_common::protocol::web::WebFrameData;
-use crate::ssh::client::SSHClient;
-use crate::ssh::session::SSHCommand;
 
 #[derive(Clone)]
 pub(crate) enum SSHConfigAuth {
@@ -59,7 +59,7 @@ impl SSHConnection {
                 client_handler.authenticate_password(username, password)
             }
         }
-            .await?;
+        .await?;
 
         if !auth_res.success() {
             anyhow::bail!("SSH authentication failed. Please check your password.");

@@ -77,7 +77,7 @@ export class SFTPBrowser {
     handleTunnelOpened(sessionId) {
         this.sessionId = sessionId;
         console.log("SFTP tunnel opened, session ID:", sessionId, "- Requesting directory listing for /");
-        // Request directory listing when tunnel is opened
+        // Request directory listing when tunnel is opened; start at root for consistency
         this.listDirectory(".");
     }
 
@@ -369,6 +369,17 @@ export class SFTPBrowser {
             unit = units.shift();
         }
         return `${size.toFixed(1)} ${unit}`;
+    }
+
+    formatDuration(seconds) {
+        if (!Number.isFinite(seconds) || seconds < 0) return "--";
+        if (seconds < 60) return `${seconds.toFixed(0)}s`;
+        const m = Math.floor(seconds / 60);
+        const s = Math.floor(seconds % 60);
+        if (m < 60) return `${m}m ${s}s`;
+        const h = Math.floor(m / 60);
+        const rm = m % 60;
+        return `${h}h ${rm}m`;
     }
 
     downloadFile(filename) {
@@ -711,55 +722,74 @@ export class SFTPBrowser {
 
         console.log(`Starting upload: ${file.name} (${this.formatBytes(file.size)}) with msgId ${msgId}`);
 
+        // Step 1: Send upload start request and wait for upload_id
+        const upload_id = await new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                reject(new Error("Upload start timeout"));
+            }, 10000);
+
+            this.pendingUploadStarts = this.pendingUploadStarts || new Map();
+            this.pendingUploadStarts.set(msgId, { resolve, reject, timeout });
+
+            this.socket.send_sftp_upload_start(
+                this.selectedNode,
+                this.sessionId,
+                file.name,
+                this.currentPath,
+                totalChunks,
+                BigInt(file.size),
+                msgId
+            );
+        });
+
+        console.log(`Received upload_id: ${upload_id}, sending chunks...`);
+
         let uploadedChunks = 0;
-        const startTime = Date.now();
+        let uploadedBytes = 0;
+        const uploadStart = performance.now();
+        const RATE_BYTES_PER_SEC = 1024 * 1024; // 1 MiB/s cap
 
         try {
+            // Step 2: Send chunks using the upload_id
             for (let i = 0; i < totalChunks; i++) {
                 const start = i * CHUNK_SIZE;
                 const end = Math.min(start + CHUNK_SIZE, file.size);
                 const chunkData = new Uint8Array(await file.slice(start, end).arrayBuffer());
 
-            const uploadChunk = {
-                filename: file.name,
-                remote_path: this.currentPath,
-                chunk_index: i,
-                total_chunks: totalChunks,
-                total_size: file.size,
-                chunk_size: chunkData.length,
-                data: Array.from(chunkData),
-            };
-
-            this.socket.send_sftp_upload(
-                this.selectedNode,
-                this.sessionId,
-                this.currentPath,
-                uploadChunk.filename,
-                uploadChunk.remote_path,
-                uploadChunk.chunk_index,
-                uploadChunk.total_chunks,
-                BigInt(uploadChunk.total_size),
-                uploadChunk.chunk_size,
-                uploadChunk.data,
-                msgId
-            );
+                this.socket.send_sftp_upload_chunk(
+                    this.selectedNode,
+                    this.sessionId,
+                    upload_id,
+                    i,
+                    chunkData.length,
+                    Array.from(chunkData),
+                    null  // no msg_id needed for chunks
+                );
 
                 uploadedChunks++;
+                uploadedBytes += chunkData.length;
 
                 // Update progress in the loader overlay
                 const progress = (uploadedChunks / totalChunks) * 100;
-
-                const uploadedBytes = uploadedChunks * CHUNK_SIZE;
-                const currentTime = Date.now();
-                const elapsedSeconds = (currentTime - startTime) / 1000;
+                const now = performance.now();
+                const elapsedSeconds = (now - uploadStart) / 1000;
                 const speed = elapsedSeconds > 0 ? uploadedBytes / elapsedSeconds : 0;
-                const infoText = `${this.formatBytes(uploadedBytes)} / ${this.formatBytes(file.size)} • ↑ ${this.formatBytes(speed)}/s`;
+                const remainingBytes = file.size - uploadedBytes;
+                const etaSeconds = speed > 0 ? remainingBytes / speed : NaN;
+                const infoText = `${this.formatBytes(uploadedBytes)} / ${this.formatBytes(file.size)} • ↑ ${this.formatBytes(speed)}/s • ETA ${this.formatDuration(etaSeconds)}`;
 
                 this.setLoaderProgress(progress, infoText);
 
-                // Add small delay to avoid overwhelming the connection
-                await new Promise(resolve => setTimeout(resolve, 10));
+                // Pacing: ensure average rate stays at or below 1 MiB/s
+                const targetElapsedMs = (uploadedBytes / RATE_BYTES_PER_SEC) * 1000;
+                const waitMs = targetElapsedMs - (performance.now() - uploadStart);
+                if (waitMs > 0) {
+                    await new Promise((resolve) => setTimeout(resolve, waitMs));
+                }
             }
+        } catch (err) {
+            console.error("Upload failed:", err);
+            alert(`Upload failed: ${err.message}`);
         } finally {
             this.hideLoader();
         }
@@ -768,5 +798,18 @@ export class SFTPBrowser {
 
         // Refresh directory listing to show the new file
         setTimeout(() => this.listDirectory(this.currentPath), 500);
+    }
+
+    handleUploadStartResponse(msgId, upload_id) {
+        if (!this.pendingUploadStarts) {
+            this.pendingUploadStarts = new Map();
+        }
+
+        const pending = this.pendingUploadStarts.get(msgId);
+        if (pending) {
+            clearTimeout(pending.timeout);
+            pending.resolve(upload_id);
+            this.pendingUploadStarts.delete(msgId);
+        }
     }
 }

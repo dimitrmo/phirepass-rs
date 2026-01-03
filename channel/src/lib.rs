@@ -279,32 +279,48 @@ impl Channel {
         })
     }
 
-    pub fn send_sftp_upload(
+    pub fn send_sftp_upload_start(
         &self,
         node_id: String,
         sid: u32,
-        path: String,
         filename: String,
         remote_path: String,
-        chunk_index: u32,
         total_chunks: u32,
         total_size: u64,
+        msg_id: Option<u32>,
+    ) {
+        let upload = phirepass_common::protocol::sftp::SFTPUploadStart {
+            filename,
+            remote_path,
+            total_chunks,
+            total_size,
+        };
+        self.send_frame_data(WebFrameData::SFTPUploadStart {
+            node_id,
+            sid,
+            msg_id,
+            upload,
+        })
+    }
+
+    pub fn send_sftp_upload_chunk(
+        &self,
+        node_id: String,
+        sid: u32,
+        upload_id: u32,
+        chunk_index: u32,
         chunk_size: u32,
         data: Vec<u8>,
         msg_id: Option<u32>,
     ) {
         let chunk = phirepass_common::protocol::sftp::SFTPUploadChunk {
-            filename,
-            remote_path,
+            upload_id,
             chunk_index,
-            total_chunks,
-            total_size,
             chunk_size,
             data,
         };
         self.send_frame_data(WebFrameData::SFTPUpload {
             node_id,
-            path,
             sid,
             msg_id,
             chunk,

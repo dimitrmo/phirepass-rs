@@ -32,15 +32,26 @@ pub struct SFTPFileChunk {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct SFTPUploadChunk {
+pub struct SFTPUploadStart {
     pub filename: String,
     pub remote_path: String,
-    pub chunk_index: u32,
     pub total_chunks: u32,
     pub total_size: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SFTPUploadStartResponse {
+    pub upload_id: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SFTPUploadChunk {
+    pub upload_id: u32,
+    pub chunk_index: u32,
     pub chunk_size: u32,
     pub data: Vec<u8>,
 }
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SFTPDelete {
     pub path: String,

@@ -1,5 +1,9 @@
 use crate::env::{Env, SSHAuthMethod};
-use crate::sftp::{SFTPActiveUploads};
+use crate::sftp::SFTPActiveUploads;
+use crate::sftp::connection::{SFTPConfig, SFTPConfigAuth, SFTPConnection};
+use crate::sftp::session::{SFTPCommand, SFTPSessionHandle};
+use crate::ssh::connection::{SSHConfig, SSHConfigAuth, SSHConnection};
+use crate::ssh::session::{SSHCommand, SSHSessionHandle};
 use anyhow::anyhow;
 use futures_util::stream::SplitStream;
 use futures_util::{SinkExt, StreamExt};
@@ -22,10 +26,6 @@ use tokio::sync::{Mutex, oneshot};
 use tokio_tungstenite::{
     MaybeTlsStream, WebSocketStream, connect_async, tungstenite::protocol::Message,
 };
-use crate::sftp::connection::{SFTPConfig, SFTPConfigAuth, SFTPConnection};
-use crate::sftp::session::{SFTPCommand, SFTPSessionHandle};
-use crate::ssh::connection::{SSHConfig, SSHConfigAuth, SSHConnection};
-use crate::ssh::session::{SSHCommand, SSHSessionHandle};
 
 type TunnelSessions = Arc<Mutex<HashMap<(String, u32), SessionHandle>>>;
 
@@ -415,15 +415,24 @@ async fn handle_message(
                 warn!("failed to forward sftp download data: {err}");
             }
         }
+        NodeFrameData::SFTPUploadStart {
+            cid,
+            sid,
+            msg_id,
+            upload,
+        } => {
+            if let Err(err) = send_sftp_upload_start_data(cid, sid, msg_id, upload, &sessions).await
+            {
+                warn!("failed to forward sftp upload start data: {err}");
+            }
+        }
         NodeFrameData::SFTPUpload {
             cid,
-            path,
             sid,
             msg_id,
             chunk,
         } => {
-            if let Err(err) = send_sftp_upload_data(cid, sid, path, msg_id, chunk, &sessions).await
-            {
+            if let Err(err) = send_sftp_upload_data(cid, sid, msg_id, chunk, &sessions).await {
                 warn!("failed to forward sftp upload data: {err}");
             }
         }
@@ -506,10 +515,39 @@ async fn send_sftp_download_data(
         .map_err(|err| anyhow!(err))
 }
 
+async fn send_sftp_upload_start_data(
+    cid: String,
+    sid: u32,
+    msg_id: Option<u32>,
+    upload: phirepass_common::protocol::sftp::SFTPUploadStart,
+    sessions: &TunnelSessions,
+) -> anyhow::Result<()> {
+    let connection_id = cid.clone();
+
+    let stdin = {
+        let sessions = sessions.lock().await;
+        sessions.get(&(cid, sid)).map(|s| s.get_stdin())
+    };
+
+    let Some(stdin) = stdin else {
+        anyhow::bail!(format!("no session found for connection {connection_id}"))
+    };
+
+    let SessionCommand::SFTP(stdin) = stdin else {
+        anyhow::bail!(format!(
+            "no sftp tunnel found for connection {connection_id}"
+        ))
+    };
+
+    stdin
+        .send(SFTPCommand::UploadStart { upload, msg_id })
+        .await
+        .map_err(|err| anyhow!(err))
+}
+
 async fn send_sftp_upload_data(
     cid: String,
     sid: u32,
-    _path: String,
     msg_id: Option<u32>,
     chunk: phirepass_common::protocol::sftp::SFTPUploadChunk,
     sessions: &TunnelSessions,
@@ -642,8 +680,8 @@ async fn close_uploads_for_cid(cid: &String, uploads: &SFTPActiveUploads) {
     let mut uploads = uploads.lock().await;
     for key in keys_to_remove {
         info!("removing sftp upload by key {:?}", key);
-        if let Some(file) = uploads.remove(&key) {
-            let _ = file.sync_all().await;
+        if let Some(file_upload) = uploads.remove(&key) {
+            let _ = file_upload.sftp_file.sync_all().await;
         }
     }
 }

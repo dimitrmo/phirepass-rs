@@ -1,11 +1,11 @@
-use std::path::Path;
 use log::{debug, warn};
-use russh_sftp::client::SftpSession;
-use tokio::sync::mpsc::Sender;
 use phirepass_common::protocol::common::{Frame, FrameError};
 use phirepass_common::protocol::node::NodeFrameData;
 use phirepass_common::protocol::sftp::{SFTPListItem, SFTPListItemAttributes, SFTPListItemKind};
 use phirepass_common::protocol::web::WebFrameData;
+use russh_sftp::client::SftpSession;
+use std::path::Path;
+use tokio::sync::mpsc::Sender;
 
 pub async fn send_directory_listing(
     tx: &Sender<Frame>,
@@ -29,7 +29,7 @@ pub async fn send_directory_listing(
                         },
                         sid,
                     }
-                        .into(),
+                    .into(),
                 )
                 .await
             {
@@ -39,18 +39,21 @@ pub async fn send_directory_listing(
         }
     };
 
+    // Always return the canonical path so the UI has a stable absolute path
+    let canonical_path = dir.path.clone();
+
     match tx
         .send(
             NodeFrameData::WebFrame {
                 frame: WebFrameData::SFTPListItems {
-                    path: path.to_string(),
+                    path: canonical_path,
                     sid,
                     msg_id,
                     dir,
                 },
                 sid,
             }
-                .into(),
+            .into(),
         )
         .await
     {

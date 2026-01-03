@@ -1,7 +1,7 @@
 use log::{debug, info};
+use phirepass_common::protocol::sftp::{SFTPDelete, SFTPUploadChunk, SFTPUploadStart};
 use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot;
-use phirepass_common::protocol::sftp::{SFTPDelete, SFTPUploadChunk};
 
 #[derive(Clone, Debug)]
 pub(crate) enum SFTPCommand {
@@ -9,6 +9,10 @@ pub(crate) enum SFTPCommand {
     Download {
         path: String,
         filename: String,
+        msg_id: Option<u32>,
+    },
+    UploadStart {
+        upload: SFTPUploadStart,
         msg_id: Option<u32>,
     },
     Upload {

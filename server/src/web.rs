@@ -1,4 +1,5 @@
 use crate::connection::WebConnection;
+use crate::http::AppState;
 use axum::extract::ws::{Message, WebSocket};
 use axum::extract::{State, WebSocketUpgrade};
 use axum::http::HeaderMap;
@@ -12,7 +13,6 @@ use std::net::IpAddr;
 use std::time::{Duration, SystemTime};
 use tokio::sync::mpsc;
 use ulid::Ulid;
-use crate::http::AppState;
 
 pub(crate) async fn ws_web_handler(
     State(state): State<AppState>,
@@ -144,14 +144,21 @@ async fn handle_web_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
                         handle_sftp_download(&state, cid, sid, node_id, path, filename, msg_id)
                             .await;
                     }
+                    WebFrameData::SFTPUploadStart {
+                        sid,
+                        node_id,
+                        msg_id,
+                        upload,
+                    } => {
+                        handle_sftp_upload_start(&state, cid, sid, node_id, msg_id, upload).await;
+                    }
                     WebFrameData::SFTPUpload {
-                        path,
                         sid,
                         node_id,
                         msg_id,
                         chunk,
                     } => {
-                        handle_sftp_upload(&state, cid, sid, node_id, path, msg_id, chunk).await;
+                        handle_sftp_upload(&state, cid, sid, node_id, msg_id, chunk).await;
                     }
                     WebFrameData::SFTPDelete {
                         sid,
@@ -163,6 +170,12 @@ async fn handle_web_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
                     }
                     WebFrameData::SFTPListItems { .. } => {
                         warn!("received sftp list items which is invalid if sent by web client");
+                        break;
+                    }
+                    WebFrameData::SFTPUploadStartResponse { .. } => {
+                        warn!(
+                            "received sftp upload start response which is invalid if sent by web client"
+                        );
                         break;
                     }
                     WebFrameData::SFTPFileChunk { .. } => {
@@ -377,12 +390,53 @@ async fn handle_sftp_download(
     }
 }
 
+async fn handle_sftp_upload_start(
+    state: &AppState,
+    cid: Ulid,
+    sid: u32,
+    target: String,
+    msg_id: Option<u32>,
+    upload: phirepass_common::protocol::sftp::SFTPUploadStart,
+) {
+    debug!("handle sftp upload start request");
+
+    let node_id = match get_node_id_by_cid(state, &cid, target, sid).await {
+        Ok(id) => id,
+        Err(err) => {
+            warn!("error getting node id: {err}");
+            return;
+        }
+    };
+
+    let tx = {
+        let nodes = state.nodes.read().await;
+        nodes.get(&node_id).map(|info| info.tx.clone())
+    };
+
+    let Some(tx) = tx else {
+        warn!("tx for node not found {node_id}");
+        return;
+    };
+
+    match tx
+        .send(NodeFrameData::SFTPUploadStart {
+            cid: cid.to_string(),
+            sid,
+            msg_id,
+            upload,
+        })
+        .await
+    {
+        Ok(_) => debug!("sent sftp upload start to {node_id}"),
+        Err(err) => warn!("failed to forward sftp upload start to node {node_id}: {err}"),
+    }
+}
+
 async fn handle_sftp_upload(
     state: &AppState,
     cid: Ulid,
     sid: u32,
     target: String,
-    path: String,
     msg_id: Option<u32>,
     chunk: phirepass_common::protocol::sftp::SFTPUploadChunk,
 ) {
@@ -409,14 +463,13 @@ async fn handle_sftp_upload(
     match tx
         .send(NodeFrameData::SFTPUpload {
             cid: cid.to_string(),
-            path,
             sid,
             msg_id,
             chunk,
         })
         .await
     {
-        Ok(_) => info!("sent sftp upload chunk to {node_id}"),
+        Ok(_) => debug!("sent sftp upload chunk to {node_id}"),
         Err(err) => warn!("failed to forward sftp upload to node {node_id}: {err}"),
     }
 }

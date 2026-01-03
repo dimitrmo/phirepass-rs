@@ -1,8 +1,8 @@
-use std::sync::Arc;
+use crate::env::Env;
 use axum::Json;
 use axum::response::IntoResponse;
 use serde_json::json;
-use crate::env::Env;
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub(crate) struct AppState {

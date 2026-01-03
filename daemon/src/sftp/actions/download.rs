@@ -1,12 +1,12 @@
+use crate::sftp::CHUNK_SIZE;
 use log::{debug, info, warn};
-use russh_sftp::client::SftpSession;
-use tokio::io::AsyncReadExt;
-use tokio::sync::mpsc::Sender;
 use phirepass_common::protocol::common::{Frame, FrameError};
 use phirepass_common::protocol::node::NodeFrameData;
 use phirepass_common::protocol::sftp::SFTPFileChunk;
 use phirepass_common::protocol::web::WebFrameData;
-use crate::sftp::CHUNK_SIZE;
+use russh_sftp::client::SftpSession;
+use tokio::io::AsyncReadExt;
+use tokio::sync::mpsc::Sender;
 
 pub async fn send_file_chunks(
     tx: &Sender<Frame>,
@@ -40,7 +40,7 @@ pub async fn send_file_chunks(
                         },
                         sid,
                     }
-                        .into(),
+                    .into(),
                 )
                 .await;
             return;
@@ -67,7 +67,7 @@ pub async fn send_file_chunks(
                         },
                         sid,
                     }
-                        .into(),
+                    .into(),
                 )
                 .await;
             return;
@@ -109,7 +109,7 @@ pub async fn send_file_chunks(
                             frame: WebFrameData::SFTPFileChunk { sid, msg_id, chunk },
                             sid,
                         }
-                            .into(),
+                        .into(),
                     )
                     .await
                 {
@@ -131,7 +131,7 @@ pub async fn send_file_chunks(
                             },
                             sid,
                         }
-                            .into(),
+                        .into(),
                     )
                     .await;
                 break;
