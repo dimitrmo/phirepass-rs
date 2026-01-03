@@ -40,16 +40,14 @@ pub fn build_cors(state: &AppState) -> CorsLayer {
 
     if !state.env.mode.is_production() {
         cors = cors.allow_origin(Any);
-    } else {
-        if let Some(origin) = state
-            .env
-            .access_control_allowed_origin
-            .as_deref()
-            .filter(|s| !s.is_empty())
-            .and_then(|s| HeaderValue::from_str(s).ok())
-        {
-            cors = cors.allow_origin(origin);
-        }
+    } else if let Some(origin) = state
+        .env
+        .access_control_allowed_origin
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .and_then(|s| HeaderValue::from_str(s).ok())
+    {
+        cors = cors.allow_origin(origin);
     }
 
     cors

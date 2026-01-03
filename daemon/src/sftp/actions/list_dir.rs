@@ -72,7 +72,7 @@ async fn list_dir(sftp_session: &SftpSession, path: &str) -> anyhow::Result<SFTP
     let name = Path::new(&abs_path)
         .components()
         .filter_map(|c| c.as_os_str().to_str())
-        .last();
+        .next_back();
 
     let mut root = SFTPListItem {
         name: name.unwrap_or(path).to_string(),
@@ -80,7 +80,7 @@ async fn list_dir(sftp_session: &SftpSession, path: &str) -> anyhow::Result<SFTP
         kind: SFTPListItemKind::Folder,
         items: vec![],
         attributes: SFTPListItemAttributes {
-            size: attributes.size.map(|x| x).unwrap_or(0),
+            size: attributes.size.unwrap_or(0),
         },
     };
 
@@ -99,7 +99,7 @@ async fn list_dir(sftp_session: &SftpSession, path: &str) -> anyhow::Result<SFTP
             kind,
             items: vec![],
             attributes: SFTPListItemAttributes {
-                size: entry.metadata().size.map(|x| x).unwrap_or(0),
+                size: entry.metadata().size.unwrap_or(0),
             },
         });
     }

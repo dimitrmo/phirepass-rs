@@ -120,7 +120,7 @@ pub async fn upload_file_chunk(
         chunk.data.len()
     );
 
-    let key = (cid.clone(), chunk.upload_id);
+    let key = (cid, chunk.upload_id);
 
     // Check if this is the last chunk
     let is_last_chunk = {

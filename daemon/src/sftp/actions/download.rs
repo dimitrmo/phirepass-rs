@@ -91,7 +91,7 @@ pub async fn start_download(
         // Store the file handle and metadata for subsequent chunks
         let mut downloads = downloads.lock().await;
         downloads.insert(
-            (cid.clone(), download_id),
+            (cid, download_id),
             FileDownload {
                 filename: download.filename.clone(),
                 total_size,

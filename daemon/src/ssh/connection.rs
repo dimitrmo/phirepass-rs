@@ -155,7 +155,7 @@ impl SSHConnection {
 
                             break;
                         }
-                        ChannelMsg::Close { .. } => {
+                        ChannelMsg::Close => {
                             debug!("ssh channel closed");
                             break;
                         }

@@ -280,7 +280,7 @@ async fn get_node_id_by_cid(
         }
     };
 
-    if !client_id.eq(&cid) {
+    if !client_id.eq(cid) {
         anyhow::bail!("correct cid was not found for sid {sid}")
     }
 
@@ -663,13 +663,13 @@ async fn handle_web_open_tunnel(
 
     let Some(username) = username else {
         warn!("username not found");
-        let _ = send_requires_username_password_error(&state, &cid, msg_id).await;
+        let _ = send_requires_username_password_error(state, &cid, msg_id).await;
         return;
     };
 
     let Some(password) = password else {
         warn!("password not found");
-        let _ = send_requires_password_error(&state, &cid, msg_id).await;
+        let _ = send_requires_password_error(state, &cid, msg_id).await;
         return;
     };
 
@@ -740,9 +740,7 @@ async fn notify_nodes_client_disconnect(state: &AppState, cid: Ulid) {
     for (node_id, conn) in nodes.iter() {
         match conn
             .tx
-            .send(NodeFrameData::ConnectionDisconnect {
-                cid,
-            })
+            .send(NodeFrameData::ConnectionDisconnect { cid })
             .await
         {
             Ok(..) => info!("notified node {node_id} about client {cid} disconnect"),

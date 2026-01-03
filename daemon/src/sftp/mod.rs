@@ -60,7 +60,7 @@ pub async fn cleanup_abandoned_uploads(uploads: &SFTPActiveUploads) {
             .filter_map(|(key, upload)| {
                 if let Ok(elapsed) = now.duration_since(upload.last_updated) {
                     if elapsed > TIMEOUT {
-                        return Some(key.clone());
+                        return Some(*key);
                     }
                 }
                 None
@@ -92,7 +92,7 @@ pub async fn cleanup_abandoned_downloads(downloads: &SFTPActiveDownloads) {
             .filter_map(|(key, download)| {
                 if let Ok(elapsed) = now.duration_since(download.last_updated) {
                     if elapsed > TIMEOUT {
-                        return Some(key.clone());
+                        return Some(*key);
                     }
                 }
                 None

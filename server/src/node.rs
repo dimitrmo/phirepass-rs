@@ -132,8 +132,7 @@ async fn handle_node_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
                         sid,
                         msg_id,
                     } => {
-                        handle_tunnel_opened(&state, protocol, cid, sid, &id, msg_id)
-                            .await;
+                        handle_tunnel_opened(&state, protocol, cid, sid, &id, msg_id).await;
                     }
                     // daemon notified server with data for web
                     NodeFrameData::WebFrame { frame, sid } => {
@@ -146,8 +145,7 @@ async fn handle_node_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
                         sid,
                         msg_id,
                     } => {
-                        handle_tunnel_closed(&state, protocol, cid, sid, &id, msg_id)
-                            .await;
+                        handle_tunnel_closed(&state, protocol, cid, sid, &id, msg_id).await;
                     }
                     o => warn!("unhandled node frame: {o:?}"),
                 }
@@ -176,7 +174,7 @@ async fn get_connection_id_by_sid(
         }
     };
 
-    if !node_id.eq(&target) {
+    if !node_id.eq(target) {
         anyhow::bail!("correct node_id was not found for sid {sid}")
     }
 
@@ -283,7 +281,7 @@ async fn handle_tunnel_opened(
     {
         let key = format!("{node_id}-{sid}");
         let mut tunnel_sessions = state.tunnel_sessions.write().await;
-        tunnel_sessions.insert(key, (cid, node_id.clone()));
+        tunnel_sessions.insert(key, (cid, *node_id));
     }
 
     match connection

@@ -125,7 +125,7 @@ impl Channel {
                 let _ = cb.call1(&JsValue::NULL, &JsValue::from(&event));
             }
             if let Some(cb) = protocol_message_cb.as_ref() {
-                handle_message(&cb, &event);
+                handle_message(cb, &event);
             }
         }) as Box<dyn FnMut(MessageEvent)>);
 

@@ -104,27 +104,27 @@ impl SFTPConnection {
                     match cmd {
                         SFTPCommand::List(folder, msg_id) => {
                             debug!("sftp list command received for folder {folder}: {msg_id:?}");
-                            send_directory_listing(&tx, &sftp, &folder, sid, msg_id).await;
+                            send_directory_listing(tx, &sftp, &folder, sid, msg_id).await;
                         }
                         SFTPCommand::DownloadStart { download, msg_id } => {
                             debug!("sftp download start command received for {}/{}: {msg_id:?}", download.path, download.filename);
-                            download::start_download(&tx, &sftp, &download, cid, sid, msg_id, downloads).await;
+                            download::start_download(tx, &sftp, &download, cid, sid, msg_id, downloads).await;
                         }
                         SFTPCommand::DownloadChunk { chunk, msg_id } => {
                             debug!("sftp download chunk command received for download_id {}: {msg_id:?}", chunk.download_id);
-                            download::download_file_chunk(&tx, cid, sid, msg_id, chunk.download_id, chunk.chunk_index, downloads).await;
+                            download::download_file_chunk(tx, cid, sid, msg_id, chunk.download_id, chunk.chunk_index, downloads).await;
                         }
                         SFTPCommand::UploadStart { upload, msg_id } => {
                             debug!("sftp upload start command received for {}/{}: {msg_id:?}", upload.remote_path, upload.filename);
-                            start_upload(&tx, &sftp, &upload, cid, sid, msg_id, uploads).await;
+                            start_upload(tx, &sftp, &upload, cid, sid, msg_id, uploads).await;
                         }
                         SFTPCommand::Upload { chunk, msg_id } => {
                             debug!("sftp upload chunk command received for upload_id {}: {msg_id:?}", chunk.upload_id);
-                            upload_file_chunk(&tx, &sftp, &chunk, cid, sid, msg_id, uploads).await;
+                            upload_file_chunk(tx, &sftp, &chunk, cid, sid, msg_id, uploads).await;
                         }
                         SFTPCommand::Delete { data, msg_id } => {
                             debug!("sftp delete command received for {}/{}: {msg_id:?}", data.path, data.filename);
-                            delete_file(&tx, &sftp, &data, cid, sid, msg_id, uploads).await;
+                            delete_file(tx, &sftp, &data, cid, sid, msg_id, uploads).await;
                         }
                     }
                 }
