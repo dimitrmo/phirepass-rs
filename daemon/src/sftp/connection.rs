@@ -1,10 +1,10 @@
-use crate::sftp::{SFTPActiveDownloads, SFTPActiveUploads};
 use crate::sftp::actions::delete::delete_file;
 use crate::sftp::actions::download;
 use crate::sftp::actions::list_dir::send_directory_listing;
 use crate::sftp::actions::upload::{start_upload, upload_file_chunk};
 use crate::sftp::client::SFTPClient;
 use crate::sftp::session::SFTPCommand;
+use crate::sftp::{SFTPActiveDownloads, SFTPActiveUploads};
 use log::{debug, info};
 use phirepass_common::protocol::common::Frame;
 use russh::client::Handle;

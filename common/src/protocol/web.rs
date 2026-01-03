@@ -1,8 +1,7 @@
 use crate::protocol::common::FrameError;
 use crate::protocol::sftp::{
-    SFTPDelete, SFTPDownloadChunk, SFTPDownloadStart, SFTPDownloadStartResponse,
-    SFTPListItem, SFTPUploadChunk, SFTPUploadStart,
-    SFTPUploadStartResponse,
+    SFTPDelete, SFTPDownloadChunk, SFTPDownloadStart, SFTPDownloadStartResponse, SFTPListItem,
+    SFTPUploadChunk, SFTPUploadStart, SFTPUploadStartResponse,
 };
 use serde::{Deserialize, Serialize};
 
@@ -72,6 +71,14 @@ pub enum WebFrameData {
         response: SFTPDownloadStartResponse,
     },
 
+    SFTPDownloadChunkRequest {
+        node_id: String,
+        sid: u32,
+        msg_id: Option<u32>,
+        download_id: u32,
+        chunk_index: u32,
+    },
+
     SFTPDownloadChunk {
         sid: u32,
         msg_id: Option<u32>,
@@ -125,12 +132,13 @@ impl WebFrameData {
             WebFrameData::SFTPListItems { .. } => 41,
             WebFrameData::SFTPDownloadStart { .. } => 42,
             WebFrameData::SFTPDownloadStartResponse { .. } => 43,
-            WebFrameData::SFTPDownloadChunk { .. } => 44,
-            WebFrameData::SFTPUploadStart { .. } => 45,
-            WebFrameData::SFTPUploadStartResponse { .. } => 46,
-            WebFrameData::SFTPUpload { .. } => 47,
-            WebFrameData::SFTPDelete { .. } => 48,
-            WebFrameData::Error { .. } => 49,
+            WebFrameData::SFTPDownloadChunkRequest { .. } => 44,
+            WebFrameData::SFTPDownloadChunk { .. } => 45,
+            WebFrameData::SFTPUploadStart { .. } => 46,
+            WebFrameData::SFTPUploadStartResponse { .. } => 47,
+            WebFrameData::SFTPUpload { .. } => 48,
+            WebFrameData::SFTPDelete { .. } => 49,
+            WebFrameData::Error { .. } => 50,
         }
     }
 }

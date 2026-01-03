@@ -26,7 +26,7 @@ pub async fn start_upload(
         format!("{}/{}", upload.remote_path, upload.filename)
     };
 
-    debug!(
+    info!(
         "starting upload for file {file_path} ({} bytes, {} chunks)",
         upload.total_size, upload.total_chunks
     );

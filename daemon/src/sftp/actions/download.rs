@@ -1,11 +1,13 @@
 use crate::sftp::{
-    cleanup_abandoned_downloads, FileDownload, SFTPActiveDownloads, CHUNK_SIZE,
+    CHUNK_SIZE, FileDownload, SFTPActiveDownloads, cleanup_abandoned_downloads,
     generate_download_id,
 };
 use log::{debug, info, warn};
 use phirepass_common::protocol::common::{Frame, FrameError};
 use phirepass_common::protocol::node::NodeFrameData;
-use phirepass_common::protocol::sftp::{SFTPDownloadChunk, SFTPDownloadStart, SFTPDownloadStartResponse};
+use phirepass_common::protocol::sftp::{
+    SFTPDownloadChunk, SFTPDownloadStart, SFTPDownloadStartResponse,
+};
 use phirepass_common::protocol::web::WebFrameData;
 use russh_sftp::client::SftpSession;
 use std::time::SystemTime;
@@ -21,17 +23,15 @@ pub async fn start_download(
     msg_id: Option<u32>,
     downloads: &SFTPActiveDownloads,
 ) {
-    // Clean up any abandoned downloads before starting a new one
     cleanup_abandoned_downloads(downloads).await;
 
-    // Build the full file path
     let file_path = if download.path.ends_with('/') {
         format!("{}{}", download.path, download.filename)
     } else {
         format!("{}/{}", download.path, download.filename)
     };
 
-    debug!("starting download: {file_path}");
+    info!("starting download: {file_path}");
 
     // Get file metadata to determine size
     let metadata = match sftp_session.metadata(&file_path).await {
@@ -182,7 +182,9 @@ pub async fn download_file_chunk(
                         )
                         .await
                     {
-                        warn!("failed to send chunk {chunk_index} for download_id {download_id}: {err}");
+                        warn!(
+                            "failed to send chunk {chunk_index} for download_id {download_id}: {err}"
+                        );
                     }
                 }
                 Err(err) => {

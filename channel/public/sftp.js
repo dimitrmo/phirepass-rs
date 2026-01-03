@@ -453,12 +453,33 @@ export class SFTPBrowser {
     }
 
     requestAllDownloadChunks(msgId, download_id, total_chunks) {
+        // Verify socket is available before scheduling any requests
+        if (!this.socket) {
+            console.error(`Cannot request chunks: socket is null for msgId ${msgId}`);
+            this.activeDownloads.delete(msgId);
+            this.hideLoader();
+            return;
+        }
+
+        // Capture socket reference to avoid it becoming null during setTimeout
+        const socket = this.socket;
+        const selectedNode = this.selectedNode;
+        const sessionId = this.sessionId;
+
         // Request chunks sequentially or with rate limiting
         for (let i = 0; i < total_chunks; i++) {
             setTimeout(() => {
-                this.socket.send_sftp_download_chunk(
-                    this.selectedNode,
-                    this.sessionId,
+                // Use captured references instead of this.socket
+                if (!socket) {
+                    console.error(`Socket disconnected during download chunk request for msgId ${msgId}`);
+                    this.activeDownloads.delete(msgId);
+                    this.hideLoader();
+                    return;
+                }
+
+                socket.send_sftp_download_chunk(
+                    selectedNode,
+                    sessionId,
                     download_id,
                     i,
                     msgId
@@ -852,6 +873,12 @@ export class SFTPBrowser {
         const download = this.activeDownloads.get(msgId);
         if (!download) {
             console.warn(`Received download chunk for unknown download msgId: ${msgId}`);
+            return;
+        }
+
+        // Safety check: ensure download metadata is set
+        if (!download.total_chunks || !download.total_size) {
+            console.warn(`Received chunk before download metadata was set for msgId: ${msgId}`);
             return;
         }
 

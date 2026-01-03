@@ -287,16 +287,12 @@ impl Channel {
         chunk_index: u32,
         msg_id: Option<u32>,
     ) {
-        let chunk = phirepass_common::protocol::sftp::SFTPDownloadChunk {
-            download_id,
-            chunk_index,
-            chunk_size: 0, // Server will set the actual size
-            data: vec![],
-        };
-        self.send_frame_data(WebFrameData::SFTPDownloadChunk {
+        self.send_frame_data(WebFrameData::SFTPDownloadChunkRequest {
+            node_id,
             sid,
             msg_id,
-            chunk,
+            download_id,
+            chunk_index,
         })
     }
 

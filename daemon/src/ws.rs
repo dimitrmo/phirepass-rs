@@ -1,7 +1,7 @@
 use crate::env::{Env, SSHAuthMethod};
-use crate::sftp::{SFTPActiveDownloads, SFTPActiveUploads};
 use crate::sftp::connection::{SFTPConfig, SFTPConfigAuth, SFTPConnection};
 use crate::sftp::session::{SFTPCommand, SFTPSessionHandle};
+use crate::sftp::{SFTPActiveDownloads, SFTPActiveUploads};
 use crate::ssh::connection::{SSHConfig, SSHConfigAuth, SSHConnection};
 use crate::ssh::session::{SSHCommand, SSHSessionHandle};
 use anyhow::anyhow;
@@ -216,7 +216,10 @@ async fn spawn_reader_task(
 
                     debug!("received node frame: {data:?}");
 
-                    handle_message(&target, data, &sender, &config, &sessions, &uploads, &downloads).await;
+                    handle_message(
+                        &target, data, &sender, &config, &sessions, &uploads, &downloads,
+                    )
+                    .await;
                 }
                 Ok(Message::Close(reason)) => {
                     info!("received close message: {reason:?}");
@@ -441,13 +444,34 @@ async fn handle_message(
                 warn!("failed to forward sftp download start data: {err}");
             }
         }
+        NodeFrameData::SFTPDownloadChunkRequest {
+            cid,
+            sid,
+            msg_id,
+            download_id,
+            chunk_index,
+        } => {
+            if let Err(err) = send_sftp_download_chunk_request(
+                cid,
+                sid,
+                msg_id,
+                download_id,
+                chunk_index,
+                &sessions,
+            )
+            .await
+            {
+                warn!("failed to handle sftp download chunk request: {err}");
+            }
+        }
         NodeFrameData::SFTPDownloadChunk {
             cid,
             sid,
             msg_id,
             chunk,
         } => {
-            if let Err(err) = send_sftp_download_chunk_data(cid, sid, msg_id, chunk, &sessions).await
+            if let Err(err) =
+                send_sftp_download_chunk_data(cid, sid, msg_id, chunk, &sessions).await
             {
                 warn!("failed to forward sftp download chunk data: {err}");
             }
@@ -495,7 +519,6 @@ async fn send_sftp_list_data(
         .await
         .map_err(|err| anyhow!(err))
 }
-
 
 async fn send_sftp_upload_start_data(
     cid: String,
@@ -613,6 +636,44 @@ async fn send_sftp_download_start_data(
 
     stdin
         .send(SFTPCommand::DownloadStart { download, msg_id })
+        .await
+        .map_err(|err| anyhow!(err))
+}
+
+async fn send_sftp_download_chunk_request(
+    cid: String,
+    sid: u32,
+    msg_id: Option<u32>,
+    download_id: u32,
+    chunk_index: u32,
+    sessions: &TunnelSessions,
+) -> anyhow::Result<()> {
+    let connection_id = cid.clone();
+
+    let stdin = {
+        let sessions = sessions.lock().await;
+        sessions.get(&(cid, sid)).map(|s| s.get_stdin())
+    };
+
+    let Some(stdin) = stdin else {
+        anyhow::bail!(format!("no session found for connection {connection_id}"))
+    };
+
+    let SessionCommand::SFTP(stdin) = stdin else {
+        anyhow::bail!(format!(
+            "no sftp tunnel found for connection {connection_id}"
+        ))
+    };
+
+    let chunk = phirepass_common::protocol::sftp::SFTPDownloadChunk {
+        download_id,
+        chunk_index,
+        chunk_size: 0,
+        data: vec![],
+    };
+
+    stdin
+        .send(SFTPCommand::DownloadChunk { chunk, msg_id })
         .await
         .map_err(|err| anyhow!(err))
 }

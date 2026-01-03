@@ -1,3 +1,4 @@
+use log::info;
 use russh_sftp::client::fs::File;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -46,6 +47,8 @@ pub fn generate_download_id() -> u32 {
 }
 
 pub async fn cleanup_abandoned_uploads(uploads: &SFTPActiveUploads) {
+    info!("cleaning up abandoned uploads");
+
     const TIMEOUT: Duration = Duration::from_secs(15 * 60); // 15 minutes
 
     let now = SystemTime::now();
@@ -76,6 +79,8 @@ pub async fn cleanup_abandoned_uploads(uploads: &SFTPActiveUploads) {
 }
 
 pub async fn cleanup_abandoned_downloads(downloads: &SFTPActiveDownloads) {
+    info!("cleaning up abandoned downloads");
+
     const TIMEOUT: Duration = Duration::from_secs(15 * 60); // 15 minutes
 
     let now = SystemTime::now();
@@ -98,7 +103,9 @@ pub async fn cleanup_abandoned_downloads(downloads: &SFTPActiveDownloads) {
         let mut downloads = downloads.lock().await;
         for key in keys_to_remove {
             log::info!("cleaning up abandoned download: {:?}", key);
-            downloads.remove(&key);
+            if let Some(file_download) = downloads.remove(&key) {
+                let _ = file_download.sftp_file.sync_all().await;
+            }
         }
     }
 }
