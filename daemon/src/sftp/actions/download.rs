@@ -226,7 +226,7 @@ pub async fn download_file_chunk(
                     NodeFrameData::WebFrame {
                         frame: WebFrameData::Error {
                             kind: FrameError::Generic,
-                            message: format!("Download not found or expired"),
+                            message: "Download not found or expired".to_string(),
                             msg_id,
                         },
                         sid,

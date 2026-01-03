@@ -22,9 +22,10 @@ pub struct FileUpload {
 
 pub struct FileDownload {
     pub filename: String,
+    #[allow(dead_code)]
     pub total_size: u64,
     pub total_chunks: u32,
-    pub sftp_file: russh_sftp::client::fs::File,
+    pub sftp_file: File,
     #[allow(dead_code)]
     pub started_at: SystemTime,
     pub last_updated: SystemTime,
@@ -76,7 +77,7 @@ pub async fn cleanup_abandoned_uploads(uploads: &SFTPActiveUploads) {
 
 pub async fn cleanup_abandoned_downloads(downloads: &SFTPActiveDownloads) {
     const TIMEOUT: Duration = Duration::from_secs(15 * 60); // 15 minutes
-    
+
     let now = SystemTime::now();
     let keys_to_remove: Vec<(String, u32)> = {
         let entries = downloads.lock().await;

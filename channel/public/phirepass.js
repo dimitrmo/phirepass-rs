@@ -465,6 +465,22 @@ function connectSFTP() {
                     }
                 }
                 break;
+            case "SFTPDownloadStartResponse":
+                if (sftpBrowser && currentTab === "sftp") {
+                    const response = frame.data.web.response;
+                    if (response && response.download_id !== undefined) {
+                        sftpBrowser.handleDownloadStartResponse(frame.data.web.msg_id, response.download_id, response.total_size, response.total_chunks);
+                    }
+                }
+                break;
+            case "SFTPDownloadChunk":
+                if (sftpBrowser && currentTab === "sftp") {
+                    const chunk = frame.data.web.chunk;
+                    if (chunk) {
+                        sftpBrowser.handleDownloadChunk(frame.data.web.msg_id, chunk);
+                    }
+                }
+                break;
             case "SFTPUploadStartResponse":
                 if (sftpBrowser && currentTab === "sftp") {
                     const response = frame.data.web.response;

@@ -399,13 +399,64 @@ export class SFTPBrowser {
             chunks: new Map(),
             total_chunks: null,
             total_size: null,
+            download_id: null,
             startTime: Date.now(),
             lastUpdateTime: Date.now(),
             lastReceivedBytes: 0
         });
 
-        // Send download request
-        this.socket.send_sftp_download(this.selectedNode, this.sessionId, this.currentPath, filename, msgId);
+        // Initialize pending download starts tracker if needed
+        if (!this.pendingDownloadStarts) {
+            this.pendingDownloadStarts = new Map();
+        }
+
+        // Create a promise to wait for download start response
+        const startPromise = new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                reject(new Error("Download start timeout"));
+                this.pendingDownloadStarts.delete(msgId);
+            }, 10000);
+
+            this.pendingDownloadStarts.set(msgId, { resolve, reject, timeout });
+        });
+
+        // Send download start request
+        this.socket.send_sftp_download_start(this.selectedNode, this.sessionId, this.currentPath, filename, msgId);
+
+        // Handle the response
+        startPromise
+            .then(({ download_id, total_size, total_chunks }) => {
+                const download = this.activeDownloads.get(msgId);
+                if (download) {
+                    download.download_id = download_id;
+                    download.total_size = total_size;
+                    download.total_chunks = total_chunks;
+                    console.log(`Download ${filename}: ${total_chunks} chunks, ${this.formatBytes(total_size)}`);
+                    
+                    // Request all chunks from the daemon
+                    this.requestAllDownloadChunks(msgId, download_id, total_chunks);
+                }
+            })
+            .catch(err => {
+                console.error(`Download start failed: ${err}`);
+                this.activeDownloads.delete(msgId);
+                this.hideLoader();
+            });
+    }
+
+    requestAllDownloadChunks(msgId, download_id, total_chunks) {
+        // Request chunks sequentially or with rate limiting
+        for (let i = 0; i < total_chunks; i++) {
+            setTimeout(() => {
+                this.socket.send_sftp_download_chunk(
+                    this.selectedNode,
+                    this.sessionId,
+                    download_id,
+                    i,
+                    msgId
+                );
+            }, i * 100); // 100ms delay between chunk requests
+        }
     }
 
     handleFileChunk(msgId, chunk) {
@@ -810,6 +861,49 @@ export class SFTPBrowser {
             clearTimeout(pending.timeout);
             pending.resolve(upload_id);
             this.pendingUploadStarts.delete(msgId);
+        }
+    }
+
+    handleDownloadStartResponse(msgId, download_id, total_size, total_chunks) {
+        if (!this.pendingDownloadStarts) {
+            this.pendingDownloadStarts = new Map();
+        }
+
+        const pending = this.pendingDownloadStarts.get(msgId);
+        if (pending) {
+            clearTimeout(pending.timeout);
+            pending.resolve({ download_id, total_size, total_chunks });
+            this.pendingDownloadStarts.delete(msgId);
+        }
+    }
+
+    handleDownloadChunk(msgId, chunk) {
+        const download = this.activeDownloads.get(msgId);
+        if (!download) {
+            console.warn(`Received download chunk for unknown download msgId: ${msgId}`);
+            return;
+        }
+
+        // Convert chunk data to Uint8Array
+        const chunkData = new Uint8Array(chunk.data);
+
+        // Store chunk
+        download.chunks.set(chunk.chunk_index, chunkData);
+
+        // Update progress
+        const progress = (download.chunks.size / download.total_chunks) * 100;
+        const receivedSize = Array.from(download.chunks.values()).reduce((sum, data) => sum + data.length, 0);
+        const currentTime = Date.now();
+        const elapsedSeconds = (currentTime - download.startTime) / 1000;
+        const speed = elapsedSeconds > 0 ? receivedSize / elapsedSeconds : 0;
+        const eta = speed > 0 ? (download.total_size - receivedSize) / speed : 0;
+        const infoText = `${this.formatBytes(receivedSize)} / ${this.formatBytes(download.total_size)} • ↓ ${this.formatBytes(speed)}/s • ETA: ${this.formatDuration(eta)}`;
+
+        this.setLoaderProgress(progress, infoText);
+
+        // Check if download complete
+        if (download.chunks.size === download.total_chunks) {
+            this.finalizeDownload(msgId);
         }
     }
 }
