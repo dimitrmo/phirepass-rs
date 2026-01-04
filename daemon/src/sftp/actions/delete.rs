@@ -31,13 +31,10 @@ pub async fn delete_file(
 
     // Cancel any active uploads for this file
     let temp_path = format!("{}.tmp", file_path);
-    {
-        let mut uploads = uploads.lock().await;
-        // Remove all uploads for this cid that match the temp_path
-        uploads.retain(|(upload_cid, _), file_upload| {
-            !(upload_cid == &cid && file_upload.temp_path == temp_path)
-        });
-    }
+    // Remove all uploads for this cid that match the temp_path
+    uploads.retain(|(upload_cid, _), file_upload| {
+        !(upload_cid == &cid && file_upload.temp_path == temp_path)
+    });
 
     // Attempt to delete the file
     match sftp_session.remove_file(&file_path).await {

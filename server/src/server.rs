@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -9,6 +8,7 @@ use crate::node::ws_node_handler;
 use crate::web::ws_web_handler;
 use axum::Router;
 use axum::routing::get;
+use dashmap::DashMap;
 use log::{info, warn};
 use phirepass_common::stats::Stats;
 use tokio::signal;
@@ -22,9 +22,9 @@ pub async fn start(config: Env) -> anyhow::Result<()> {
 
     let state = AppState {
         env: Arc::new(config),
-        nodes: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
-        connections: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
-        tunnel_sessions: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
+        nodes: Arc::new(DashMap::new()),
+        connections: Arc::new(DashMap::new()),
+        tunnel_sessions: Arc::new(DashMap::new()),
     };
 
     let conns_task = spawn_stats_connections_logger(&state, stats_refresh_interval as u64);
@@ -95,9 +95,7 @@ fn spawn_stats_connections_logger(state: &AppState, interval: u64) -> tokio::tas
         let mut interval = tokio::time::interval(Duration::from_secs(interval));
         loop {
             interval.tick().await;
-            let connections = connections.read().await;
             info!("active web connections: {}", connections.len());
-            let nodes = nodes.read().await;
             info!("active nodes connections: {}", nodes.len());
         }
     })
@@ -112,7 +110,7 @@ fn spawn_stats_logger(
         loop {
             tokio::select! {
                 _ = interval.tick() => {
-                    match Stats::gather() {
+                    match Stats::refresh() {
                         Some(stats) => info!("server stats\n{}", stats.log_line()),
                         None => warn!("stats: unable to read process metrics"),
                     }

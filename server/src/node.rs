@@ -34,9 +34,8 @@ async fn handle_node_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
     let (tx, mut rx) = mpsc::channel::<NodeFrameData>(256);
 
     {
-        let mut nodes = state.nodes.write().await;
-        nodes.insert(id, NodeConnection::new(ip, tx.clone()));
-        let total = nodes.len();
+        state.nodes.insert(id, NodeConnection::new(ip, tx.clone()));
+        let total = state.nodes.len();
         info!("node {id} ({ip}) connected (total: {total})", id = id);
     }
 
@@ -166,9 +165,11 @@ async fn get_connection_id_by_sid(
     target: &Ulid,
 ) -> anyhow::Result<Ulid> {
     let key = crate::http::TunnelSessionKey::new(*target, sid);
-    let sessions = state.tunnel_sessions.read().await;
-    let (client_id, node_id) = match sessions.get(&key) {
-        Some((client_id, node_id)) => (client_id, node_id),
+    let (client_id, node_id) = match state.tunnel_sessions.get(&key) {
+        Some(entry) => {
+            let (cid, nid) = entry.value();
+            (*cid, *nid)
+        }
         _ => {
             anyhow::bail!("node not found for session id {sid}")
         }
@@ -178,7 +179,7 @@ async fn get_connection_id_by_sid(
         anyhow::bail!("correct node_id was not found for sid {sid}")
     }
 
-    Ok(*client_id)
+    Ok(client_id)
 }
 
 async fn handle_frame_response(state: &AppState, frame: WebFrameData, sid: u32, node_id: &Ulid) {
@@ -192,10 +193,10 @@ async fn handle_frame_response(state: &AppState, frame: WebFrameData, sid: u32, 
         }
     };
 
-    let tx = {
-        let connections = state.connections.read().await;
-        connections.get(&client_id).map(|info| info.tx.clone())
-    };
+    let tx = state
+        .connections
+        .get(&client_id)
+        .map(|info| info.tx.clone());
 
     let Some(tx) = tx else {
         warn!("tx for client not found {node_id}");
@@ -236,16 +237,14 @@ async fn handle_tunnel_closed(
 ) {
     debug!("handling tunnel closed for connection {cid} with session {sid}");
 
-    let connections = state.connections.read().await;
-    let Some(connection) = connections.get(&cid) else {
+    let Some(connection) = state.connections.get(&cid) else {
         warn!("connection {cid} not found");
         return;
     };
 
     {
         let key = crate::http::TunnelSessionKey::new(*node_id, sid);
-        let mut tunnel_sessions = state.tunnel_sessions.write().await;
-        tunnel_sessions.remove(&key);
+        state.tunnel_sessions.remove(&key);
     }
 
     match connection
@@ -272,16 +271,14 @@ async fn handle_tunnel_opened(
 ) {
     debug!("handling tunnel opened for connection {cid} with session {sid}");
 
-    let connections = state.connections.read().await;
-    let Some(connection) = connections.get(&cid) else {
+    let Some(connection) = state.connections.get(&cid) else {
         warn!("connection {cid} not found");
         return;
     };
 
     {
         let key = crate::http::TunnelSessionKey::new(*node_id, sid);
-        let mut tunnel_sessions = state.tunnel_sessions.write().await;
-        tunnel_sessions.insert(key, (cid, *node_id));
+        state.tunnel_sessions.insert(key, (cid, *node_id));
     }
 
     match connection
@@ -299,21 +296,18 @@ async fn handle_tunnel_opened(
 }
 
 async fn disconnect_node(state: &AppState, id: Ulid) {
-    let mut nodes = state.nodes.write().await;
-    if let Some(info) = nodes.remove(&id) {
+    if let Some((_, info)) = state.nodes.remove(&id) {
         let alive = info.node.connected_at.elapsed();
+        let total = state.nodes.len();
         info!(
             "node {id} ({}) removed after {:.1?} (total: {})",
-            info.node.ip,
-            alive,
-            nodes.len()
+            info.node.ip, alive, total
         );
     }
 }
 
 async fn update_node_heartbeat(state: &AppState, id: &Ulid, stats: Option<Stats>) {
-    let mut nodes = state.nodes.write().await;
-    if let Some(info) = nodes.get_mut(id) {
+    if let Some(mut info) = state.nodes.get_mut(id) {
         let since_last = info.node.last_heartbeat.elapsed();
         info.node.last_heartbeat = SystemTime::now();
         if let Some(stats) = stats {

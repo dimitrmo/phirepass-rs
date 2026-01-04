@@ -105,6 +105,12 @@ pub enum WebFrameData {
         chunk: SFTPUploadChunk,
     },
 
+    SFTPUploadChunkAck {
+        sid: u32,
+        upload_id: u32,
+        chunk_index: u32,
+    },
+
     SFTPDelete {
         node_id: String,
         sid: u32,
@@ -137,8 +143,9 @@ impl WebFrameData {
             WebFrameData::SFTPUploadStart { .. } => 46,
             WebFrameData::SFTPUploadStartResponse { .. } => 47,
             WebFrameData::SFTPUpload { .. } => 48,
-            WebFrameData::SFTPDelete { .. } => 49,
-            WebFrameData::Error { .. } => 50,
+            WebFrameData::SFTPUploadChunkAck { .. } => 49,
+            WebFrameData::SFTPDelete { .. } => 50,
+            WebFrameData::Error { .. } => 51,
         }
     }
 }

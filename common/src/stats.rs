@@ -27,6 +27,8 @@ pub fn format_mem(bytes: u64) -> String {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Stats {
+    // metadata
+    pub last_refreshed_secs: u64,
     // process
     pub proc_id: String,
     pub proc_threads: usize,
@@ -54,6 +56,7 @@ static HOST_OS_INFO: OnceLock<String> = OnceLock::new();
 static SYS_INFO: OnceLock<Mutex<System>> = OnceLock::new();
 static CONNECTIONS_CACHE: OnceLock<Mutex<ConnectionCache>> = OnceLock::new();
 static PROCESS_COUNT_CACHE: OnceLock<Mutex<ProcessCountCache>> = OnceLock::new();
+static STATS_CACHE: OnceLock<Mutex<StatsCache>> = OnceLock::new();
 
 const SOCKETS_CACHE_TTL: Duration = Duration::from_secs(30);
 const PROCESS_COUNT_TTL: Duration = Duration::from_secs(60);
@@ -70,7 +73,57 @@ struct ProcessCountCache {
     total: usize,
 }
 
+#[derive(Debug, Clone)]
+struct StatsCache {
+    stats: Option<Stats>,
+    last_refresh: Instant,
+    refresh_start: Instant,
+}
+
 impl Stats {
+    /// Get the cached stats without refreshing.
+    /// Returns None if stats have not been gathered yet.
+    pub fn get() -> Option<Stats> {
+        let cache = STATS_CACHE.get_or_init(|| {
+            Mutex::new(StatsCache {
+                stats: None,
+                last_refresh: Instant::now(),
+                refresh_start: Instant::now(),
+            })
+        });
+        let cache = cache.lock().ok()?;
+        let mut stats = cache.stats.clone()?;
+
+        // Update last_refreshed_secs dynamically based on elapsed time
+        stats.last_refreshed_secs = cache.last_refresh.elapsed().as_secs();
+        Some(stats)
+    }
+
+    /// Refresh and update the cached stats.
+    /// Only the stats logger task should call this periodically (every 60 seconds).
+    pub fn refresh() -> Option<Self> {
+        let refresh_start = Instant::now();
+        let mut stats = Self::gather()?;
+
+        let cache = STATS_CACHE.get_or_init(|| {
+            Mutex::new(StatsCache {
+                stats: None,
+                last_refresh: Instant::now(),
+                refresh_start: Instant::now(),
+            })
+        });
+
+        if let Ok(mut cache) = cache.lock() {
+            stats.last_refreshed_secs = 0; // Just refreshed, so 0 seconds ago
+            cache.stats = Some(stats.clone());
+            cache.last_refresh = Instant::now();
+            cache.refresh_start = refresh_start;
+            Some(stats)
+        } else {
+            Some(stats)
+        }
+    }
+
     pub fn gather() -> Option<Self> {
         // Keep a single System instance and refresh only the data we need to reduce overhead.
         let sys = SYS_INFO.get_or_init(|| Mutex::new(System::new_all()));
@@ -108,6 +161,7 @@ impl Stats {
         let host_processes = Self::process_count(&mut sys);
 
         Some(Self {
+            last_refreshed_secs: 0,
             proc_id: pid.to_string(),
             host_name: hostname,
             host_ip,

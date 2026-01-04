@@ -33,9 +33,8 @@ async fn handle_web_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
     let (tx, mut rx) = mpsc::channel::<WebFrameData>(256);
 
     {
-        let mut connections = state.connections.write().await;
-        connections.insert(cid, WebConnection::new(ip, tx));
-        let total = connections.len();
+        state.connections.insert(cid, WebConnection::new(ip, tx));
+        let total = state.connections.len();
         info!("connection {cid} ({ip}) established (total: {total})");
     }
 
@@ -197,6 +196,12 @@ async fn handle_web_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
                         warn!("received sftp list items which is invalid if sent by web client");
                         break;
                     }
+                    WebFrameData::SFTPUploadChunkAck { .. } => {
+                        warn!(
+                            "received sftp upload chunk ack which is invalid if sent by web client"
+                        );
+                        break;
+                    }
                     WebFrameData::SFTPUploadStartResponse { .. } => {
                         warn!(
                             "received sftp upload start response which is invalid if sent by web client"
@@ -234,14 +239,12 @@ async fn handle_web_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
 }
 
 async fn disconnect_web_client(state: &AppState, cid: Ulid) {
-    let mut connections = state.connections.write().await;
-    if let Some(info) = connections.remove(&cid) {
+    if let Some((_, info)) = state.connections.remove(&cid) {
         let alive = info.connected_at.elapsed();
+        let total = state.connections.len();
         info!(
             "web client {cid} ({}) removed after {:.1?} (total: {})",
-            info.ip,
-            alive,
-            connections.len()
+            info.ip, alive, total
         );
     }
 
@@ -249,8 +252,7 @@ async fn disconnect_web_client(state: &AppState, cid: Ulid) {
 }
 
 async fn update_web_heartbeat(state: &AppState, cid: &Ulid) {
-    let mut connections = state.connections.write().await;
-    if let Some(info) = connections.get_mut(cid) {
+    if let Some(mut info) = state.connections.get_mut(cid) {
         let since_last = info
             .last_heartbeat
             .elapsed()
@@ -276,9 +278,11 @@ async fn get_node_id_by_cid(
         Ulid::from_string(&node_id).map_err(|_| anyhow::anyhow!("invalid node_id format"))?;
 
     let key = crate::http::TunnelSessionKey::new(node_ulid, sid);
-    let sessions = state.tunnel_sessions.read().await;
-    let (client_id, node_id) = match sessions.get(&key) {
-        Some((client_id, node_id)) => (client_id, node_id),
+    let (client_id, node_id) = match state.tunnel_sessions.get(&key) {
+        Some(entry) => {
+            let (cid, nid) = entry.value();
+            (*cid, *nid)
+        }
         _ => {
             anyhow::bail!("node not found for session id {sid}")
         }
@@ -288,7 +292,7 @@ async fn get_node_id_by_cid(
         anyhow::bail!("correct cid was not found for sid {sid}")
     }
 
-    Ok(*node_id)
+    Ok(node_id)
 }
 
 async fn handle_web_tunnel_data(
@@ -309,10 +313,7 @@ async fn handle_web_tunnel_data(
         }
     };
 
-    let tx = {
-        let nodes = state.nodes.read().await;
-        nodes.get(&node_id).map(|info| info.tx.clone())
-    };
+    let tx = state.nodes.get(&node_id).map(|info| info.tx.clone());
 
     let Some(tx) = tx else {
         warn!("tx for node not found {node_id}");
@@ -353,10 +354,7 @@ async fn handle_sftp_list(
         }
     };
 
-    let tx = {
-        let nodes = state.nodes.read().await;
-        nodes.get(&node_id).map(|info| info.tx.clone())
-    };
+    let tx = state.nodes.get(&node_id).map(|info| info.tx.clone());
 
     let Some(tx) = tx else {
         warn!("tx for node not found {node_id}");
@@ -395,10 +393,7 @@ async fn handle_sftp_download_start(
         }
     };
 
-    let tx = {
-        let nodes = state.nodes.read().await;
-        nodes.get(&node_id).map(|info| info.tx.clone())
-    };
+    let tx = state.nodes.get(&node_id).map(|info| info.tx.clone());
 
     let Some(tx) = tx else {
         warn!("tx for node not found {node_id}");
@@ -438,10 +433,7 @@ async fn handle_sftp_download_chunk_request(
         }
     };
 
-    let tx = {
-        let nodes = state.nodes.read().await;
-        nodes.get(&node_id).map(|info| info.tx.clone())
-    };
+    let tx = state.nodes.get(&node_id).map(|info| info.tx.clone());
 
     let Some(tx) = tx else {
         warn!("tx for node not found {node_id}");
@@ -483,10 +475,7 @@ async fn handle_sftp_upload_start(
         }
     };
 
-    let tx = {
-        let nodes = state.nodes.read().await;
-        nodes.get(&node_id).map(|info| info.tx.clone())
-    };
+    let tx = state.nodes.get(&node_id).map(|info| info.tx.clone());
 
     let Some(tx) = tx else {
         warn!("tx for node not found {node_id}");
@@ -525,10 +514,7 @@ async fn handle_sftp_upload(
         }
     };
 
-    let tx = {
-        let nodes = state.nodes.read().await;
-        nodes.get(&node_id).map(|info| info.tx.clone())
-    };
+    let tx = state.nodes.get(&node_id).map(|info| info.tx.clone());
 
     let Some(tx) = tx else {
         warn!("tx for node not found {node_id}");
@@ -567,10 +553,7 @@ async fn handle_sftp_delete(
         }
     };
 
-    let tx = {
-        let nodes = state.nodes.read().await;
-        nodes.get(&node_id).map(|info| info.tx.clone())
-    };
+    let tx = state.nodes.get(&node_id).map(|info| info.tx.clone());
 
     let Some(tx) = tx else {
         warn!("tx for node not found {node_id}");
@@ -609,10 +592,7 @@ async fn handle_web_resize(
         }
     };
 
-    let tx = {
-        let nodes = state.nodes.read().await;
-        nodes.get(&node_id).map(|info| info.tx.clone())
-    };
+    let tx = state.nodes.get(&node_id).map(|info| info.tx.clone());
 
     let Some(tx) = tx else {
         warn!("tx for node not found {node_id}");
@@ -655,10 +635,7 @@ async fn handle_web_open_tunnel(
         }
     };
 
-    let node_tx = {
-        let nodes = state.nodes.read().await;
-        nodes.get(&node_id).map(|info| info.tx.clone())
-    };
+    let node_tx = state.nodes.get(&node_id).map(|info| info.tx.clone());
 
     let Some(tx) = node_tx else {
         warn!("tx for node not found {node_id}");
@@ -702,8 +679,7 @@ async fn send_requires_username_password_error(
     cid: &Ulid,
     msg_id: Option<u32>,
 ) -> anyhow::Result<()> {
-    let connections = state.connections.read().await;
-    if let Some(wc) = connections.get(cid) {
+    if let Some(wc) = state.connections.get(cid) {
         wc.tx
             .send(WebFrameData::Error {
                 kind: FrameError::RequiresUsernamePassword,
@@ -723,8 +699,7 @@ async fn send_requires_password_error(
     cid: &Ulid,
     msg_id: Option<u32>,
 ) -> anyhow::Result<()> {
-    let connections = state.connections.read().await;
-    if let Some(wc) = connections.get(cid) {
+    if let Some(wc) = state.connections.get(cid) {
         wc.tx
             .send(WebFrameData::Error {
                 kind: FrameError::RequiresPassword,
@@ -740,8 +715,8 @@ async fn send_requires_password_error(
 }
 
 async fn notify_nodes_client_disconnect(state: &AppState, cid: Ulid) {
-    let nodes = state.nodes.read().await;
-    for (node_id, conn) in nodes.iter() {
+    for entry in state.nodes.iter() {
+        let (node_id, conn) = entry.pair();
         match conn
             .tx
             .send(NodeFrameData::ConnectionDisconnect { cid })

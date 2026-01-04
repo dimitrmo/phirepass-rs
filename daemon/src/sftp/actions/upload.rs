@@ -8,7 +8,18 @@ use russh_sftp::client::SftpSession;
 use russh_sftp::protocol::OpenFlags;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc::Sender;
+use tokio::time::{Duration, sleep};
 use ulid::Ulid;
+
+// Upload rate limiting configuration
+// Set UPLOAD_CHUNK_ACK_DELAY_MS to add delay before sending chunk acknowledgments
+// This controls upload speed: 64KB chunk / delay = max speed
+// Examples:
+//   0ms = no limit (full speed)
+//   10ms = ~6.4 MB/s max
+//   50ms = ~1.3 MB/s max
+//   100ms = ~640 KB/s max
+const UPLOAD_CHUNK_ACK_DELAY_MS: u64 = 0;
 
 pub async fn start_upload(
     tx: &Sender<Frame>,
@@ -48,27 +59,24 @@ pub async fn start_upload(
             let upload_id = generate_upload_id();
             let now = std::time::SystemTime::now();
 
-            {
-                // Store the file handle and metadata for subsequent chunks
-                let mut uploads = uploads.lock().await;
-                uploads.insert(
-                    (cid, upload_id),
-                    FileUpload {
-                        filename: upload.filename.clone(),
-                        remote_path: upload.remote_path.clone(),
-                        total_chunks: upload.total_chunks,
-                        total_size: upload.total_size,
-                        sftp_file: file,
-                        temp_path: temp_path.clone(),
-                        started_at: now,
-                        last_updated: now,
-                    },
-                );
-                info!(
-                    "opened file on SFTP for upload: {} (upload_id: {})",
-                    temp_path, upload_id
-                );
-            }
+            // Store the file handle and metadata for subsequent chunks
+            uploads.insert(
+                (cid, upload_id),
+                FileUpload {
+                    filename: upload.filename.clone(),
+                    remote_path: upload.remote_path.clone(),
+                    total_chunks: upload.total_chunks,
+                    total_size: upload.total_size,
+                    sftp_file: file,
+                    temp_path: temp_path.clone(),
+                    started_at: now,
+                    last_updated: now,
+                },
+            );
+            info!(
+                "opened file on SFTP for upload: {} (upload_id: {})",
+                temp_path, upload_id
+            );
 
             // Send upload start response with upload_id
             let _ = tx
@@ -124,7 +132,6 @@ pub async fn upload_file_chunk(
 
     // Check if this is the last chunk
     let is_last_chunk = {
-        let uploads = uploads.lock().await;
         if let Some(file_upload) = uploads.get(&key) {
             chunk.chunk_index + 1 >= file_upload.total_chunks
         } else {
@@ -148,10 +155,7 @@ pub async fn upload_file_chunk(
 
     if is_last_chunk {
         // Last chunk: write final chunk, close, and rename
-        let mut file_upload = {
-            let mut uploads = uploads.lock().await;
-            uploads.remove(&key)
-        };
+        let mut file_upload = uploads.remove(&key).map(|(_, v)| v);
 
         if let Some(ref mut upload) = file_upload {
             if let Err(err) = upload.sftp_file.write_all(&chunk.data).await {
@@ -187,6 +191,21 @@ pub async fn upload_file_chunk(
             match sftp_session.rename(&upload.temp_path, &file_path).await {
                 Ok(_) => {
                     info!("file upload complete: {}", file_path);
+
+                    // Send acknowledgment for the final chunk
+                    let _ = tx
+                        .send(
+                            NodeFrameData::WebFrame {
+                                frame: WebFrameData::SFTPUploadChunkAck {
+                                    sid,
+                                    upload_id: chunk.upload_id,
+                                    chunk_index: chunk.chunk_index,
+                                },
+                                sid,
+                            }
+                            .into(),
+                        )
+                        .await;
                 }
                 Err(err) => {
                     warn!("failed to rename file on SFTP: {}", err);
@@ -226,8 +245,7 @@ pub async fn upload_file_chunk(
         }
     } else {
         // Intermediate chunk: write and continue
-        let mut uploads = uploads.lock().await;
-        if let Some(file_upload) = uploads.get_mut(&key) {
+        if let Some(mut file_upload) = uploads.get_mut(&key) {
             if let Err(err) = file_upload.sftp_file.write_all(&chunk.data).await {
                 warn!(
                     "failed to write chunk {} to SFTP file: {err}",
@@ -255,6 +273,26 @@ pub async fn upload_file_chunk(
                 "appended chunk {} to SFTP file for upload_id {}",
                 chunk.chunk_index, chunk.upload_id
             );
+
+            // Apply rate limiting if configured
+            if UPLOAD_CHUNK_ACK_DELAY_MS > 0 {
+                sleep(Duration::from_millis(UPLOAD_CHUNK_ACK_DELAY_MS)).await;
+            }
+
+            // Send acknowledgment for this chunk
+            let _ = tx
+                .send(
+                    NodeFrameData::WebFrame {
+                        frame: WebFrameData::SFTPUploadChunkAck {
+                            sid,
+                            upload_id: chunk.upload_id,
+                            chunk_index: chunk.chunk_index,
+                        },
+                        sid,
+                    }
+                    .into(),
+                )
+                .await;
         } else {
             warn!(
                 "upload_id {} not found for chunk {}",

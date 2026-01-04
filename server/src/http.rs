@@ -5,9 +5,9 @@ use axum::Json;
 use axum::extract::State;
 use axum::http::{HeaderValue, Method};
 use axum::response::IntoResponse;
+use dashmap::DashMap;
 use phirepass_common::stats::Stats;
 use serde_json::json;
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::SystemTime;
 use tower_http::cors::{Any, CorsLayer};
@@ -27,11 +27,11 @@ impl TunnelSessionKey {
     }
 }
 
-pub type Nodes = Arc<tokio::sync::RwLock<HashMap<Ulid, NodeConnection>>>;
+pub type Nodes = Arc<DashMap<Ulid, NodeConnection>>;
 
-pub type Connections = Arc<tokio::sync::RwLock<HashMap<Ulid, WebConnection>>>;
+pub type Connections = Arc<DashMap<Ulid, WebConnection>>;
 
-pub type TunnelSessions = Arc<tokio::sync::RwLock<HashMap<TunnelSessionKey, (Ulid, Ulid)>>>;
+pub type TunnelSessions = Arc<DashMap<TunnelSessionKey, (Ulid, Ulid)>>;
 
 #[derive(Clone)]
 pub(crate) struct AppState {
@@ -74,14 +74,11 @@ pub async fn get_version() -> impl IntoResponse {
 }
 
 pub async fn get_stats(State(state): State<AppState>) -> impl IntoResponse {
-    let nodes = state.nodes.read().await;
-    let connections = state.connections.read().await;
-
-    let body = match Stats::gather() {
+    let body = match Stats::get() {
         Some(stats) => json!({
             "stats": stats,
-            "nodes": nodes.len(),
-            "connections": connections.len(),
+            "nodes": state.nodes.len(),
+            "connections": state.connections.len(),
         }),
         None => json!({
             "stats": {},
@@ -94,12 +91,13 @@ pub async fn get_stats(State(state): State<AppState>) -> impl IntoResponse {
 }
 
 pub async fn list_nodes(State(state): State<AppState>) -> impl IntoResponse {
-    let nodes = state.nodes.read().await;
     let now = SystemTime::now();
 
-    let data: Vec<_> = nodes
+    let data: Vec<_> = state
+        .nodes
         .iter()
-        .map(|(id, info)| {
+        .map(|entry| {
+            let (id, info) = entry.pair();
             json!({
                 "id": id,
                 "ip": info.node.ip,
@@ -119,12 +117,13 @@ pub async fn list_nodes(State(state): State<AppState>) -> impl IntoResponse {
 }
 
 pub async fn list_connections(State(state): State<AppState>) -> impl IntoResponse {
-    let connections = state.connections.read().await;
     let now = SystemTime::now();
 
-    let data: Vec<_> = connections
+    let data: Vec<_> = state
+        .connections
         .iter()
-        .map(|(id, info)| {
+        .map(|entry| {
+            let (id, info) = entry.pair();
             json!({
                 "id": id,
                 "ip": info.ip,

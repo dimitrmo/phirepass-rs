@@ -433,10 +433,11 @@ export class SFTPBrowser {
                         download.download_id = download_id;
                         download.total_size = total_size;
                         download.total_chunks = total_chunks;
+                        download.nextChunkToRequest = 0;
                         console.log(`Download ${filename}: ${total_chunks} chunks, ${this.formatBytes(total_size)}`);
 
-                        // Request all chunks from the daemon
-                        this.requestAllDownloadChunks(msgId, download_id, total_chunks);
+                        // Request first chunk to start the sequential download
+                        this.requestNextDownloadChunk(msgId);
                     }
                 })
                 .catch(err => {
@@ -452,40 +453,31 @@ export class SFTPBrowser {
         }
     }
 
-    requestAllDownloadChunks(msgId, download_id, total_chunks) {
-        // Verify socket is available before scheduling any requests
+    requestNextDownloadChunk(msgId) {
+        const download = this.activeDownloads.get(msgId);
+        if (!download) {
+            console.warn(`Download ${msgId} not found for next chunk request`);
+            return;
+        }
+
         if (!this.socket) {
-            console.error(`Cannot request chunks: socket is null for msgId ${msgId}`);
+            console.error(`Socket disconnected during download for msgId ${msgId}`);
             this.activeDownloads.delete(msgId);
             this.hideLoader();
             return;
         }
 
-        // Capture socket reference to avoid it becoming null during setTimeout
-        const socket = this.socket;
-        const selectedNode = this.selectedNode;
-        const sessionId = this.sessionId;
+        const chunkIndex = download.nextChunkToRequest;
 
-        // Request chunks sequentially or with rate limiting
-        for (let i = 0; i < total_chunks; i++) {
-            setTimeout(() => {
-                // Use captured references instead of this.socket
-                if (!socket) {
-                    console.error(`Socket disconnected during download chunk request for msgId ${msgId}`);
-                    this.activeDownloads.delete(msgId);
-                    this.hideLoader();
-                    return;
-                }
+        this.socket.send_sftp_download_chunk(
+            this.selectedNode,
+            this.sessionId,
+            download.download_id,
+            chunkIndex,
+            msgId
+        );
 
-                socket.send_sftp_download_chunk(
-                    selectedNode,
-                    sessionId,
-                    download_id,
-                    i,
-                    msgId
-                );
-            }, i * 100); // 100ms delay between chunk requests
-        }
+        download.nextChunkToRequest++;
     }
 
     finalizeDownload(msgId) {
@@ -790,24 +782,35 @@ export class SFTPBrowser {
         let uploadedChunks = 0;
         let uploadedBytes = 0;
         const uploadStart = performance.now();
-        const RATE_BYTES_PER_SEC = 1024 * 1024; // 1 MiB/s cap
+
+        // Initialize pending ACKs tracker
+        this.pendingUploadAcks = this.pendingUploadAcks || new Map();
 
         try {
-            // Step 2: Send chunks using the upload_id
+            // Step 2: Send chunks using the upload_id and wait for ACK
             for (let i = 0; i < totalChunks; i++) {
                 const start = i * CHUNK_SIZE;
                 const end = Math.min(start + CHUNK_SIZE, file.size);
                 const chunkData = new Uint8Array(await file.slice(start, end).arrayBuffer());
 
-                this.socket.send_sftp_upload_chunk(
-                    this.selectedNode,
-                    this.sessionId,
-                    upload_id,
-                    i,
-                    chunkData.length,
-                    Array.from(chunkData),
-                    null  // no msg_id needed for chunks
-                );
+                // Wait for ACK before sending next chunk
+                await new Promise((resolve, reject) => {
+                    const timeout = setTimeout(() => {
+                        reject(new Error(`Chunk ${i} ACK timeout`));
+                    }, 30000); // 30 second timeout per chunk
+
+                    this.pendingUploadAcks.set(`${upload_id}_${i}`, { resolve, reject, timeout });
+
+                    this.socket.send_sftp_upload_chunk(
+                        this.selectedNode,
+                        this.sessionId,
+                        upload_id,
+                        i,
+                        chunkData.length,
+                        Array.from(chunkData),
+                        null  // no msg_id needed for chunks
+                    );
+                });
 
                 uploadedChunks++;
                 uploadedBytes += chunkData.length;
@@ -822,13 +825,6 @@ export class SFTPBrowser {
                 const infoText = `${this.formatBytes(uploadedBytes)} / ${this.formatBytes(file.size)} • ↑ ${this.formatBytes(speed)}/s • ETA ${this.formatDuration(etaSeconds)}`;
 
                 this.setLoaderProgress(progress, infoText);
-
-                // Pacing: ensure average rate stays at or below 1 MiB/s
-                const targetElapsedMs = (uploadedBytes / RATE_BYTES_PER_SEC) * 1000;
-                const waitMs = targetElapsedMs - (performance.now() - uploadStart);
-                if (waitMs > 0) {
-                    await new Promise((resolve) => setTimeout(resolve, waitMs));
-                }
             }
         } catch (err) {
             console.error("Upload failed:", err);
@@ -853,6 +849,20 @@ export class SFTPBrowser {
             clearTimeout(pending.timeout);
             pending.resolve(upload_id);
             this.pendingUploadStarts.delete(msgId);
+        }
+    }
+
+    handleUploadChunkAck(upload_id, chunk_index) {
+        if (!this.pendingUploadAcks) {
+            this.pendingUploadAcks = new Map();
+        }
+
+        const key = `${upload_id}_${chunk_index}`;
+        const pending = this.pendingUploadAcks.get(key);
+        if (pending) {
+            clearTimeout(pending.timeout);
+            pending.resolve();
+            this.pendingUploadAcks.delete(key);
         }
     }
 
@@ -902,6 +912,9 @@ export class SFTPBrowser {
         // Check if download complete
         if (download.chunks.size === download.total_chunks) {
             this.finalizeDownload(msgId);
+        } else {
+            // Request next chunk
+            this.requestNextDownloadChunk(msgId);
         }
     }
 }

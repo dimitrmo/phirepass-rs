@@ -489,6 +489,15 @@ function connectSFTP() {
                     }
                 }
                 break;
+            case "SFTPUploadChunkAck":
+                if (sftpBrowser && currentTab === "sftp") {
+                    const upload_id = frame.data.web.upload_id;
+                    const chunk_index = frame.data.web.chunk_index;
+                    if (upload_id !== undefined && chunk_index !== undefined) {
+                        sftpBrowser.handleUploadChunkAck(upload_id, chunk_index);
+                    }
+                }
+                break;
             case "TunnelOpened":
                 if (currentTab === "sftp") {
                     if (!sftpBrowser) {

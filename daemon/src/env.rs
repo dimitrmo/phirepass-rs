@@ -39,7 +39,7 @@ pub(crate) struct Env {
     #[envconfig(from = "PAT_TOKEN", default = "")]
     pub token: String,
 
-    #[envconfig(from = "STATS_REFRESH_INTERVAL", default = "15")]
+    #[envconfig(from = "STATS_REFRESH_INTERVAL", default = "60")]
     pub stats_refresh_interval: u16,
 
     #[envconfig(from = "PING_INTERVAL", default = "30")]
