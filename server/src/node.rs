@@ -26,17 +26,100 @@ pub(crate) async fn ws_node_handler(
     ws.on_upgrade(move |socket| handle_node_socket(socket, state, ip))
 }
 
+async fn wait_for_auth(
+    ws_rx: &mut futures_util::stream::SplitStream<WebSocket>,
+    tx: &mpsc::Sender<NodeFrameData>,
+    ip: IpAddr,
+) -> anyhow::Result<Ulid> {
+    // Wait for the first message which must be Auth
+    let msg = ws_rx
+        .next()
+        .await
+        .ok_or_else(|| anyhow::anyhow!("connection closed before auth"))??;
+
+    let data = match msg {
+        Message::Binary(data) => data,
+        Message::Close(reason) => {
+            anyhow::bail!("connection closed before auth: {:?}", reason);
+        }
+        _ => {
+            anyhow::bail!("expected binary message for auth, got: {:?}", msg);
+        }
+    };
+
+    let frame = Frame::decode(&data)?;
+
+    let node_frame = match frame.data {
+        FrameData::Node(data) => data,
+        FrameData::Web(_) => {
+            anyhow::bail!("expected node frame for auth, got web frame");
+        }
+    };
+
+    match node_frame {
+        NodeFrameData::Auth {
+            token: _,
+            node_id: received_node_id,
+            version: daemon_version,
+        } => {
+            // Use provided node_id if available, otherwise generate a new one
+            let id = match received_node_id {
+                Some(node_id) => {
+                    info!("suggested node id found: {node_id}");
+                    node_id
+                }
+                None => {
+                    let id = Ulid::new();
+                    info!("assigning new node id: {id}");
+                    id
+                }
+            };
+
+            info!(
+                "node {id} authenticated from {ip} (daemon version: {daemon_version}, reusing id: {})",
+                received_node_id.is_some()
+            );
+
+            // Send auth response
+            let resp = NodeFrameData::AuthResponse {
+                node_id: id,
+                success: true,
+                version: env::version().to_string(),
+            };
+
+            tx.send(resp)
+                .await
+                .map_err(|err| anyhow::anyhow!("failed to send auth response: {err}"))?;
+
+            Ok(id)
+        }
+        other => {
+            anyhow::bail!("expected Auth as first message, got: {:?}", other);
+        }
+    }
+}
+
 async fn handle_node_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
-    let id = Ulid::new();
     let (mut ws_tx, mut ws_rx) = socket.split();
 
     // Bounded channel to avoid unbounded memory growth if the node socket is back-pressured.
     let (tx, mut rx) = mpsc::channel::<NodeFrameData>(256);
 
+    // Wait for authentication as the first message
+    let id = match wait_for_auth(&mut ws_rx, &tx, ip).await {
+        Ok(node_id) => node_id,
+        Err(err) => {
+            warn!("authentication failed from {ip}: {err}");
+            let _ = ws_tx.close().await;
+            return;
+        }
+    };
+
+    // Register the node connection after successful authentication
     {
         state.nodes.insert(id, NodeConnection::new(ip, tx.clone()));
         let total = state.nodes.len();
-        info!("node {id} ({ip}) connected (total: {total})", id = id);
+        info!("node {id} ({ip}) authenticated and registered (total: {total})");
     }
 
     let write_task = tokio::spawn(async move {
@@ -97,20 +180,8 @@ async fn handle_node_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
                     NodeFrameData::Heartbeat { stats } => {
                         update_node_heartbeat(&state, &id, Some(stats)).await;
                     }
-                    NodeFrameData::Auth { token: _ } => {
-                        info!("node {id} is asking to be authenticated");
-
-                        let resp = NodeFrameData::AuthResponse {
-                            node_id: id,
-                            success: true,
-                            version: env::version().to_string(),
-                        };
-
-                        if let Err(err) = tx.send(resp).await {
-                            warn!("failed to respond to node {id}: {err}");
-                        } else {
-                            info!("auth response sent {id}");
-                        }
+                    NodeFrameData::Auth { .. } => {
+                        warn!("received Auth message after initial authentication from node {id}");
                     }
                     // ping from daemon
                     NodeFrameData::Ping { sent_at } => {
@@ -208,24 +279,6 @@ async fn handle_frame_response(state: &AppState, frame: WebFrameData, sid: u32, 
         Err(err) => warn!("failed to forward tunnel data to node {node_id}: {err}"),
     }
 }
-
-/*
-async fn handle_frame_response(state: &AppState, frame: Frame, nid: String, cid: String) {
-    debug!("node {nid} is asking to send a frame directly to user {cid}");
-
-    let Ok(cid_as_str) = Ulid::from_string(cid.as_str()) else {
-        warn!("{cid} is not a valid format");
-        return;
-    };
-
-    let connections = state.connections.read().await;
-    if let Some(conn) = connections.get(&cid_as_str) {
-        match conn.tx.send(frame).await {
-            Ok(..) => debug!("frame response sent to connection {cid_as_str}"),
-            Err(err) => warn!("failed to send frame to user({}): {}", cid_as_str, err),
-        }
-    }
-}*/
 
 async fn handle_tunnel_closed(
     state: &AppState,

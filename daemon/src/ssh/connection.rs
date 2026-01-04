@@ -138,7 +138,7 @@ impl SSHConnection {
                                 )
                                 .await
                             {
-                                warn!("failed to send frame: {err}");
+                                warn!("failed to send frame from ssh to server to web: {err}");
                             } else {
                                 debug!("frame response sent");
                             }

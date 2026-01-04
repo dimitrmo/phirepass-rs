@@ -15,6 +15,8 @@ pub enum NodeFrameData {
 
     Auth {
         token: String,
+        node_id: Option<Ulid>,
+        version: String,
     },
 
     AuthResponse {

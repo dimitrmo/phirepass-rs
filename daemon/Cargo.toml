@@ -12,6 +12,7 @@ clap = { workspace = true }
 phirepass-common = { workspace = true, features = ["full"] }
 log = { workspace = true }
 tokio = { workspace = true }
+tokio-util = { workspace = true }
 russh = { workspace = true }
 anyhow = { workspace = true }
 tokio-tungstenite = { workspace = true }

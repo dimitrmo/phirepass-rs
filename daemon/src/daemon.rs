@@ -78,9 +78,10 @@ fn start_ws_connection(
     let env = Arc::clone(&state.env);
     tokio::spawn(async move {
         let mut attempt: u32 = 0;
+        let stored_node_id = Arc::new(tokio::sync::RwLock::new(None));
 
         loop {
-            let conn = ws::WebSocketConnection::new();
+            let conn = ws::WebSocketConnection::new(stored_node_id.clone());
 
             tokio::select! {
                 res = conn.connect(Arc::clone(&env)) => {
