@@ -17,6 +17,8 @@ RUN apt-get update && apt-get install -y \
     autoconf \
  && rm -rf /var/lib/apt/lists/*
 
+ ENV JEMALLOC_SYS_STATIC=1
+
 RUN case "${TARGETARCH}" in \
       "amd64") echo "x86_64-unknown-linux-gnu"  > /rust_target ;; \
       "arm64") echo "aarch64-unknown-linux-gnu" > /rust_target ;; \
