@@ -1,11 +1,15 @@
+use jemallocator;
+#[global_allocator]
+static GLOBAL: jemallocator::Jemalloc = jemallocator::Jemalloc;
+
 use phirepass_common::runtime::build_runtime_from_env;
 
-mod server;
 mod cli;
 mod connection;
 mod env;
 mod http;
 mod node;
+mod server;
 mod web;
 
 fn main() -> anyhow::Result<()> {

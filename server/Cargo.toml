@@ -23,3 +23,4 @@ rustls = { workspace = true }
 tower-http = { workspace = true }
 dashmap = { workspace = true }
 bytes = { workspace = true }
+jemallocator = { workspace = true }
