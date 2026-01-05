@@ -11,6 +11,10 @@ RUN apt-get update && apt-get install -y \
     libssl-dev \
     gcc-aarch64-linux-gnu \
     libc6-dev-arm64-cross \
+    build-essential \
+    git \
+    make \
+    autoconf \
  && rm -rf /var/lib/apt/lists/*
 
 RUN case "${TARGETARCH}" in \
