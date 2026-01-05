@@ -1,5 +1,5 @@
 use dashmap::DashMap;
-use log::info;
+use log::debug;
 use russh_sftp::client::fs::File;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -42,7 +42,7 @@ pub fn generate_id() -> u32 {
 }
 
 pub async fn cleanup_abandoned_uploads(uploads: &SFTPActiveUploads) {
-    info!("cleaning up abandoned uploads");
+    debug!("cleaning up abandoned uploads");
 
     const TIMEOUT: Duration = Duration::from_secs(15 * 60); // 15 minutes
 
@@ -62,7 +62,7 @@ pub async fn cleanup_abandoned_uploads(uploads: &SFTPActiveUploads) {
 
     if !keys_to_remove.is_empty() {
         for key in keys_to_remove {
-            info!("cleaning up abandoned upload: {:?}", key);
+            debug!("cleaning up abandoned upload: {:?}", key);
             if let Some((_, file_upload)) = uploads.remove(&key) {
                 let _ = file_upload.sftp_file.sync_all().await;
             }
@@ -71,7 +71,7 @@ pub async fn cleanup_abandoned_uploads(uploads: &SFTPActiveUploads) {
 }
 
 pub async fn cleanup_abandoned_downloads(downloads: &SFTPActiveDownloads) {
-    info!("cleaning up abandoned downloads");
+    debug!("cleaning up abandoned downloads");
 
     const TIMEOUT: Duration = Duration::from_secs(15 * 60); // 15 minutes
 
@@ -91,7 +91,7 @@ pub async fn cleanup_abandoned_downloads(downloads: &SFTPActiveDownloads) {
 
     if !keys_to_remove.is_empty() {
         for key in keys_to_remove {
-            info!("cleaning up abandoned download: {:?}", key);
+            debug!("cleaning up abandoned download: {:?}", key);
             if let Some((_, file_download)) = downloads.remove(&key) {
                 let _ = file_download.sftp_file.sync_all().await;
             }

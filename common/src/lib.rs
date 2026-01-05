@@ -7,6 +7,8 @@ pub mod logger;
 pub mod node;
 #[cfg(feature = "protocol")]
 pub mod protocol;
+#[cfg(feature = "runtime")]
+pub mod runtime;
 #[cfg(feature = "stats")]
 pub mod stats;
 #[cfg(feature = "time")]

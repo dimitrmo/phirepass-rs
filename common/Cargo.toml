@@ -21,13 +21,15 @@ mac_address = { version = "1.1.8", optional = true }
 axum = { workspace = true, optional = true }
 ulid = { workspace = true, optional = true }
 bytes = { workspace = true, optional = true }
+tokio ={ workspace = true, optional = true }
 
 [features]
-full = ["env", "ip", "logger", "node", "protocol", "stats", "time"]
+full = ["env", "ip", "logger", "node", "protocol", "stats", "time", "runtime"]
 env = []
 ip = ["dep:axum"]
 logger = ["dep:serde", "stats"]
 node = ["dep:serde", "dep:ulid", "stats"]
+runtime = ["dep:tokio"]
 protocol = ["dep:anyhow", "dep:serde", "dep:serde_json", "dep:rmp-serde", "dep:bytes"]
 stats = [
     "dep:get_if_addrs",
