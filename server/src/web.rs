@@ -4,6 +4,7 @@ use axum::extract::ws::{Message, WebSocket};
 use axum::extract::{State, WebSocketUpgrade};
 use axum::http::HeaderMap;
 use axum_client_ip::ClientIp;
+use bytes::Bytes;
 use futures_util::{SinkExt, StreamExt};
 use log::{debug, info, warn};
 use phirepass_common::protocol::common::{Frame, FrameData, FrameError};
@@ -33,7 +34,9 @@ async fn handle_web_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
     let (tx, mut rx) = mpsc::channel::<WebFrameData>(256);
 
     {
-        state.connections.insert(cid, WebConnection::new(ip, tx));
+        state
+            .connections
+            .insert(cid, WebConnection::new(ip, tx.clone()));
         let total = state.connections.len();
         info!("connection {cid} ({ip}) established (total: {total})");
     }
@@ -57,6 +60,21 @@ async fn handle_web_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
         }
     });
 
+    // Handle messages in separate function to ensure cleanup always happens
+    handle_web_messages(&mut ws_rx, &state, cid).await;
+
+    // Always abort write task regardless of how we exited message loop
+    drop(tx); // Close sender first to wake write task
+    write_task.abort();
+    disconnect_web_client(&state, cid).await;
+}
+
+/// Handles incoming WebSocket messages. Always returns to parent for cleanup.
+async fn handle_web_messages(
+    ws_rx: &mut futures_util::stream::SplitStream<WebSocket>,
+    state: &AppState,
+    cid: Ulid,
+) {
     while let Some(msg) = ws_rx.next().await {
         let msg = match msg {
             Ok(msg) => msg,
@@ -225,17 +243,13 @@ async fn handle_web_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
                     None => warn!("web client {cid} disconnected"),
                     Some(err) => warn!("web client {cid} disconnected: {:?}", err),
                 }
-                disconnect_web_client(&state, cid).await;
-                return;
+                return; // Cleanup handled by caller
             }
             _ => {
                 info!("unknown message: {:?}", msg);
             }
         }
     }
-
-    disconnect_web_client(&state, cid).await;
-    write_task.abort();
 }
 
 async fn disconnect_web_client(state: &AppState, cid: Ulid) {
@@ -301,7 +315,7 @@ async fn handle_web_tunnel_data(
     protocol: u8,
     sid: u32,
     node_id: String,
-    data: Vec<u8>,
+    data: Bytes,
 ) {
     debug!("tunnel data received: {} bytes", data.len());
 

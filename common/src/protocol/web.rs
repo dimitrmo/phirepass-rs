@@ -3,6 +3,7 @@ use crate::protocol::sftp::{
     SFTPDelete, SFTPDownloadChunk, SFTPDownloadStart, SFTPDownloadStartResponse, SFTPListItem,
     SFTPUploadChunk, SFTPUploadStart, SFTPUploadStartResponse,
 };
+use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -28,7 +29,7 @@ pub enum WebFrameData {
         protocol: u8,
         node_id: String,
         sid: u32,
-        data: Vec<u8>,
+        data: Bytes,
     }, // bidirectioanal tunnel data
 
     TunnelClosed {

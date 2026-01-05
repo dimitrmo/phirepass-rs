@@ -12,6 +12,7 @@ use russh::{Preferred, client, kex};
 use russh_sftp::client::SftpSession;
 use std::borrow::Cow;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::oneshot;
 use ulid::Ulid;
@@ -26,6 +27,7 @@ pub(crate) struct SFTPConfig {
     pub host: String,
     pub port: u16,
     pub credentials: SFTPConfigAuth,
+    pub inactivity_timeout: Option<Duration>,
 }
 
 pub(crate) struct SFTPConnection {
@@ -41,7 +43,7 @@ impl SFTPConnection {
         let sftp_config: SFTPConfig = self.config.clone();
 
         let config = Arc::new(client::Config {
-            inactivity_timeout: None,
+            inactivity_timeout: self.config.inactivity_timeout,
             preferred: Preferred {
                 kex: Cow::Owned(vec![
                     kex::CURVE25519_PRE_RFC_8731,

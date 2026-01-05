@@ -1,5 +1,6 @@
 include!(concat!(env!("OUT_DIR"), "/version.rs"));
 
+use bytes::Bytes;
 use gloo_timers::callback::Interval;
 use phirepass_common::protocol::common::Frame;
 use phirepass_common::protocol::web::WebFrameData;
@@ -227,7 +228,7 @@ impl Channel {
             protocol: Protocol::SSH as u8,
             node_id,
             sid,
-            data: data.into_bytes(),
+            data: Bytes::from(data.into_bytes()),
         });
     }
 
@@ -334,7 +335,7 @@ impl Channel {
             upload_id,
             chunk_index,
             chunk_size,
-            data,
+            data: Bytes::from(data),
         };
         self.send_frame_data(WebFrameData::SFTPUpload {
             node_id,

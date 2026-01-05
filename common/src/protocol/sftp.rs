@@ -1,3 +1,4 @@
+use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -39,7 +40,7 @@ pub struct SFTPDownloadChunk {
     pub download_id: u32,
     pub chunk_index: u32,
     pub chunk_size: u32,
-    pub data: Vec<u8>,
+    pub data: Bytes,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -60,7 +61,7 @@ pub struct SFTPUploadChunk {
     pub upload_id: u32,
     pub chunk_index: u32,
     pub chunk_size: u32,
-    pub data: Vec<u8>,
+    pub data: Bytes,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

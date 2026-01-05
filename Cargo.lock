@@ -385,6 +385,9 @@ name = "bytes"
 version = "1.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b35204fbdc0b3f4446b89fc1ac2cf84a8a68971995d0bf2e925ec7cd960f9cb3"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "c_linked_list"
@@ -643,9 +646,9 @@ dependencies = [
 
 [[package]]
 name = "crypto-bigint"
-version = "0.7.0-rc.13"
+version = "0.7.0-rc.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b2bb4138de6db76c8155b4423e967049fbef2cf84ad6af7f552f73a161941b72"
+checksum = "c9c6daa2049db6a5fad90a981b8c63f023dbaf75a0fae73db4dcf234556fc957"
 dependencies = [
  "ctutils",
  "num-traits",
@@ -666,9 +669,9 @@ dependencies = [
 
 [[package]]
 name = "crypto-common"
-version = "0.2.0-rc.8"
+version = "0.2.0-rc.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e6165b8029cdc3e765b74d3548f85999ee799d5124877ce45c2c85ca78e4d4aa"
+checksum = "41b8986f836d4aeb30ccf4c9d3bd562fd716074cfd7fc4a2948359fbd21ed809"
 dependencies = [
  "hybrid-array",
 ]
@@ -679,7 +682,7 @@ version = "0.7.0-pre.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "da0b07a7a616370e8b6efca0c6a25e5f4c6d02fde11f3d570e4af64d8ed7e2e9"
 dependencies = [
- "crypto-bigint 0.7.0-rc.13",
+ "crypto-bigint 0.7.0-rc.14",
  "libm",
  "rand_core 0.10.0-rc-3",
 ]
@@ -802,7 +805,7 @@ checksum = "ebf9423bafb058e4142194330c52273c343f8a5beb7176d052f0e73b17dd35b9"
 dependencies = [
  "block-buffer 0.11.0",
  "const-oid 0.10.1",
- "crypto-common 0.2.0-rc.8",
+ "crypto-common 0.2.0-rc.9",
 ]
 
 [[package]]
@@ -2279,6 +2282,7 @@ dependencies = [
  "anyhow",
  "axum",
  "axum-client-ip",
+ "bytes",
  "clap",
  "dashmap",
  "envconfig",
@@ -2301,6 +2305,7 @@ dependencies = [
 name = "phirepass-channel"
 version = "0.1.66"
 dependencies = [
+ "bytes",
  "gloo-timers",
  "phirepass-common",
  "serde",
@@ -2315,6 +2320,7 @@ version = "0.1.66"
 dependencies = [
  "anyhow",
  "axum",
+ "bytes",
  "env_logger",
  "get_if_addrs",
  "libc",
@@ -2336,6 +2342,7 @@ dependencies = [
  "anyhow",
  "axum",
  "axum-client-ip",
+ "bytes",
  "clap",
  "dashmap",
  "env_logger",
@@ -2361,6 +2368,7 @@ dependencies = [
  "anyhow",
  "axum",
  "axum-client-ip",
+ "bytes",
  "clap",
  "dashmap",
  "envconfig",
@@ -2700,7 +2708,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d27d813937fdf8e9ad15e3e422a55da4021d29639000139ca19d99f3949060da"
 dependencies = [
  "const-oid 0.10.1",
- "crypto-bigint 0.7.0-rc.13",
+ "crypto-bigint 0.7.0-rc.14",
  "crypto-primes",
  "digest 0.11.0-rc.5",
  "pkcs1",
@@ -3373,9 +3381,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-util"
-version = "0.7.17"
+version = "0.7.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2efa149fe76073d6e8fd97ef4f4eca7b67f599660115591483572e406e165594"
+checksum = "9ae9cec805b01e8fc3fd2fe289f89149a9b66dd16786abd8b19cfa7b48cb0098"
 dependencies = [
  "bytes",
  "futures-core",

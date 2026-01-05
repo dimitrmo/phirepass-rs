@@ -115,7 +115,6 @@ async fn handle_node_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
         }
     };
 
-    // Register the node connection after successful authentication
     {
         state.nodes.insert(id, NodeConnection::new(ip, tx.clone()));
         let total = state.nodes.len();
@@ -140,6 +139,22 @@ async fn handle_node_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
         }
     });
 
+    // Handle messages in separate function to ensure cleanup always happens
+    handle_node_messages(&mut ws_rx, &state, id, &tx).await;
+
+    // Always abort write task regardless of how we exited message loop
+    drop(tx); // Close sender first to wake write task
+    write_task.abort();
+    disconnect_node(&state, id).await;
+}
+
+/// Handles incoming WebSocket messages. Always returns to parent for cleanup.
+async fn handle_node_messages(
+    ws_rx: &mut futures_util::stream::SplitStream<axum::extract::ws::WebSocket>,
+    state: &AppState,
+    id: Ulid,
+    tx: &mpsc::Sender<NodeFrameData>,
+) {
     while let Some(msg) = ws_rx.next().await {
         let msg = match msg {
             Ok(msg) => msg,
@@ -153,8 +168,7 @@ async fn handle_node_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
         match msg {
             Message::Close(reason) => {
                 warn!("node connection close message: {:?}", reason);
-                disconnect_node(&state, id).await;
-                return;
+                return; // Cleanup handled by caller
             }
             Message::Binary(data) => {
                 let frame = match Frame::decode(&data) {
@@ -225,9 +239,6 @@ async fn handle_node_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
             }
         }
     }
-
-    disconnect_node(&state, id).await;
-    write_task.abort();
 }
 
 async fn get_connection_id_by_sid(

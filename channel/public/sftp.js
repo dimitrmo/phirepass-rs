@@ -76,7 +76,7 @@ export class SFTPBrowser {
 
     handleTunnelOpened(sessionId) {
         this.sessionId = sessionId;
-        console.log("SFTP tunnel opened, session ID:", sessionId, "- Requesting directory listing for /");
+        console.log("SFTP tunnel opened, session ID:", sessionId, "- Requesting directory listing for $HOME");
         // Request directory listing when tunnel is opened; start at root for consistency
         this.listDirectory(".");
     }

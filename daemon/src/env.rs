@@ -1,21 +1,7 @@
+use crate::ssh::auth::SSHAuthMethod;
 use envconfig::Envconfig;
 use phirepass_common::env::Mode;
-
-#[derive(Clone, Debug)]
-pub enum SSHAuthMethod {
-    CredentialsPrompt,
-}
-
-impl std::str::FromStr for SSHAuthMethod {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "credentials_prompt" => Ok(SSHAuthMethod::CredentialsPrompt),
-            _ => Err(format!("invalid authentication method: {}", s)),
-        }
-    }
-}
+use std::time::Duration;
 
 #[derive(Envconfig)]
 pub(crate) struct Env {
@@ -59,6 +45,18 @@ pub(crate) struct Env {
 
     #[envconfig(from = "SSH_AUTH_METHOD", default = "credentials_prompt")]
     pub ssh_auth_mode: SSHAuthMethod,
+
+    #[envconfig(from = "SSH_INACTIVITY_PERIOD", default = "3600")] // 1 hour
+    pub ssh_inactivity_secs: u64,
+}
+
+impl Env {
+    pub fn get_ssh_inactivity_duration(&self) -> Option<Duration> {
+        match self.ssh_inactivity_secs {
+            0 => None,
+            o => Some(Duration::from_secs(o)),
+        }
+    }
 }
 
 pub(crate) fn init() -> anyhow::Result<Env> {

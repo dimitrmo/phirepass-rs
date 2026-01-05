@@ -1,5 +1,6 @@
 use crate::ssh::client::SSHClient;
 use crate::ssh::session::SSHCommand;
+use bytes::Bytes;
 use log::{debug, info, warn};
 use phirepass_common::protocol::Protocol;
 use phirepass_common::protocol::common::Frame;
@@ -10,6 +11,7 @@ use russh::{ChannelMsg, Disconnect, Preferred, client, kex};
 use std::borrow::Cow;
 use std::io::Cursor;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::oneshot;
 use ulid::Ulid;
@@ -24,6 +26,7 @@ pub(crate) struct SSHConfig {
     pub host: String,
     pub port: u16,
     pub credentials: SSHConfigAuth,
+    pub inactivity_timeout: Option<Duration>,
 }
 
 pub(crate) struct SSHConnection {
@@ -39,7 +42,7 @@ impl SSHConnection {
         let ssh_config: SSHConfig = self.config.clone();
 
         let config = Arc::new(client::Config {
-            inactivity_timeout: None,
+            inactivity_timeout: self.config.inactivity_timeout,
             preferred: Preferred {
                 kex: Cow::Owned(vec![
                     kex::CURVE25519_PRE_RFC_8731,
@@ -123,25 +126,13 @@ impl SSHConnection {
 
                     match msg {
                         ChannelMsg::Data { ref data } => {
-                            if let Err(err) = tx
-                                .send(
-                                    NodeFrameData::WebFrame {
-                                        frame: WebFrameData::TunnelData {
-                                            protocol: Protocol::SSH as u8,
-                                            node_id: node_id.to_string(),
-                                            sid,
-                                            data: data.to_vec(),
-                                        },
-                                        sid,
-                                    }
-                                    .into(),
-                                )
-                                .await
-                            {
-                                warn!("failed to send frame from ssh to server to web: {err}");
-                            } else {
-                                debug!("frame response sent");
-                            }
+                            send_tunnel_data(
+                                tx,
+                                sid,
+                                node_id.to_string(),
+                                Bytes::copy_from_slice(data),
+                            )
+                            .await;
                         }
                         ChannelMsg::Eof => {
                             debug!("ssh channel received EOF");
@@ -174,5 +165,28 @@ impl SSHConnection {
             .await?;
 
         Ok(())
+    }
+}
+
+#[inline]
+pub async fn send_tunnel_data(tx: &Sender<Frame>, sid: u32, node_id: String, data: Bytes) {
+    if let Err(err) = tx
+        .send(
+            NodeFrameData::WebFrame {
+                frame: WebFrameData::TunnelData {
+                    protocol: Protocol::SSH as u8,
+                    node_id: node_id.to_string(),
+                    sid,
+                    data,
+                },
+                sid,
+            }
+            .into(),
+        )
+        .await
+    {
+        warn!("failed to send frame from ssh to server to web: {err}");
+    } else {
+        debug!("frame response sent");
     }
 }

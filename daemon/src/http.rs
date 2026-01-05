@@ -9,6 +9,12 @@ pub(crate) struct AppState {
     pub(crate) env: Arc<Env>,
 }
 
+impl AppState {
+    pub fn new(config: Arc<Env>) -> Self {
+        Self { env: config }
+    }
+}
+
 pub async fn get_version() -> impl IntoResponse {
     Json(json!({
         "version": crate::env::version(),

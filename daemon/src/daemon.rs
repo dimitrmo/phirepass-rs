@@ -17,13 +17,10 @@ pub(crate) async fn start(config: Env) -> anyhow::Result<()> {
     let stats_refresh_interval = config.stats_refresh_interval;
     let (shutdown_tx, _) = broadcast::channel(1);
 
-    let state = AppState {
-        env: Arc::new(config),
-    };
-
+    let state = AppState::new(Arc::new(config));
     let ws_task = start_ws_connection(&state, shutdown_tx.subscribe());
     let http_task = start_http_server(state, shutdown_tx.subscribe());
-    let stats_task = spawn_stats_logger(stats_refresh_interval, shutdown_tx.subscribe());
+    let stats_task = spawn_stats_logger(stats_refresh_interval as u64, shutdown_tx.subscribe());
 
     let shutdown_signal = async {
         if let Err(err) = signal::ctrl_c().await {
@@ -41,6 +38,9 @@ pub(crate) async fn start(config: Env) -> anyhow::Result<()> {
     }
 
     let _ = shutdown_tx.send(());
+
+    info!("waiting for tasks to shut down gracefully...");
+    tokio::time::sleep(Duration::from_millis(500)).await;
 
     Ok(())
 }
@@ -110,12 +110,11 @@ fn start_ws_connection(
 }
 
 fn spawn_stats_logger(
-    stats_refresh_interval: u16,
+    stats_refresh_interval: u64,
     mut shutdown: broadcast::Receiver<()>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        let mut interval =
-            tokio::time::interval(Duration::from_secs(stats_refresh_interval as u64));
+        let mut interval = tokio::time::interval(Duration::from_secs(stats_refresh_interval));
         loop {
             tokio::select! {
                 _ = interval.tick() => {

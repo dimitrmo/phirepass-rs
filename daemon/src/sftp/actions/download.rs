@@ -1,7 +1,7 @@
 use crate::sftp::{
-    CHUNK_SIZE, FileDownload, SFTPActiveDownloads, cleanup_abandoned_downloads,
-    generate_download_id,
+    CHUNK_SIZE, FileDownload, SFTPActiveDownloads, cleanup_abandoned_downloads, generate_id,
 };
+use bytes::Bytes;
 use log::{debug, info, warn};
 use phirepass_common::protocol::common::{Frame, FrameError};
 use phirepass_common::protocol::node::NodeFrameData;
@@ -95,7 +95,7 @@ pub async fn start_download(
     };
 
     // Generate unique download ID
-    let download_id = generate_download_id();
+    let download_id = generate_id();
     let now = SystemTime::now();
 
     // Store the file handle and metadata for subsequent chunks
@@ -188,7 +188,7 @@ pub async fn download_file_chunk(
                         should_remove = true;
                     }
                     Ok(bytes_read) => {
-                        let chunk_data = buffer[..bytes_read].to_vec();
+                        let chunk_data = Bytes::copy_from_slice(&buffer[..bytes_read]);
                         let chunk = SFTPDownloadChunk {
                             download_id,
                             chunk_index,
@@ -269,6 +269,9 @@ pub async fn download_file_chunk(
 
     // Remove the download entry if EOF or error was encountered
     if should_remove {
-        downloads.remove(&key);
+        if let Some((_, file_download)) = downloads.remove(&key) {
+            debug!("closed sftp file for download: {}", file_download.filename);
+            // FileDownload is dropped here, closing the sftp_file
+        }
     }
 }

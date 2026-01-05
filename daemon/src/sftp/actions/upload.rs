@@ -1,4 +1,4 @@
-use crate::sftp::{FileUpload, SFTPActiveUploads, cleanup_abandoned_uploads, generate_upload_id};
+use crate::sftp::{FileUpload, SFTPActiveUploads, cleanup_abandoned_uploads, generate_id};
 use log::{debug, info, warn};
 use phirepass_common::protocol::common::{Frame, FrameError};
 use phirepass_common::protocol::node::NodeFrameData;
@@ -56,7 +56,7 @@ pub async fn start_upload(
     {
         Ok(file) => {
             // Generate unique upload ID
-            let upload_id = generate_upload_id();
+            let upload_id = generate_id();
             let now = std::time::SystemTime::now();
 
             // Store the file handle and metadata for subsequent chunks
@@ -158,7 +158,7 @@ pub async fn upload_file_chunk(
         let mut file_upload = uploads.remove(&key).map(|(_, v)| v);
 
         if let Some(ref mut upload) = file_upload {
-            if let Err(err) = upload.sftp_file.write_all(&chunk.data).await {
+            if let Err(err) = upload.sftp_file.write_all(chunk.data.as_ref()).await {
                 warn!("failed to write final chunk to SFTP file: {err}");
                 let _ = tx
                     .send(
@@ -246,12 +246,18 @@ pub async fn upload_file_chunk(
     } else {
         // Intermediate chunk: write and continue
         if let Some(mut file_upload) = uploads.get_mut(&key) {
-            if let Err(err) = file_upload.sftp_file.write_all(&chunk.data).await {
+            if let Err(err) = file_upload.sftp_file.write_all(chunk.data.as_ref()).await {
                 warn!(
                     "failed to write chunk {} to SFTP file: {err}",
                     chunk.chunk_index
                 );
-                uploads.remove(&key);
+                if let Some((_, file_upload)) = uploads.remove(&key) {
+                    debug!(
+                        "closed sftp file for upload due to write error: {}",
+                        file_upload.filename
+                    );
+                    // FileUpload is dropped here, closing the sftp_file
+                }
                 let _ = tx
                     .send(
                         NodeFrameData::WebFrame {

@@ -1,11 +1,13 @@
-use crate::env::{Env, SSHAuthMethod};
+use crate::env::Env;
+use crate::session::{SESSION_ID, SessionCommand, SessionHandle, TunnelSessions};
 use crate::sftp::connection::{SFTPConfig, SFTPConfigAuth, SFTPConnection};
 use crate::sftp::session::{SFTPCommand, SFTPSessionHandle};
 use crate::sftp::{SFTPActiveDownloads, SFTPActiveUploads};
+use crate::ssh::auth::SSHAuthMethod;
 use crate::ssh::connection::{SSHConfig, SSHConfigAuth, SSHConnection};
 use crate::ssh::session::{SSHCommand, SSHSessionHandle};
 use anyhow::anyhow;
-use dashmap::DashMap;
+use bytes::Bytes;
 use futures_util::stream::SplitStream;
 use futures_util::{SinkExt, StreamExt};
 use log::{debug, error, info, warn};
@@ -16,12 +18,12 @@ use phirepass_common::protocol::node::NodeFrameData;
 use phirepass_common::protocol::web::WebFrameData;
 use phirepass_common::stats::Stats;
 use phirepass_common::time::now_millis;
-use std::fmt::{Display, Formatter};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 use tokio::net::TcpStream;
 use tokio::sync::RwLock;
+use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::mpsc::{Receiver, Sender, channel};
 use tokio::sync::oneshot;
 use tokio_tungstenite::{
@@ -30,64 +32,18 @@ use tokio_tungstenite::{
 use tokio_util::sync::CancellationToken;
 use ulid::Ulid;
 
-type TunnelSessions = Arc<DashMap<(Ulid, u32), SessionHandle>>;
-
 type WebSocketReader = SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>;
-
-static SESSION_ID: AtomicU32 = AtomicU32::new(1);
-
-#[derive(Debug)]
-enum SessionHandle {
-    Ssh(SSHSessionHandle),
-    Sftp(SFTPSessionHandle),
-}
-
-impl Display for SessionHandle {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            SessionHandle::Ssh(_) => write!(f, "SSHSessionHandle"),
-            SessionHandle::Sftp(_) => write!(f, "SFTPSessionHandle"),
-        }
-    }
-}
-
-enum SessionCommand {
-    Ssh(Sender<SSHCommand>),
-    Sftp(Sender<SFTPCommand>),
-}
-
-impl SessionHandle {
-    pub fn get_stdin(&self) -> SessionCommand {
-        match self {
-            SessionHandle::Ssh(ssh_handle) => SessionCommand::Ssh(ssh_handle.stdin.clone()),
-            SessionHandle::Sftp(sftp_handle) => SessionCommand::Sftp(sftp_handle.stdin.clone()),
-        }
-    }
-
-    pub async fn shutdown(self) {
-        match self {
-            SessionHandle::Ssh(ssh_handle) => {
-                info!("shutting down ssh handle");
-                ssh_handle.shutdown().await;
-            }
-            SessionHandle::Sftp(sftp_handle) => {
-                info!("shutting down sftp handle");
-                sftp_handle.shutdown().await;
-            }
-        }
-    }
-}
 
 pub(crate) struct WebSocketConnection {
     writer: Sender<Frame>,
     reader: Receiver<Frame>,
+    stored_node_id: Arc<RwLock<Option<Ulid>>>,
     sessions: TunnelSessions,
     uploads: SFTPActiveUploads,
     downloads: SFTPActiveDownloads,
-    stored_node_id: Arc<RwLock<Option<Ulid>>>,
 }
 
-fn generate_server_endpoint(mode: Mode, server_host: String, server_port: u16) -> String {
+fn generate_server_endpoint(mode: &Mode, server_host: &String, server_port: u16) -> String {
     match mode {
         Mode::Development => {
             if server_port == 80 {
@@ -113,10 +69,10 @@ impl WebSocketConnection {
         Self {
             reader: rx,
             writer: tx,
-            sessions: Arc::new(DashMap::new()),
-            uploads: Arc::new(DashMap::new()),
             stored_node_id,
-            downloads: Arc::new(DashMap::new()),
+            sessions: Arc::new(Default::default()),
+            uploads: Arc::new(Default::default()),
+            downloads: Arc::new(Default::default()),
         }
     }
 
@@ -125,11 +81,7 @@ impl WebSocketConnection {
 
         let endpoint = format!(
             "{}/api/nodes/ws",
-            generate_server_endpoint(
-                config.mode.clone(),
-                config.server_host.to_string(),
-                config.server_port,
-            )
+            generate_server_endpoint(&config.mode, &config.server_host, config.server_port)
         );
 
         info!("trying {endpoint}");
@@ -176,9 +128,9 @@ impl WebSocketConnection {
             read,
             self.writer.clone(),
             Arc::clone(&config),
-            self.sessions.clone(),
-            self.uploads.clone(),
-            self.downloads.clone(),
+            Arc::clone(&self.sessions),
+            Arc::clone(&self.uploads),
+            Arc::clone(&self.downloads),
         )
         .await;
 
@@ -197,18 +149,77 @@ impl WebSocketConnection {
         )
         .await;
 
+        let cleanup_task = spawn_cleanup_task(
+            self.uploads.clone(),
+            self.downloads.clone(),
+            cancellation_token.clone(),
+        )
+        .await;
+
         tokio::select! {
             _ = ping_task => warn!("ping task ended"),
             _ = write_task => warn!("write task ended"),
             _ = reader_task => warn!("read task ended"),
             _ = heartbeat_task => warn!("heartbeat task ended"),
+            _ = cleanup_task => warn!("cleanup task ended"),
         }
 
         // Cancel background tasks to prevent them from trying to send on a closed channel
         cancellation_token.cancel();
 
+        // close all active sessions
+        info!("closing all active sessions");
+        let session_keys: Vec<_> = self.sessions.iter().map(|entry| *entry.key()).collect();
+        for key in session_keys {
+            if let Some((_, session)) = self.sessions.remove(&key) {
+                session.shutdown().await;
+            }
+        }
+
+        // close all active uploads
+        info!("closing all active uploads");
+        let upload_keys: Vec<_> = self.uploads.iter().map(|entry| *entry.key()).collect();
+        for key in upload_keys {
+            if let Some((_, file_upload)) = self.uploads.remove(&key) {
+                let _ = file_upload.sftp_file.sync_all().await;
+            }
+        }
+
+        // close all active downloads
+        info!("closing all active downloads");
+        let download_keys: Vec<_> = self.downloads.iter().map(|entry| *entry.key()).collect();
+        for key in download_keys {
+            if let Some((_, file_download)) = self.downloads.remove(&key) {
+                let _ = file_download.sftp_file.sync_all().await;
+            }
+        }
+
         Ok(())
     }
+}
+
+async fn spawn_cleanup_task(
+    uploads: SFTPActiveUploads,
+    downloads: SFTPActiveDownloads,
+    token: CancellationToken,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        const CLEANUP_INTERVAL: u64 = 300; // 5 minutes
+        let mut interval = tokio::time::interval(Duration::from_secs(CLEANUP_INTERVAL));
+
+        loop {
+            tokio::select! {
+                _ = interval.tick() => {
+                    crate::sftp::cleanup_abandoned_uploads(&uploads).await;
+                    crate::sftp::cleanup_abandoned_downloads(&downloads).await;
+                }
+                _ = token.cancelled() => {
+                    info!("file transfer cleanup task shutting down");
+                    break;
+                }
+            }
+        }
+    })
 }
 
 async fn spawn_reader_task(
@@ -269,7 +280,7 @@ async fn spawn_ping_task(
             tokio::select! {
                 _ = interval.tick() => {
                     let sent_at = now_millis();
-                    send_frame_data(&sender, NodeFrameData::Ping { sent_at }).await;
+                    send_frame_data(&sender, NodeFrameData::Ping { sent_at });
                 }
                 _ = cancellation_token.cancelled() => {
                     debug!("ping task cancelled");
@@ -294,7 +305,7 @@ async fn spawn_heartbeat_task(
                         warn!("failed to get stats for heartbeat");
                         continue;
                     };
-                    send_frame_data(&sender, NodeFrameData::Heartbeat { stats }).await;
+                    send_frame_data(&sender, NodeFrameData::Heartbeat { stats });
                 }
                 _ = cancellation_token.cancelled() => {
                     debug!("heartbeat task cancelled");
@@ -418,6 +429,7 @@ async fn handle_message(
             info!("received connection disconnect for {cid}");
             close_tunnels_for_cid(cid, sessions).await;
             close_uploads_for_cid(cid, uploads).await;
+            close_downloads_for_cid(cid, downloads).await;
         }
         NodeFrameData::SSHWindowResize {
             cid,
@@ -668,7 +680,7 @@ async fn send_sftp_download_chunk_request(
         download_id,
         chunk_index,
         chunk_size: 0,
-        data: vec![],
+        data: Bytes::new(),
     };
 
     stdin
@@ -703,7 +715,7 @@ async fn send_sftp_download_chunk_data(
 async fn send_ssh_tunnel_data(
     cid: Ulid,
     sid: u32,
-    data: Vec<u8>,
+    data: Bytes,
     sessions: &TunnelSessions,
 ) -> anyhow::Result<()> {
     let stdin = sessions.get(&(cid, sid)).map(|s| s.get_stdin());
@@ -745,6 +757,28 @@ async fn send_ssh_forward_resize(
         .map_err(|err| anyhow!(err))
 }
 
+async fn close_downloads_for_cid(cid: Ulid, downloads: &SFTPActiveDownloads) {
+    info!("closing downloads for connection {cid}");
+
+    let keys_to_remove: Vec<(Ulid, u32)> = downloads
+        .iter()
+        .filter(|entry| entry.key().0.eq(&cid))
+        .map(|entry| *entry.key())
+        .collect();
+
+    // Remove and cleanup each download
+    for key in keys_to_remove {
+        info!("removing sftp download by key {:?}", key);
+        if let Some((_, file_download)) = downloads.remove(&key) {
+            debug!(
+                "closed sftp file for download cleanup: {}",
+                file_download.filename
+            );
+            // FileDownload is dropped here, closing the sftp_file
+        }
+    }
+}
+
 async fn close_uploads_for_cid(cid: Ulid, uploads: &SFTPActiveUploads) {
     info!("closing uploads for connection {cid}");
 
@@ -781,11 +815,24 @@ async fn close_tunnels_for_cid(cid: Ulid, sessions: &TunnelSessions) {
     }
 }
 
-async fn send_frame_data(sender: &Sender<Frame>, data: NodeFrameData) {
-    if let Err(err) = sender.send(data.into()).await {
-        warn!("failed to send frame: {err}");
-    } else {
-        debug!("frame response sent");
+fn send_frame_data(sender: &Sender<Frame>, data: NodeFrameData) {
+    if sender.is_closed() {
+        warn!("frame sender is closed, client may have disconnected");
+        return;
+    }
+
+    match sender.try_send(data.into()) {
+        Ok(_) => debug!("frame response sent"),
+        Err(err) => match err {
+            TrySendError::Closed(err) => {
+                warn!("failed to send frame to closed channel: {err:?}");
+            }
+            TrySendError::Full(err) => {
+                debug!(
+                    "frame channel full for client, potential slow client or backpressure: {err:?}"
+                );
+            }
+        },
     }
 }
 
@@ -799,18 +846,17 @@ async fn start_sftp_tunnel(
     downloads: &SFTPActiveDownloads,
     msg_id: Option<u32>,
 ) {
-    let (stdin_tx, stdin_rx) = channel::<SFTPCommand>(512);
+    let (stdin_tx, stdin_rx) = channel::<SFTPCommand>(2048);
     let (stop_tx, stop_rx) = oneshot::channel();
     let sender = tx.clone();
     let session_id = SESSION_ID.fetch_add(1, Ordering::Relaxed);
-    // let sessions_for_task = sessions.clone();
     let tx_for_opened = tx.clone();
-    // let config_for_task = config.clone();
 
     let conn = SFTPConnection::new(SFTPConfig {
         host: config.ssh_host.clone(),
         port: config.ssh_port,
         credentials,
+        inactivity_timeout: config.get_ssh_inactivity_duration(),
     });
 
     info!(
@@ -820,6 +866,8 @@ async fn start_sftp_tunnel(
 
     let uploads = uploads.clone();
     let downloads = downloads.clone();
+    // Background task will run to completion or until stop_rx is triggered.
+    // Not awaited here; cleanup is managed via the SessionHandle (stop_tx).
     let _sftp_task = tokio::spawn(async move {
         info!("sftp task started for connection {cid}");
 
@@ -831,8 +879,7 @@ async fn start_sftp_tunnel(
                 sid: session_id,
                 msg_id,
             },
-        )
-        .await;
+        );
 
         match conn
             .connect(
@@ -850,8 +897,7 @@ async fn start_sftp_tunnel(
                         sid: session_id,
                         msg_id,
                     },
-                )
-                .await;
+                );
             }
             Err(err) => {
                 warn!("sftp connection error for {cid}: {err}");
@@ -865,8 +911,7 @@ async fn start_sftp_tunnel(
                             msg_id,
                         },
                     },
-                )
-                .await;
+                );
             }
         }
     });
@@ -907,6 +952,7 @@ async fn start_ssh_tunnel(
         host: config.ssh_host.clone(),
         port: config.ssh_port,
         credentials,
+        inactivity_timeout: config.get_ssh_inactivity_duration(),
     });
 
     info!(
@@ -914,6 +960,8 @@ async fn start_ssh_tunnel(
         config.ssh_host, config.ssh_port
     );
 
+    // Background task will run to completion or until stop_rx is triggered.
+    // Not awaited here; cleanup is managed via the SessionHandle (stop_tx).
     let _ssh_task = tokio::spawn(async move {
         info!("ssh task started for connection {cid}");
 
@@ -925,8 +973,7 @@ async fn start_ssh_tunnel(
                 sid: session_id,
                 msg_id,
             },
-        )
-        .await;
+        );
 
         match conn
             .connect(node_id, cid, session_id, &sender, stdin_rx, stop_rx)
@@ -942,8 +989,7 @@ async fn start_ssh_tunnel(
                         sid: session_id,
                         msg_id,
                     },
-                )
-                .await;
+                );
             }
             Err(err) => {
                 warn!("ssh connection error for {cid}: {err}");
@@ -957,8 +1003,7 @@ async fn start_ssh_tunnel(
                             msg_id,
                         },
                     },
-                )
-                .await;
+                );
             }
         }
     });

@@ -3,6 +3,7 @@ use crate::protocol::sftp::{
 };
 use crate::protocol::web::WebFrameData;
 use crate::stats::Stats;
+use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use ulid::Ulid;
 
@@ -44,7 +45,7 @@ pub enum NodeFrameData {
         protocol: u8,
         cid: Ulid,
         sid: u32,
-        data: Vec<u8>,
+        data: Bytes,
     },
 
     TunnelClosed {

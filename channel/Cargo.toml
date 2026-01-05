@@ -24,6 +24,7 @@ web-sys = { version = "0.3.83", features = [
     "CloseEvent",
     "WebSocket",
 ]}
+bytes = { workspace = true }
 
 [package.metadata.wasm-pack.profile.dev]
 wasm-opt = ["-O", "--enable-bulk-memory", "--enable-nontrapping-float-to-int"]

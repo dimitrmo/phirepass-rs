@@ -35,15 +35,10 @@ pub struct FileDownload {
 pub type SFTPActiveUploads = Arc<DashMap<(Ulid, u32), FileUpload>>;
 pub type SFTPActiveDownloads = Arc<DashMap<(Ulid, u32), FileDownload>>;
 
-static UPLOAD_ID_COUNTER: AtomicU32 = AtomicU32::new(1);
-static DOWNLOAD_ID_COUNTER: AtomicU32 = AtomicU32::new(1);
+static ID_COUNTER: AtomicU32 = AtomicU32::new(1);
 
-pub fn generate_upload_id() -> u32 {
-    UPLOAD_ID_COUNTER.fetch_add(1, Ordering::SeqCst)
-}
-
-pub fn generate_download_id() -> u32 {
-    DOWNLOAD_ID_COUNTER.fetch_add(1, Ordering::SeqCst)
+pub fn generate_id() -> u32 {
+    ID_COUNTER.fetch_add(1, Ordering::SeqCst)
 }
 
 pub async fn cleanup_abandoned_uploads(uploads: &SFTPActiveUploads) {

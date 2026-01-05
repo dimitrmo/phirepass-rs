@@ -1,10 +1,11 @@
+use bytes::Bytes;
 use log::debug;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot;
 
 #[derive(Clone, Debug)]
 pub(crate) enum SSHCommand {
-    Data(Vec<u8>),
+    Data(Bytes),
     Resize { cols: u32, rows: u32 },
 }
 

@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use crate::env::Env;
 use crate::http::{AppState, build_cors, get_stats, get_version, list_connections, list_nodes};
@@ -28,8 +28,9 @@ pub async fn start(config: Env) -> anyhow::Result<()> {
     };
 
     let conns_task = spawn_stats_connections_logger(&state, stats_refresh_interval as u64);
-    let http_task = start_http_server(state, shutdown_tx.subscribe());
+    let http_task = start_http_server(state.clone(), shutdown_tx.subscribe());
     let stats_task = spawn_stats_logger(stats_refresh_interval as u64, shutdown_tx.subscribe());
+    let cleanup_task = spawn_connection_cleanup_task(&state, 30, shutdown_tx.subscribe());
 
     let shutdown_signal = async {
         if let Err(err) = signal::ctrl_c().await {
@@ -43,6 +44,7 @@ pub async fn start(config: Env) -> anyhow::Result<()> {
         _ = http_task => warn!("http task ended"),
         _ = stats_task => warn!("stats logger task ended"),
         _ = conns_task => warn!("connections stats task ended"),
+        _ = cleanup_task => warn!("cleanup task ended"),
         _ = shutdown_signal => info!("shutdown signal received"),
     }
 
@@ -117,6 +119,89 @@ fn spawn_stats_logger(
                 }
                 _ = shutdown.recv() => {
                     info!("stats logger shutting down");
+                    break;
+                }
+            }
+        }
+    })
+}
+
+fn spawn_connection_cleanup_task(
+    state: &AppState,
+    interval: u64,
+    mut shutdown: broadcast::Receiver<()>,
+) -> tokio::task::JoinHandle<()> {
+    let connections = state.connections.clone();
+    let nodes = state.nodes.clone();
+
+    tokio::spawn(async move {
+        // Connections without heartbeat for longer than this are considered stale and removed
+        const CONNECTION_TIMEOUT: Duration = Duration::from_secs(3600); // 1 hour
+
+        let mut interval = tokio::time::interval(Duration::from_secs(interval));
+        loop {
+            tokio::select! {
+                _ = interval.tick() => {
+                    let now = SystemTime::now();
+
+                    // Clean up stale web connections
+                    let mut removed_count = 0;
+                    connections.retain(|_, conn| {
+                        match now.duration_since(conn.last_heartbeat) {
+                            Ok(elapsed) => {
+                                if elapsed > CONNECTION_TIMEOUT {
+                                    warn!(
+                                        "removing stale web connection from {} (inactive for {:.1?})",
+                                        conn.ip, elapsed
+                                    );
+                                    removed_count += 1;
+                                    false  // Remove this connection
+                                } else {
+                                    true  // Keep this connection
+                                }
+                            }
+                            Err(_) => true,  // Keep if time went backwards
+                        }
+                    });
+
+                    if removed_count > 0 {
+                        info!(
+                            "cleanup: removed {} stale web connections (active: {})",
+                            removed_count,
+                            connections.len()
+                        );
+                    }
+
+                    // Clean up stale node connections
+                    let mut removed_count = 0;
+                    nodes.retain(|_, node| {
+                        match now.duration_since(node.node.last_heartbeat) {
+                            Ok(elapsed) => {
+                                if elapsed > CONNECTION_TIMEOUT {
+                                    warn!(
+                                        "removing stale node from {} (inactive for {:.1?})",
+                                        node.node.ip, elapsed
+                                    );
+                                    removed_count += 1;
+                                    false  // Remove this node
+                                } else {
+                                    true  // Keep this node
+                                }
+                            }
+                            Err(_) => true,  // Keep if time went backwards
+                        }
+                    });
+
+                    if removed_count > 0 {
+                        info!(
+                            "cleanup: removed {} stale node connections (active: {})",
+                            removed_count,
+                            nodes.len()
+                        );
+                    }
+                }
+                _ = shutdown.recv() => {
+                    info!("connection cleanup task shutting down");
                     break;
                 }
             }

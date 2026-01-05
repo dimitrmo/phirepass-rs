@@ -20,6 +20,7 @@ netstat2 = { version = "0.11.2", optional = true }
 mac_address = { version = "1.1.8", optional = true }
 axum = { workspace = true, optional = true }
 ulid = { workspace = true, optional = true }
+bytes = { workspace = true, optional = true }
 
 [features]
 full = ["env", "ip", "logger", "node", "protocol", "stats", "time"]
@@ -27,7 +28,7 @@ env = []
 ip = ["dep:axum"]
 logger = ["dep:serde", "stats"]
 node = ["dep:serde", "dep:ulid", "stats"]
-protocol = ["dep:anyhow", "dep:serde", "dep:serde_json", "dep:rmp-serde"]
+protocol = ["dep:anyhow", "dep:serde", "dep:serde_json", "dep:rmp-serde", "dep:bytes"]
 stats = [
     "dep:get_if_addrs",
     "dep:mac_address",
