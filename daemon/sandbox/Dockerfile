@@ -32,6 +32,8 @@ FROM debian:trixie-slim AS sandbox
 ARG DEFAULT_USER=phire
 ARG DEFAULT_PASSWORD=pass
 
+ENV MALLOC_ARENA_MAX=2
+
 ENV RUST_LOG=info
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
