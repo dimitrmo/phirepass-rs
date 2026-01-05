@@ -1,8 +1,8 @@
 use jemallocator;
+use phirepass_common::runtime::build_runtime_from_env;
+
 #[global_allocator]
 static GLOBAL: jemallocator::Jemalloc = jemallocator::Jemalloc;
-
-use phirepass_common::runtime::build_runtime_from_env;
 
 mod cli;
 mod connection;

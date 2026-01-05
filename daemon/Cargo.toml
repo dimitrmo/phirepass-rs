@@ -26,3 +26,4 @@ russh-sftp = { workspace = true }
 ulid = { workspace = true }
 dashmap = { workspace = true }
 bytes = { workspace = true }
+jemallocator = { workspace = true }
