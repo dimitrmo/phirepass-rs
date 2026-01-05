@@ -1,4 +1,4 @@
-use phirepass_common::runtime::build_runtime_from_env;
+use phirepass_common::runtime::RuntimeBuilder;
 
 mod cli;
 mod daemon;
@@ -14,7 +14,7 @@ fn main() -> anyhow::Result<()> {
         .install_default()
         .expect("install rustls crypto provider");
 
-    let rt = build_runtime_from_env();
+    let rt = RuntimeBuilder::create().with_worker_threads(2).build()?;
 
     rt.block_on(async {
         let cli = cli::parse();
