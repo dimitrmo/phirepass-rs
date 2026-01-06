@@ -5,7 +5,6 @@ pub struct RuntimeBuilder {
 }
 
 impl RuntimeBuilder {
-
     pub fn create() -> Self {
         let flavor = std::env::var("TOKIO_FLAVOR").unwrap_or_else(|_| "multi_thread".to_string());
 
@@ -51,4 +50,3 @@ impl RuntimeBuilder {
         self.inner.build()
     }
 }
-
