@@ -20,6 +20,7 @@ RUN apt-get update && apt-get install -y \
 RUN case "${TARGETARCH}" in \
       "amd64") echo "x86_64-unknown-linux-gnu"  > /rust_target ;; \
       "arm64") echo "aarch64-unknown-linux-gnu" > /rust_target ;; \
+      "aarch64") echo "aarch64-unknown-linux-gnu" > /rust_target ;; \
       *) echo "Unsupported arch: ${TARGETARCH}" && exit 1 ;; \
     esac
 
