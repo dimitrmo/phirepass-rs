@@ -387,35 +387,7 @@ async fn handle_message(
             msg_id,
         } => {
             info!("received open tunnel with protocol {protocol}");
-
-            match config.ssh_auth_mode {
-                SSHAuthMethod::CredentialsPrompt => {
-                    if username.is_none() && password.is_none() {
-                        warn!("received open tunnel without username/password");
-                        send_requires_username_password_error(sender, cid, msg_id);
-                        return;
-                    }
-
-                    if username.is_none() {
-                        warn!("received open tunnel without username");
-                        send_requires_username_error(sender, cid, msg_id);
-                        return;
-                    };
-
-                    if password.is_none() {
-                        warn!("received open tunnel without password");
-                        send_requires_password_error(sender, cid, msg_id);
-                        return;
-                    };
-                }
-                SSHAuthMethod::UsernamePrompt => {
-                    if username.is_none() {
-                        warn!("received open tunnel without username");
-                        send_requires_username_error(sender, cid, msg_id);
-                        return;
-                    };
-                },
-            };
+            ensure_credentials(sender, &config, cid, &username, &password, msg_id);
 
             match Protocol::try_from(protocol) {
                 Ok(Protocol::SFTP) => {
@@ -423,7 +395,9 @@ async fn handle_message(
                         SSHAuthMethod::CredentialsPrompt => {
                             SFTPConfigAuth::UsernamePassword(username.unwrap(), password.unwrap())
                         }
-                        SSHAuthMethod::UsernamePrompt => SFTPConfigAuth::Username(username.unwrap()),
+                        SSHAuthMethod::PasswordlessPrompt => {
+                            SFTPConfigAuth::Username(username.unwrap())
+                        }
                     };
 
                     start_sftp_tunnel(
@@ -436,7 +410,9 @@ async fn handle_message(
                         SSHAuthMethod::CredentialsPrompt => {
                             SSHConfigAuth::UsernamePassword(username.unwrap(), password.unwrap())
                         }
-                        SSHAuthMethod::UsernamePrompt => SSHConfigAuth::Username(username.unwrap()),
+                        SSHAuthMethod::PasswordlessPrompt => {
+                            SSHConfigAuth::Username(username.unwrap())
+                        }
                     };
 
                     start_ssh_tunnel(sender, node_id, cid, config, auth, sessions, msg_id).await;
@@ -837,6 +813,44 @@ async fn close_tunnels_for_cid(cid: Ulid, sessions: &TunnelSessions) {
             handle.shutdown().await;
         }
     }
+}
+
+fn ensure_credentials(
+    sender: &Sender<Frame>,
+    config: &Arc<Env>,
+    cid: Ulid,
+    username: &Option<String>,
+    password: &Option<String>,
+    msg_id: Option<u32>,
+) {
+    match config.ssh_auth_mode {
+        SSHAuthMethod::CredentialsPrompt => {
+            if username.is_none() && password.is_none() {
+                warn!("received open tunnel without username/password");
+                send_requires_username_password_error(sender, cid, msg_id);
+                return;
+            }
+
+            if username.is_none() {
+                warn!("received open tunnel without username");
+                send_requires_username_error(sender, cid, msg_id);
+                return;
+            };
+
+            if password.is_none() {
+                warn!("received open tunnel without password");
+                send_requires_password_error(sender, cid, msg_id);
+                return;
+            };
+        }
+        SSHAuthMethod::PasswordlessPrompt => {
+            if username.is_none() {
+                warn!("received open tunnel without username");
+                send_requires_username_error(sender, cid, msg_id);
+                return;
+            };
+        }
+    };
 }
 
 fn send_requires_username_password_error(sender: &Sender<Frame>, cid: Ulid, msg_id: Option<u32>) {
