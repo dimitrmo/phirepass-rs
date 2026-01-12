@@ -388,31 +388,42 @@ async fn handle_message(
         } => {
             info!("received open tunnel with protocol {protocol}");
 
-            if username.is_none() && password.is_none() {
-                warn!("received open tunnel without username/password");
-                send_requires_username_password_error(sender, cid, msg_id);
-                return;
-            }
+            match config.ssh_auth_mode {
+                SSHAuthMethod::CredentialsPrompt => {
+                    if username.is_none() && password.is_none() {
+                        warn!("received open tunnel without username/password");
+                        send_requires_username_password_error(sender, cid, msg_id);
+                        return;
+                    }
 
-            let Some(username) = username else {
-                warn!("received open tunnel without username");
-                send_requires_username_error(sender, cid, msg_id);
-                return;
-            };
+                    if username.is_none() {
+                        warn!("received open tunnel without username");
+                        send_requires_username_error(sender, cid, msg_id);
+                        return;
+                    };
 
-            let Some(password) = password else {
-                warn!("received open tunnel without password");
-                send_requires_password_error(sender, cid, msg_id);
-                return;
+                    if password.is_none() {
+                        warn!("received open tunnel without password");
+                        send_requires_password_error(sender, cid, msg_id);
+                        return;
+                    };
+                }
+                SSHAuthMethod::UsernamePrompt => {
+                    if username.is_none() {
+                        warn!("received open tunnel without username");
+                        send_requires_username_error(sender, cid, msg_id);
+                        return;
+                    };
+                },
             };
 
             match Protocol::try_from(protocol) {
                 Ok(Protocol::SFTP) => {
                     let auth = match config.ssh_auth_mode {
                         SSHAuthMethod::CredentialsPrompt => {
-                            SFTPConfigAuth::UsernamePassword(username, password)
+                            SFTPConfigAuth::UsernamePassword(username.unwrap(), password.unwrap())
                         }
-                        SSHAuthMethod::UsernamePrompt => SFTPConfigAuth::Username(username),
+                        SSHAuthMethod::UsernamePrompt => SFTPConfigAuth::Username(username.unwrap()),
                     };
 
                     start_sftp_tunnel(
@@ -423,9 +434,9 @@ async fn handle_message(
                 Ok(Protocol::SSH) => {
                     let auth = match config.ssh_auth_mode {
                         SSHAuthMethod::CredentialsPrompt => {
-                            SSHConfigAuth::UsernamePassword(username, password)
+                            SSHConfigAuth::UsernamePassword(username.unwrap(), password.unwrap())
                         }
-                        SSHAuthMethod::UsernamePrompt => SSHConfigAuth::Username(username),
+                        SSHAuthMethod::UsernamePrompt => SSHConfigAuth::Username(username.unwrap()),
                     };
 
                     start_ssh_tunnel(sender, node_id, cid, config, auth, sessions, msg_id).await;
