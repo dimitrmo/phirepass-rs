@@ -1,6 +1,7 @@
 use phirepass_common::runtime::RuntimeBuilder;
 
 mod cli;
+mod common;
 mod daemon;
 mod env;
 mod http;

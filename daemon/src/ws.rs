@@ -1,3 +1,4 @@
+use crate::common::{send_frame_data, send_requires_password_error, send_requires_username_error};
 use crate::env::Env;
 use crate::session::{SESSION_ID, SessionCommand, SessionHandle, TunnelSessions};
 use crate::sftp::connection::{SFTPConfig, SFTPConfigAuth, SFTPConnection};
@@ -23,7 +24,6 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 use tokio::net::TcpStream;
 use tokio::sync::RwLock;
-use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::mpsc::{Receiver, Sender, channel};
 use tokio::sync::oneshot;
 use tokio_tungstenite::{
@@ -838,55 +838,6 @@ fn ensure_credentials(
     }
 
     Ok(())
-}
-
-fn send_requires_username_error(sender: &Sender<Frame>, cid: Ulid, msg_id: Option<u32>) {
-    send_frame_data(
-        sender,
-        NodeFrameData::WebFrame {
-            id: WebFrameId::ConnectionId(cid),
-            frame: WebFrameData::Error {
-                kind: FrameError::RequiresUsername,
-                message: String::from("Username is missing"),
-                msg_id,
-            },
-        },
-    );
-}
-
-fn send_requires_password_error(sender: &Sender<Frame>, cid: Ulid, msg_id: Option<u32>) {
-    send_frame_data(
-        sender,
-        NodeFrameData::WebFrame {
-            id: WebFrameId::ConnectionId(cid),
-            frame: WebFrameData::Error {
-                kind: FrameError::RequiresPassword,
-                message: String::from("Password is missing"),
-                msg_id,
-            },
-        },
-    );
-}
-
-fn send_frame_data(sender: &Sender<Frame>, data: NodeFrameData) {
-    if sender.is_closed() {
-        warn!("frame sender is closed, client may have been disconnected");
-        return;
-    }
-
-    match sender.try_send(data.into()) {
-        Ok(_) => debug!("frame response sent"),
-        Err(err) => match err {
-            TrySendError::Closed(err) => {
-                warn!("failed to send frame to closed channel: {err:?}");
-            }
-            TrySendError::Full(err) => {
-                debug!(
-                    "frame channel full for client, potential slow client or backpressure: {err:?}"
-                );
-            }
-        },
-    }
 }
 
 async fn start_sftp_tunnel(

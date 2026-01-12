@@ -1,11 +1,9 @@
+use crate::common::send_tunnel_data;
 use crate::ssh::client::SSHClient;
 use crate::ssh::session::SSHCommand;
 use bytes::Bytes;
 use log::{debug, info, warn};
-use phirepass_common::protocol::Protocol;
 use phirepass_common::protocol::common::Frame;
-use phirepass_common::protocol::node::{NodeFrameData, WebFrameId};
-use phirepass_common::protocol::web::WebFrameData;
 use russh::client::Handle;
 use russh::{ChannelMsg, Disconnect, Preferred, client, kex};
 use std::borrow::Cow;
@@ -168,28 +166,5 @@ impl SSHConnection {
             .await?;
 
         Ok(())
-    }
-}
-
-#[inline]
-pub async fn send_tunnel_data(tx: &Sender<Frame>, sid: u32, node_id: String, data: Bytes) {
-    if let Err(err) = tx
-        .send(
-            NodeFrameData::WebFrame {
-                frame: WebFrameData::TunnelData {
-                    protocol: Protocol::SSH as u8,
-                    node_id: node_id.to_string(),
-                    sid,
-                    data,
-                },
-                id: WebFrameId::SessionId(sid),
-            }
-            .into(),
-        )
-        .await
-    {
-        warn!("failed to send frame from ssh to server to web: {err}");
-    } else {
-        debug!("frame response sent");
     }
 }
