@@ -17,7 +17,7 @@ Rust workspace for the Phirepass remote-access relay. The system has three main 
 - Frames: 1 byte protocol + 4 byte BE payload length + payload. `Protocol::Control = 0`, `Protocol::SSH = 1`.
 - Control messages web→server: `Heartbeat`, `OpenTunnel`, `TunnelData` (payload for SSH), `Resize`, `TunnelClosed`, `Error`, `Ok`.
 - Control messages server→daemon: `Auth` (stubbed), `Heartbeat { stats }`, `OpenTunnel`, `TunnelData`, `Resize`, `Ping/Pong`, `ConnectionDisconnect`, `Frame { frame, cid }`, `Error`, `Ok`.
-- Errors back to web use `WebControlMessage::Error` with kinds `Generic`, `RequiresPassword`, `RequiresUsernamePassword`.
+- Errors back to web use `WebControlMessage::Error` with kinds `Generic`, `RequiresPassword`.
 
 ## HTTP endpoints (server)
 - `GET /api/web/ws` and `GET /api/nodes/ws`: WebSocket upgrades for web clients and nodes.

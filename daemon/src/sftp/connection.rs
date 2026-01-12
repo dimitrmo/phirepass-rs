@@ -80,7 +80,7 @@ impl SFTPConnection {
         }?;
 
         if !auth_res.success() {
-            anyhow::bail!("SFTP authentication failed. Please check your password.");
+            anyhow::bail!("SFTP authentication failed");
         }
 
         Ok(client_handler)

@@ -76,7 +76,7 @@ impl SSHConnection {
         }?;
 
         if !auth_res.success() {
-            anyhow::bail!("SSH authentication failed. Please check your password.");
+            anyhow::bail!("SSH authentication failed");
         }
 
         Ok(client_handler)

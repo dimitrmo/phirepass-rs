@@ -627,8 +627,8 @@ function connect() {
                 term.write(new Uint8Array(frame.data.web.data));
                 break;
             case "TunnelOpened":
-                log(`SSH Tunnel opened - Session ID: ${frame.data.web.sid}`);
-                setStatus("Tunnel established", "info");
+                // log(`SSH Tunnel opened - Session ID: ${frame.data.web.sid}`);
+                // setStatus("Tunnel established", "info");
                 session_id = frame.data.web.sid;
                 if (socket_healthy()) {
                     channel.send_ssh_terminal_resize(selected_node_id, session_id, term.cols, term.rows);
@@ -667,9 +667,18 @@ function connect() {
                         const message = frame?.data?.web?.message || "An unknown error occurred.";
                         setStatus("Error", "error");
                         log(message);
-                        session_username = "";
-                        isSshConnected = false;
-                        promptForUsername();
+
+                        // If error comes before any tunnel data, reset everything
+                        if (!isSshConnected) {
+                            session_username = "";
+                            resetCredentialCapture();
+                            cleanup();
+                        } else {
+                            // Already connected, just prompt for username
+                            session_username = "";
+                            isSshConnected = false;
+                            promptForUsername();
+                        }
                 }
                 break;
             default:
