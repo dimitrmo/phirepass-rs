@@ -1,9 +1,12 @@
-use crate::common::send_tunnel_data;
+use crate::common::{send_frame_data, send_tunnel_data};
+use crate::session::generate_session_id;
 use crate::ssh::client::SSHClient;
 use crate::ssh::session::SSHCommand;
 use bytes::Bytes;
 use log::{debug, info, warn};
+use phirepass_common::protocol::Protocol;
 use phirepass_common::protocol::common::Frame;
+use phirepass_common::protocol::node::NodeFrameData;
 use russh::client::Handle;
 use russh::{ChannelMsg, Disconnect, Preferred, client, kex};
 use std::borrow::Cow;
@@ -29,12 +32,18 @@ pub(crate) struct SSHConfig {
 }
 
 pub(crate) struct SSHConnection {
+    session_id: u32,
     config: SSHConfig,
 }
 
 impl SSHConnection {
     pub fn new(config: SSHConfig) -> Self {
-        Self { config }
+        let session_id = generate_session_id();
+        Self { session_id, config }
+    }
+
+    pub fn get_session_id(&self) -> u32 {
+        self.session_id
     }
 
     async fn create_client(&self) -> anyhow::Result<Handle<SSHClient>> {
@@ -77,8 +86,8 @@ impl SSHConnection {
         &self,
         node_id: Ulid,
         cid: Ulid,
-        sid: u32,
         tx: &Sender<Frame>,
+        msg_id: Option<u32>,
         mut cmd_rx: Receiver<SSHCommand>,
         mut shutdown_rx: oneshot::Receiver<()>,
     ) -> anyhow::Result<()> {
@@ -89,12 +98,23 @@ impl SSHConnection {
         debug!("ssh connected");
 
         let mut channel = client.channel_open_session().await?;
-
-        // Allocate a PTY so bash runs in interactive mode and emits a prompt.
         channel
             .request_pty(true, "xterm-256color", 80, 24, 0, 0, &[])
             .await?;
         channel.request_shell(true).await?;
+        let sid = self.get_session_id();
+
+        send_frame_data(
+            &tx,
+            NodeFrameData::TunnelOpened {
+                protocol: Protocol::SSH as u8,
+                cid,
+                sid,
+                msg_id,
+            },
+        );
+
+        info!("ssh[id={sid}] tunnel opened");
 
         loop {
             tokio::select! {

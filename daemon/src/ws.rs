@@ -1,6 +1,6 @@
 use crate::common::{send_frame_data, send_requires_password_error, send_requires_username_error};
 use crate::env::Env;
-use crate::session::{SESSION_ID, SessionCommand, SessionHandle, TunnelSessions};
+use crate::session::{SessionCommand, SessionHandle, TunnelSessions};
 use crate::sftp::connection::{SFTPConfig, SFTPConfigAuth, SFTPConnection};
 use crate::sftp::session::{SFTPCommand, SFTPSessionHandle};
 use crate::sftp::{SFTPActiveDownloads, SFTPActiveUploads};
@@ -20,7 +20,6 @@ use phirepass_common::protocol::web::WebFrameData;
 use phirepass_common::stats::Stats;
 use phirepass_common::time::now_millis;
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
 use std::time::Duration;
 use tokio::net::TcpStream;
 use tokio::sync::RwLock;
@@ -853,7 +852,6 @@ async fn start_sftp_tunnel(
     let (stdin_tx, stdin_rx) = channel::<SFTPCommand>(2048);
     let (stop_tx, stop_rx) = oneshot::channel();
     let sender = tx.clone();
-    let session_id = SESSION_ID.fetch_add(1, Ordering::Relaxed);
     let tx_for_opened = tx.clone();
 
     let conn = SFTPConnection::new(SFTPConfig {
@@ -863,6 +861,8 @@ async fn start_sftp_tunnel(
         inactivity_timeout: config.get_ssh_inactivity_duration(),
     });
 
+    let sid = conn.get_session_id();
+
     info!(
         "connecting sftp for connection {cid}: {}:{}",
         config.ssh_host, config.ssh_port
@@ -870,24 +870,15 @@ async fn start_sftp_tunnel(
 
     let uploads = uploads.clone();
     let downloads = downloads.clone();
+
     // Background task will run to completion or until stop_rx is triggered.
     // Not awaited here; cleanup is managed via the SessionHandle (stop_tx).
     let _sftp_task = tokio::spawn(async move {
         info!("sftp task started for connection {cid}");
 
-        send_frame_data(
-            &sender,
-            NodeFrameData::TunnelOpened {
-                protocol: Protocol::SFTP as u8,
-                cid,
-                sid: session_id,
-                msg_id,
-            },
-        );
-
         match conn
             .connect(
-                cid, session_id, &sender, &uploads, &downloads, stdin_rx, stop_rx,
+                cid, &sender, msg_id, &uploads, &downloads, stdin_rx, stop_rx,
             )
             .await
         {
@@ -898,7 +889,7 @@ async fn start_sftp_tunnel(
                     NodeFrameData::TunnelClosed {
                         protocol: Protocol::SFTP as u8,
                         cid,
-                        sid: session_id,
+                        sid,
                         msg_id,
                     },
                 );
@@ -908,7 +899,7 @@ async fn start_sftp_tunnel(
                 send_frame_data(
                     &tx_for_opened,
                     NodeFrameData::WebFrame {
-                        id: WebFrameId::SessionId(session_id),
+                        id: WebFrameId::SessionId(sid),
                         frame: WebFrameData::Error {
                             kind: FrameError::Generic,
                             message: err.to_string(),
@@ -925,9 +916,9 @@ async fn start_sftp_tunnel(
         stdin: stdin_tx,
     });
 
-    info!("sftp session handle {session_id} created");
+    info!("sftp session handle {sid} created");
 
-    let previous = sessions.insert((cid, session_id), handle);
+    let previous = sessions.insert((cid, sid), handle);
 
     if let Some(prev) = previous {
         info!("removing previous sftp session {cid}");
@@ -947,10 +938,7 @@ async fn start_ssh_tunnel(
     let (stdin_tx, stdin_rx) = channel::<SSHCommand>(512);
     let (stop_tx, stop_rx) = oneshot::channel();
     let sender = tx.clone();
-    let session_id = SESSION_ID.fetch_add(1, Ordering::Relaxed);
-    // let sessions_for_task = sessions.clone();
     let tx_for_opened = tx.clone();
-    // let config_for_task = config.clone();
 
     let conn = SSHConnection::new(SSHConfig {
         host: config.ssh_host.clone(),
@@ -958,6 +946,8 @@ async fn start_ssh_tunnel(
         credentials,
         inactivity_timeout: config.get_ssh_inactivity_duration(),
     });
+
+    let sid = conn.get_session_id();
 
     info!(
         "connecting ssh for connection {cid}: {}:{}",
@@ -969,18 +959,8 @@ async fn start_ssh_tunnel(
     let _ssh_task = tokio::spawn(async move {
         info!("ssh task started for connection {cid}");
 
-        send_frame_data(
-            &sender,
-            NodeFrameData::TunnelOpened {
-                protocol: Protocol::SSH as u8,
-                cid,
-                sid: session_id,
-                msg_id,
-            },
-        );
-
         match conn
-            .connect(node_id, cid, session_id, &sender, stdin_rx, stop_rx)
+            .connect(node_id, cid, &sender, msg_id, stdin_rx, stop_rx)
             .await
         {
             Ok(_) => {
@@ -990,7 +970,7 @@ async fn start_ssh_tunnel(
                     NodeFrameData::TunnelClosed {
                         protocol: Protocol::SSH as u8,
                         cid,
-                        sid: session_id,
+                        sid,
                         msg_id,
                     },
                 );
@@ -1000,7 +980,7 @@ async fn start_ssh_tunnel(
                 send_frame_data(
                     &tx_for_opened,
                     NodeFrameData::WebFrame {
-                        id: WebFrameId::SessionId(session_id),
+                        id: WebFrameId::SessionId(sid),
                         frame: WebFrameData::Error {
                             kind: FrameError::Generic,
                             message: err.to_string(),
@@ -1017,9 +997,9 @@ async fn start_ssh_tunnel(
         stdin: stdin_tx,
     });
 
-    info!("ssh session handle {session_id} created");
+    info!("ssh session handle {sid} created");
 
-    let previous = sessions.insert((cid, session_id), handle);
+    let previous = sessions.insert((cid, sid), handle);
 
     if let Some(prev) = previous {
         info!("removing previous ssh session {cid}");

@@ -4,13 +4,17 @@ use dashmap::DashMap;
 use log::info;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
-use std::sync::atomic::AtomicU32;
+use std::sync::atomic::{AtomicU32, Ordering};
 use tokio::sync::mpsc::Sender;
 use ulid::Ulid;
 
 pub type TunnelSessions = Arc<DashMap<(Ulid, u32), SessionHandle>>;
 
-pub static SESSION_ID: AtomicU32 = AtomicU32::new(1);
+static SESSION_ID: AtomicU32 = AtomicU32::new(1);
+
+pub fn generate_session_id() -> u32 {
+    SESSION_ID.fetch_add(1, Ordering::Relaxed)
+}
 
 #[derive(Debug)]
 pub enum SessionHandle {

@@ -1,3 +1,5 @@
+use crate::common::send_frame_data;
+use crate::session::generate_session_id;
 use crate::sftp::actions::delete::delete_file;
 use crate::sftp::actions::download;
 use crate::sftp::actions::list_dir::send_directory_listing;
@@ -6,7 +8,9 @@ use crate::sftp::client::SFTPClient;
 use crate::sftp::session::SFTPCommand;
 use crate::sftp::{SFTPActiveDownloads, SFTPActiveUploads};
 use log::{debug, info};
+use phirepass_common::protocol::Protocol;
 use phirepass_common::protocol::common::Frame;
+use phirepass_common::protocol::node::NodeFrameData;
 use russh::client::Handle;
 use russh::{Preferred, client, kex};
 use russh_sftp::client::SftpSession;
@@ -32,12 +36,18 @@ pub(crate) struct SFTPConfig {
 }
 
 pub(crate) struct SFTPConnection {
+    session_id: u32,
     config: SFTPConfig,
 }
 
 impl SFTPConnection {
     pub fn new(config: SFTPConfig) -> Self {
-        Self { config }
+        let session_id = generate_session_id();
+        Self { session_id, config }
+    }
+
+    pub fn get_session_id(&self) -> u32 {
+        self.session_id
     }
 
     async fn create_client(&self) -> anyhow::Result<Handle<SFTPClient>> {
@@ -79,8 +89,8 @@ impl SFTPConnection {
     pub async fn connect(
         &self,
         cid: Ulid,
-        sid: u32,
         tx: &Sender<Frame>,
+        msg_id: Option<u32>,
         uploads: &SFTPActiveUploads,
         downloads: &SFTPActiveDownloads,
         mut cmd_rx: Receiver<SFTPCommand>,
@@ -96,6 +106,19 @@ impl SFTPConnection {
         channel.request_subsystem(true, "sftp").await?;
         let stream = channel.into_stream();
         let sftp = SftpSession::new(stream).await?;
+        let sid = self.get_session_id();
+
+        send_frame_data(
+            &tx,
+            NodeFrameData::TunnelOpened {
+                protocol: Protocol::SFTP as u8,
+                cid,
+                sid,
+                msg_id,
+            },
+        );
+
+        info!("sftp[id={sid}] tunnel opened");
 
         loop {
             tokio::select! {

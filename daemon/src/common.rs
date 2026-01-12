@@ -38,7 +38,7 @@ pub async fn send_tunnel_data(tx: &Sender<Frame>, sid: u32, node_id: String, dat
             id: WebFrameId::SessionId(sid),
             frame: WebFrameData::TunnelData {
                 protocol: Protocol::SSH as u8,
-                node_id: node_id.to_string(),
+                node_id,
                 sid,
                 data,
             },
