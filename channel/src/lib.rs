@@ -407,7 +407,6 @@ pub enum ErrorType {
     Generic = 0,
     RequiredUsername = 100,
     RequiresPassword = 110,
-    RequiresUsernamePassword = 120,
 }
 
 #[repr(u8)]

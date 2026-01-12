@@ -38,7 +38,7 @@ let isSshConnected = false;
 let sftpBrowser = null;
 let currentTab = "ssh"; // Track current active tab
 
-let credentialMode = null; // "username" | "password"
+let credentialMode = null; // "username" | "password" | "username-only"
 let usernameBuffer = "";
 let passwordBuffer = "";
 let session_username = "";
@@ -256,7 +256,7 @@ const promptForPassword = (shouldReset = false) => {
     setStatus("Enter password", "warn");
 };
 
-const submitUsername = () => {
+const submitUsername = (requirePassword = true) => {
     const username = usernameBuffer.trim();
     if (!username.length) {
         log("Username is required to start SSH session");
@@ -267,7 +267,20 @@ const submitUsername = () => {
     }
 
     session_username = username;
-    promptForPassword(true);
+
+    if (requirePassword) {
+        // Requires both username and password
+        promptForPassword(true);
+    } else {
+        // Only username required, send with empty password
+        resetCredentialCapture();
+        setStatus("Authenticating...", "info");
+        log(`Attempting SSH connection with username only...`);
+
+        if (socket_healthy()) {
+            socket.open_ssh_tunnel(selected_node_id, session_username, "");
+        }
+    }
 };
 
 const cancelCredentialEntry = () => {
@@ -277,10 +290,10 @@ const cancelCredentialEntry = () => {
     cleanup();
 };
 
-const handleUsernameKeystroke = (data) => {
+const handleUsernameKeystroke = (data, requirePassword = true) => {
     if (data === "\r" || data === "\n") {
         term.write("\r\n");
-        submitUsername();
+        submitUsername(requirePassword);
         return;
     }
 
@@ -528,13 +541,6 @@ function connectSFTP() {
                 if (!isSftpContext) break;
 
                 switch (frame.data.web.kind) {
-                    case ErrorType.RequiresUsernamePassword:
-                        if (sftpBrowser) {
-                            sftpBrowser.showCredentialsModal();
-                            setStatus("SFTP Credentials required", "warn");
-                            log("SFTP username and password are required.");
-                        }
-                        break;
                     case ErrorType.RequiresPassword:
                         if (sftpBrowser) {
                             sftpBrowser.showCredentialsModal();
@@ -637,26 +643,23 @@ function connect() {
             case "Error":
                 switch (frame.data.web.kind) {
                     case ErrorType.RequiredUsername:
+                        // Only username required, password should be empty
                         term.reset();
-                        setStatus("Credentials required", "warn");
+                        setStatus("Username required", "warn");
                         log("SSH username is required.");
-                        promptForUsername();
-                        break;
-                    case ErrorType.RequiresUsernamePassword:
-                        term.reset();
-                        setStatus("Credentials required", "warn");
-                        log("SSH credentials are required.");
-                        if (!session_username) {
-                            promptForUsername();
-                        } else {
-                            promptForPassword();
-                        }
+                        resetCredentialCapture();
+                        session_username = "";
+                        term.write("Enter username: ");
+                        credentialMode = "username-only";
                         break;
                     case ErrorType.RequiresPassword:
+                        // Only password required, keep the username
                         term.reset();
                         setStatus("Password required", "warn");
                         log("SSH password is required.");
-                        promptForPassword();
+                        passwordBuffer = "";
+                        credentialMode = "password";
+                        term.write("Enter password: ");
                         break;
                     case ErrorType.Generic:
                     default:
@@ -770,7 +773,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
     term.onData((data) => {
         if (credentialMode === "username") {
-            handleUsernameKeystroke(data);
+            handleUsernameKeystroke(data, true); // requires password after username
+            return;
+        }
+
+        if (credentialMode === "username-only") {
+            handleUsernameKeystroke(data, false); // no password required
             return;
         }
 

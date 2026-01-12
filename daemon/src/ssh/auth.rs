@@ -1,8 +1,8 @@
 #[derive(Clone, Debug)]
 pub enum SSHAuthMethod {
-    // both username is required
+    // both username and password are required
     Password,
-    // only username
+    // only username is required
     None,
 }
 

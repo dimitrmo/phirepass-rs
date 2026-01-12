@@ -825,50 +825,19 @@ fn ensure_credentials(
     password: &Option<String>,
     msg_id: Option<u32>,
 ) -> anyhow::Result<()> {
-    match config.ssh_auth_mode {
-        SSHAuthMethod::Password => {
-            info!("ssh auth password method found");
-
-            if username.is_none() && password.is_none() {
-                send_requires_username_password_error(sender, cid, msg_id);
-                anyhow::bail!("received open tunnel without password")
-            }
-
-            if username.is_none() {
-                send_requires_username_error(sender, cid, msg_id);
-                anyhow::bail!("received open tunnel without username")
-            };
-
-            if password.is_none() {
-                send_requires_password_error(sender, cid, msg_id);
-                anyhow::bail!("received open tunnel without password")
-            };
-        }
-        SSHAuthMethod::None => {
-            info!("ssh auth none method found");
-
-            if username.is_none() {
-                send_requires_username_error(sender, cid, msg_id);
-                anyhow::bail!("received open tunnel without username")
-            };
-        }
+    if username.is_none() {
+        send_requires_username_error(sender, cid, msg_id);
+        anyhow::bail!("received open tunnel without username")
     };
 
-    Ok(())
-}
+    if let SSHAuthMethod::Password = config.ssh_auth_mode {
+        if password.is_none() {
+            send_requires_password_error(sender, cid, msg_id);
+            anyhow::bail!("received open tunnel without password")
+        };
+    }
 
-fn send_requires_username_password_error(sender: &Sender<Frame>, cid: Ulid, msg_id: Option<u32>) {
-    send_frame_data(
-        sender,
-        NodeFrameData::WebFrame {
-            id: WebFrameId::ConnectionId(cid),
-            frame: WebFrameData::Error {
-                kind: FrameError::RequiresUsernamePassword,
-                message: String::from("Credentials are missing"),
-                msg_id,
-            },
-        },
-    );
+    Ok(())
 }
 
 fn send_requires_username_error(sender: &Sender<Frame>, cid: Ulid, msg_id: Option<u32>) {
