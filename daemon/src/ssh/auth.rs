@@ -1,9 +1,9 @@
 #[derive(Clone, Debug)]
 pub enum SSHAuthMethod {
     // both username is required
-    CredentialsPrompt,
+    Password,
     // only username
-    PasswordlessPrompt,
+    None,
 }
 
 impl std::str::FromStr for SSHAuthMethod {
@@ -11,8 +11,8 @@ impl std::str::FromStr for SSHAuthMethod {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
-            "credentials_prompt" => Ok(SSHAuthMethod::CredentialsPrompt),
-            "passwordless_prompt" => Ok(SSHAuthMethod::PasswordlessPrompt),
+            "password" => Ok(SSHAuthMethod::Password),
+            "none" => Ok(SSHAuthMethod::None),
             _ => Err(format!("invalid authentication method: {}", s)),
         }
     }

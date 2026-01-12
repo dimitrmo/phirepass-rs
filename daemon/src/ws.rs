@@ -387,17 +387,21 @@ async fn handle_message(
             msg_id,
         } => {
             info!("received open tunnel with protocol {protocol}");
-            ensure_credentials(sender, &config, cid, &username, &password, msg_id);
+            if let Err(err) = ensure_credentials(sender, &config, cid, &username, &password, msg_id)
+            {
+                warn!("credentials verification error: {err}");
+                return;
+            }
+
+            info!("credentials verification succeeded");
 
             match Protocol::try_from(protocol) {
                 Ok(Protocol::SFTP) => {
                     let auth = match config.ssh_auth_mode {
-                        SSHAuthMethod::CredentialsPrompt => {
+                        SSHAuthMethod::Password => {
                             SFTPConfigAuth::UsernamePassword(username.unwrap(), password.unwrap())
                         }
-                        SSHAuthMethod::PasswordlessPrompt => {
-                            SFTPConfigAuth::Username(username.unwrap())
-                        }
+                        SSHAuthMethod::None => SFTPConfigAuth::Username(username.unwrap()),
                     };
 
                     start_sftp_tunnel(
@@ -407,12 +411,10 @@ async fn handle_message(
                 }
                 Ok(Protocol::SSH) => {
                     let auth = match config.ssh_auth_mode {
-                        SSHAuthMethod::CredentialsPrompt => {
+                        SSHAuthMethod::Password => {
                             SSHConfigAuth::UsernamePassword(username.unwrap(), password.unwrap())
                         }
-                        SSHAuthMethod::PasswordlessPrompt => {
-                            SSHConfigAuth::Username(username.unwrap())
-                        }
+                        SSHAuthMethod::None => SSHConfigAuth::Username(username.unwrap()),
                     };
 
                     start_ssh_tunnel(sender, node_id, cid, config, auth, sessions, msg_id).await;
@@ -822,35 +824,37 @@ fn ensure_credentials(
     username: &Option<String>,
     password: &Option<String>,
     msg_id: Option<u32>,
-) {
+) -> anyhow::Result<()> {
     match config.ssh_auth_mode {
-        SSHAuthMethod::CredentialsPrompt => {
+        SSHAuthMethod::Password => {
+            info!("ssh auth password method found");
+
             if username.is_none() && password.is_none() {
-                warn!("received open tunnel without username/password");
                 send_requires_username_password_error(sender, cid, msg_id);
-                return;
+                anyhow::bail!("received open tunnel without password")
             }
 
             if username.is_none() {
-                warn!("received open tunnel without username");
                 send_requires_username_error(sender, cid, msg_id);
-                return;
+                anyhow::bail!("received open tunnel without username")
             };
 
             if password.is_none() {
-                warn!("received open tunnel without password");
                 send_requires_password_error(sender, cid, msg_id);
-                return;
+                anyhow::bail!("received open tunnel without password")
             };
         }
-        SSHAuthMethod::PasswordlessPrompt => {
+        SSHAuthMethod::None => {
+            info!("ssh auth none method found");
+
             if username.is_none() {
-                warn!("received open tunnel without username");
                 send_requires_username_error(sender, cid, msg_id);
-                return;
+                anyhow::bail!("received open tunnel without username")
             };
         }
     };
+
+    Ok(())
 }
 
 fn send_requires_username_password_error(sender: &Sender<Frame>, cid: Ulid, msg_id: Option<u32>) {

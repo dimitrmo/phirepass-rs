@@ -43,7 +43,7 @@ pub(crate) struct Env {
     #[envconfig(from = "SSH_PORT", default = "22")]
     pub ssh_port: u16,
 
-    #[envconfig(from = "SSH_AUTH_METHOD", default = "credentials_prompt")]
+    #[envconfig(from = "SSH_AUTH_METHOD", default = "password")]
     pub ssh_auth_mode: SSHAuthMethod,
 
     #[envconfig(from = "SSH_INACTIVITY_PERIOD", default = "3600")] // 1 hour
