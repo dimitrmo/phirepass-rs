@@ -27,7 +27,7 @@ impl WebConnection {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub(crate) struct NodeConnection {
     pub(crate) node: Node,
     #[serde(skip_serializing)]

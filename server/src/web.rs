@@ -636,10 +636,7 @@ async fn handle_web_open_tunnel(
     username: Option<String>,
     password: Option<String>,
 ) {
-    info!(
-        "received open tunnel message protocol={:?} target={:?}",
-        protocol, target
-    );
+    info!("received open tunnel message protocol={protocol} node_id={target}");
 
     let node_id = match Ulid::from_string(&target) {
         Ok(id) => id,
@@ -655,19 +652,6 @@ async fn handle_web_open_tunnel(
         warn!("tx for node not found {node_id}");
         return;
     };
-
-    /*
-    let Some(username) = username else {
-        warn!("username not found");
-        let _ = send_requires_username_password_error(state, &cid, msg_id).await;
-        return;
-    };
-
-    let Some(password) = password else {
-        warn!("password not found");
-        let _ = send_requires_password_error(state, &cid, msg_id).await;
-        return;
-    };*/
 
     if tx
         .send(NodeFrameData::OpenTunnel {
