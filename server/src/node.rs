@@ -8,7 +8,7 @@ use axum_client_ip::ClientIp;
 use futures_util::{SinkExt, StreamExt};
 use log::{debug, info, warn};
 use phirepass_common::protocol::common::{Frame, FrameData};
-use phirepass_common::protocol::node::NodeFrameData;
+use phirepass_common::protocol::node::{NodeFrameData, WebFrameId};
 use phirepass_common::protocol::web::WebFrameData;
 use phirepass_common::stats::Stats;
 use std::net::IpAddr;
@@ -219,8 +219,8 @@ async fn handle_node_messages(
                         handle_tunnel_opened(&state, protocol, cid, sid, &id, msg_id).await;
                     }
                     // daemon notified server with data for web
-                    NodeFrameData::WebFrame { frame, sid } => {
-                        handle_frame_response(&state, frame, sid, &id).await;
+                    NodeFrameData::WebFrame { .. } => {
+                        handle_frame_response(&state, node_frame, &id).await;
                     }
                     // daemon notified server with data for web
                     NodeFrameData::TunnelClosed {
@@ -264,29 +264,34 @@ async fn get_connection_id_by_sid(
     Ok(client_id)
 }
 
-async fn handle_frame_response(state: &AppState, frame: WebFrameData, sid: u32, node_id: &Ulid) {
+async fn handle_frame_response(state: &AppState, node_frame: NodeFrameData, node_id: &Ulid) {
     debug!("web frame response received");
 
-    let client_id = match get_connection_id_by_sid(state, sid, node_id).await {
-        Ok(client_id) => client_id,
-        Err(err) => {
-            warn!("error getting client id: {err}");
-            return;
-        }
+    let NodeFrameData::WebFrame { frame, id } = node_frame else {
+        warn!("node frame not of webframe type");
+        return;
     };
 
-    let tx = state
-        .connections
-        .get(&client_id)
-        .map(|info| info.tx.clone());
+    let cid = match id {
+        WebFrameId::ConnectionId(cid) => cid,
+        WebFrameId::SessionId(sid) => match get_connection_id_by_sid(state, sid, node_id).await {
+            Ok(client_id) => client_id,
+            Err(err) => {
+                warn!("error getting client id: {err}");
+                return;
+            }
+        },
+    };
+
+    let tx = state.connections.get(&cid).map(|info| info.tx.clone());
 
     let Some(tx) = tx else {
-        warn!("tx for client not found {node_id}");
+        warn!("tx for client {cid} not found {node_id}");
         return;
     };
 
     match tx.send(frame).await {
-        Ok(_) => debug!("forwarded tunnel data to node {node_id}"),
+        Ok(_) => debug!("forwarded tunnel data to node {node_id} for client {cid}"),
         Err(err) => warn!("failed to forward tunnel data to node {node_id}: {err}"),
     }
 }

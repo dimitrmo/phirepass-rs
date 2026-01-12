@@ -8,6 +8,12 @@ use serde::{Deserialize, Serialize};
 use ulid::Ulid;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub enum WebFrameId {
+    SessionId(u32),
+    ConnectionId(Ulid),
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(tag = "type")]
 pub enum NodeFrameData {
     Heartbeat {
@@ -29,15 +35,15 @@ pub enum NodeFrameData {
     OpenTunnel {
         protocol: u8,
         cid: Ulid,
-        username: String,
-        password: String,
+        username: Option<String>,
+        password: Option<String>,
         msg_id: Option<u32>, // custom web user supplied. easier to track responses and map them to requests
     },
 
     TunnelOpened {
         protocol: u8,
         cid: Ulid,
-        sid: u32,
+        sid: u32,            // tunnel session id. exists only after we have a tunnel opened
         msg_id: Option<u32>, // custom web user supplied. easier to track responses and map them to requests
     },
 
@@ -122,7 +128,7 @@ pub enum NodeFrameData {
 
     WebFrame {
         frame: WebFrameData,
-        sid: u32,
+        id: WebFrameId,
     },
 
     ConnectionDisconnect {

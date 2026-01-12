@@ -1,6 +1,6 @@
 use log::{debug, warn};
 use phirepass_common::protocol::common::{Frame, FrameError};
-use phirepass_common::protocol::node::NodeFrameData;
+use phirepass_common::protocol::node::{NodeFrameData, WebFrameId};
 use phirepass_common::protocol::sftp::{SFTPListItem, SFTPListItemAttributes, SFTPListItemKind};
 use phirepass_common::protocol::web::WebFrameData;
 use russh_sftp::client::SftpSession;
@@ -27,7 +27,7 @@ pub async fn send_directory_listing(
                             message: format!("Failed to list directory: {}", err),
                             msg_id,
                         },
-                        sid,
+                        id: WebFrameId::SessionId(sid),
                     }
                     .into(),
                 )
@@ -51,7 +51,7 @@ pub async fn send_directory_listing(
                     msg_id,
                     dir,
                 },
-                sid,
+                id: WebFrameId::SessionId(sid),
             }
             .into(),
         )

@@ -405,8 +405,9 @@ impl Channel {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ErrorType {
     Generic = 0,
-    RequiresPassword = 100,
-    RequiresUsernamePassword = 110,
+    RequiredUsername = 100,
+    RequiresPassword = 110,
+    RequiresUsernamePassword = 120,
 }
 
 #[repr(u8)]

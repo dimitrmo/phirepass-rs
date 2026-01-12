@@ -636,21 +636,27 @@ function connect() {
                 break;
             case "Error":
                 switch (frame.data.web.kind) {
+                    case ErrorType.RequiredUsername:
+                        term.reset();
+                        setStatus("Credentials required", "warn");
+                        log("SSH username is required.");
+                        promptForUsername();
+                        break;
                     case ErrorType.RequiresUsernamePassword:
                         term.reset();
                         setStatus("Credentials required", "warn");
-                        log("SSH username and password are required.");
-                        promptForUsername();
-                        break;
-                    case ErrorType.RequiresPassword:
-                        term.reset();
-                        setStatus("Password required", "warn");
-                        log("SSH password is required.");
+                        log("SSH credentials are required.");
                         if (!session_username) {
                             promptForUsername();
                         } else {
                             promptForPassword();
                         }
+                        break;
+                    case ErrorType.RequiresPassword:
+                        term.reset();
+                        setStatus("Password required", "warn");
+                        log("SSH password is required.");
+                        promptForPassword();
                         break;
                     case ErrorType.Generic:
                     default:

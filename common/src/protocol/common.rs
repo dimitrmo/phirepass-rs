@@ -166,8 +166,9 @@ impl Frame {
 #[repr(u8)]
 pub enum FrameError {
     Generic = 0,
-    RequiresPassword = 100,
-    RequiresUsernamePassword = 110,
+    RequiresUsername = 100,
+    RequiresPassword = 110,
+    RequiresUsernamePassword = 120,
 }
 
 impl Serialize for FrameError {
@@ -193,8 +194,9 @@ impl From<u8> for FrameError {
     fn from(value: u8) -> Self {
         match value {
             0 => Self::Generic,
-            100 => Self::RequiresPassword,
-            110 => Self::RequiresUsernamePassword,
+            100 => Self::RequiresUsername,
+            110 => Self::RequiresPassword,
+            120 => Self::RequiresUsernamePassword,
             _ => Self::Generic,
         }
     }

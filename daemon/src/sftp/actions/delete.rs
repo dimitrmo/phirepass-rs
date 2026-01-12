@@ -1,7 +1,7 @@
 use crate::sftp::SFTPActiveUploads;
 use log::{info, warn};
 use phirepass_common::protocol::common::{Frame, FrameError};
-use phirepass_common::protocol::node::NodeFrameData;
+use phirepass_common::protocol::node::{NodeFrameData, WebFrameId};
 use phirepass_common::protocol::sftp::SFTPDelete;
 use phirepass_common::protocol::web::WebFrameData;
 use russh_sftp::client::SftpSession;
@@ -53,7 +53,7 @@ pub async fn delete_file(
                             message: format!("Failed to delete file: {}", err),
                             msg_id,
                         },
-                        sid,
+                        id: WebFrameId::SessionId(sid),
                     }
                     .into(),
                 )

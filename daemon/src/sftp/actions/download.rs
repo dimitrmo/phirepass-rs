@@ -4,7 +4,7 @@ use crate::sftp::{
 use bytes::Bytes;
 use log::{debug, info, warn};
 use phirepass_common::protocol::common::{Frame, FrameError};
-use phirepass_common::protocol::node::NodeFrameData;
+use phirepass_common::protocol::node::{NodeFrameData, WebFrameId};
 use phirepass_common::protocol::sftp::{
     SFTPDownloadChunk, SFTPDownloadStart, SFTPDownloadStartResponse,
 };
@@ -58,7 +58,7 @@ pub async fn start_download(
                             message: format!("Failed to get file metadata: {}", err),
                             msg_id,
                         },
-                        sid,
+                        id: WebFrameId::SessionId(sid),
                     }
                     .into(),
                 )
@@ -85,7 +85,7 @@ pub async fn start_download(
                             message: format!("Failed to open file: {}", err),
                             msg_id,
                         },
-                        sid,
+                        id: WebFrameId::SessionId(sid),
                     }
                     .into(),
                 )
@@ -128,7 +128,7 @@ pub async fn start_download(
                         total_chunks,
                     },
                 },
-                sid,
+                id: WebFrameId::SessionId(sid),
             }
             .into(),
         )
@@ -170,7 +170,7 @@ pub async fn download_file_chunk(
                                 message: format!("Error seeking file: {}", err),
                                 msg_id,
                             },
-                            sid,
+                            id: WebFrameId::SessionId(sid),
                         }
                         .into(),
                     )
@@ -216,7 +216,7 @@ pub async fn download_file_chunk(
                             .send(
                                 NodeFrameData::WebFrame {
                                     frame: WebFrameData::SFTPDownloadChunk { sid, msg_id, chunk },
-                                    sid,
+                                    id: WebFrameId::SessionId(sid),
                                 }
                                 .into(),
                             )
@@ -239,7 +239,7 @@ pub async fn download_file_chunk(
                                         message: format!("Error reading file: {}", err),
                                         msg_id,
                                     },
-                                    sid,
+                                    id: WebFrameId::SessionId(sid),
                                 }
                                 .into(),
                             )
@@ -259,7 +259,7 @@ pub async fn download_file_chunk(
                             message: "Download not found or expired".to_string(),
                             msg_id,
                         },
-                        sid,
+                        id: WebFrameId::SessionId(sid),
                     }
                     .into(),
                 )

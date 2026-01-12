@@ -7,7 +7,7 @@ use axum_client_ip::ClientIp;
 use bytes::Bytes;
 use futures_util::{SinkExt, StreamExt};
 use log::{debug, info, warn};
-use phirepass_common::protocol::common::{Frame, FrameData, FrameError};
+use phirepass_common::protocol::common::{Frame, FrameData};
 use phirepass_common::protocol::node::NodeFrameData;
 use phirepass_common::protocol::web::WebFrameData;
 use std::net::IpAddr;
@@ -656,6 +656,7 @@ async fn handle_web_open_tunnel(
         return;
     };
 
+    /*
     let Some(username) = username else {
         warn!("username not found");
         let _ = send_requires_username_password_error(state, &cid, msg_id).await;
@@ -666,7 +667,7 @@ async fn handle_web_open_tunnel(
         warn!("password not found");
         let _ = send_requires_password_error(state, &cid, msg_id).await;
         return;
-    };
+    };*/
 
     if tx
         .send(NodeFrameData::OpenTunnel {
@@ -686,46 +687,6 @@ async fn handle_web_open_tunnel(
             protocol
         );
     }
-}
-
-async fn send_requires_username_password_error(
-    state: &AppState,
-    cid: &Ulid,
-    msg_id: Option<u32>,
-) -> anyhow::Result<()> {
-    if let Some(wc) = state.connections.get(cid) {
-        wc.tx
-            .send(WebFrameData::Error {
-                kind: FrameError::RequiresUsernamePassword,
-                message: "Credentials are required".to_string(),
-                msg_id,
-            })
-            .await?;
-    } else {
-        warn!("failed to find connection {cid}");
-    }
-
-    Ok(())
-}
-
-async fn send_requires_password_error(
-    state: &AppState,
-    cid: &Ulid,
-    msg_id: Option<u32>,
-) -> anyhow::Result<()> {
-    if let Some(wc) = state.connections.get(cid) {
-        wc.tx
-            .send(WebFrameData::Error {
-                kind: FrameError::RequiresPassword,
-                message: "Password is required".to_string(),
-                msg_id,
-            })
-            .await?;
-    } else {
-        warn!("failed to find connection {cid}");
-    }
-
-    Ok(())
 }
 
 async fn notify_nodes_client_disconnect(state: &AppState, cid: Ulid) {

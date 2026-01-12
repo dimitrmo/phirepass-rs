@@ -14,7 +14,7 @@ use log::{debug, error, info, warn};
 use phirepass_common::env::Mode;
 use phirepass_common::protocol::Protocol;
 use phirepass_common::protocol::common::{Frame, FrameData, FrameError};
-use phirepass_common::protocol::node::NodeFrameData;
+use phirepass_common::protocol::node::{NodeFrameData, WebFrameId};
 use phirepass_common::protocol::web::WebFrameData;
 use phirepass_common::stats::Stats;
 use phirepass_common::time::now_millis;
@@ -388,13 +388,31 @@ async fn handle_message(
         } => {
             info!("received open tunnel with protocol {protocol}");
 
+            if username.is_none() && password.is_none() {
+                warn!("received open tunnel without username/password");
+                send_requires_username_password_error(sender, cid, msg_id);
+                return;
+            }
+
+            let Some(username) = username else {
+                warn!("received open tunnel without username");
+                send_requires_username_error(sender, cid, msg_id);
+                return;
+            };
+
+            let Some(password) = password else {
+                warn!("received open tunnel without password");
+                send_requires_password_error(sender, cid, msg_id);
+                return;
+            };
+
             match Protocol::try_from(protocol) {
                 Ok(Protocol::SFTP) => {
                     let auth = match config.ssh_auth_mode {
                         SSHAuthMethod::CredentialsPrompt => {
-                            SFTPConfigAuth::UsernamePassword(username.clone(), password.clone())
+                            SFTPConfigAuth::UsernamePassword(username, password)
                         }
-                        SSHAuthMethod::UsernamePrompt => SFTPConfigAuth::Username(username.clone()),
+                        SSHAuthMethod::UsernamePrompt => SFTPConfigAuth::Username(username),
                     };
 
                     start_sftp_tunnel(
@@ -405,9 +423,9 @@ async fn handle_message(
                 Ok(Protocol::SSH) => {
                     let auth = match config.ssh_auth_mode {
                         SSHAuthMethod::CredentialsPrompt => {
-                            SSHConfigAuth::UsernamePassword(username.clone(), password.clone())
+                            SSHConfigAuth::UsernamePassword(username, password)
                         }
-                        SSHAuthMethod::UsernamePrompt => SSHConfigAuth::Username(username.clone()),
+                        SSHAuthMethod::UsernamePrompt => SSHConfigAuth::Username(username),
                     };
 
                     start_ssh_tunnel(sender, node_id, cid, config, auth, sessions, msg_id).await;
@@ -810,9 +828,51 @@ async fn close_tunnels_for_cid(cid: Ulid, sessions: &TunnelSessions) {
     }
 }
 
+fn send_requires_username_password_error(sender: &Sender<Frame>, cid: Ulid, msg_id: Option<u32>) {
+    send_frame_data(
+        sender,
+        NodeFrameData::WebFrame {
+            id: WebFrameId::ConnectionId(cid),
+            frame: WebFrameData::Error {
+                kind: FrameError::RequiresUsernamePassword,
+                message: String::from("Credentials are missing"),
+                msg_id,
+            },
+        },
+    );
+}
+
+fn send_requires_username_error(sender: &Sender<Frame>, cid: Ulid, msg_id: Option<u32>) {
+    send_frame_data(
+        sender,
+        NodeFrameData::WebFrame {
+            id: WebFrameId::ConnectionId(cid),
+            frame: WebFrameData::Error {
+                kind: FrameError::RequiresUsername,
+                message: String::from("Username is missing"),
+                msg_id,
+            },
+        },
+    );
+}
+
+fn send_requires_password_error(sender: &Sender<Frame>, cid: Ulid, msg_id: Option<u32>) {
+    send_frame_data(
+        sender,
+        NodeFrameData::WebFrame {
+            id: WebFrameId::ConnectionId(cid),
+            frame: WebFrameData::Error {
+                kind: FrameError::RequiresPassword,
+                message: String::from("Password is missing"),
+                msg_id,
+            },
+        },
+    );
+}
+
 fn send_frame_data(sender: &Sender<Frame>, data: NodeFrameData) {
     if sender.is_closed() {
-        warn!("frame sender is closed, client may have disconnected");
+        warn!("frame sender is closed, client may have been disconnected");
         return;
     }
 
@@ -899,7 +959,7 @@ async fn start_sftp_tunnel(
                 send_frame_data(
                     &tx_for_opened,
                     NodeFrameData::WebFrame {
-                        sid: session_id,
+                        id: WebFrameId::SessionId(session_id),
                         frame: WebFrameData::Error {
                             kind: FrameError::Generic,
                             message: err.to_string(),
@@ -991,7 +1051,7 @@ async fn start_ssh_tunnel(
                 send_frame_data(
                     &tx_for_opened,
                     NodeFrameData::WebFrame {
-                        sid: session_id,
+                        id: WebFrameId::SessionId(session_id),
                         frame: WebFrameData::Error {
                             kind: FrameError::Generic,
                             message: err.to_string(),

@@ -1,7 +1,7 @@
 use crate::sftp::{FileUpload, SFTPActiveUploads, cleanup_abandoned_uploads, generate_id};
 use log::{debug, info, warn};
 use phirepass_common::protocol::common::{Frame, FrameError};
-use phirepass_common::protocol::node::NodeFrameData;
+use phirepass_common::protocol::node::{NodeFrameData, WebFrameId};
 use phirepass_common::protocol::sftp::{SFTPUploadChunk, SFTPUploadStart, SFTPUploadStartResponse};
 use phirepass_common::protocol::web::WebFrameData;
 use russh_sftp::client::SftpSession;
@@ -87,7 +87,7 @@ pub async fn start_upload(
                             msg_id,
                             response: SFTPUploadStartResponse { upload_id },
                         },
-                        sid,
+                        id: WebFrameId::SessionId(sid),
                     }
                     .into(),
                 )
@@ -103,7 +103,7 @@ pub async fn start_upload(
                             message: format!("Failed to open file: {}", err),
                             msg_id,
                         },
-                        sid,
+                        id: WebFrameId::SessionId(sid),
                     }
                     .into(),
                 )
@@ -144,7 +144,7 @@ pub async fn upload_file_chunk(
                             message: format!("Upload ID {} not found", chunk.upload_id),
                             msg_id,
                         },
-                        sid,
+                        id: WebFrameId::SessionId(sid),
                     }
                     .into(),
                 )
@@ -168,7 +168,7 @@ pub async fn upload_file_chunk(
                                 message: format!("Failed to write final chunk: {}", err),
                                 msg_id,
                             },
-                            sid,
+                            id: WebFrameId::SessionId(sid),
                         }
                         .into(),
                     )
@@ -201,7 +201,7 @@ pub async fn upload_file_chunk(
                                     upload_id: chunk.upload_id,
                                     chunk_index: chunk.chunk_index,
                                 },
-                                sid,
+                                id: WebFrameId::SessionId(sid),
                             }
                             .into(),
                         )
@@ -217,7 +217,7 @@ pub async fn upload_file_chunk(
                                     message: format!("Failed to rename file: {}", err),
                                     msg_id,
                                 },
-                                sid,
+                                id: WebFrameId::SessionId(sid),
                             }
                             .into(),
                         )
@@ -237,7 +237,7 @@ pub async fn upload_file_chunk(
                             message: "File upload not found for final chunk".to_string(),
                             msg_id,
                         },
-                        sid,
+                        id: WebFrameId::SessionId(sid),
                     }
                     .into(),
                 )
@@ -266,7 +266,7 @@ pub async fn upload_file_chunk(
                                 message: format!("Failed to write chunk: {}", err),
                                 msg_id,
                             },
-                            sid,
+                            id: WebFrameId::SessionId(sid),
                         }
                         .into(),
                     )
@@ -294,7 +294,7 @@ pub async fn upload_file_chunk(
                             upload_id: chunk.upload_id,
                             chunk_index: chunk.chunk_index,
                         },
-                        sid,
+                        id: WebFrameId::SessionId(sid),
                     }
                     .into(),
                 )
@@ -312,7 +312,7 @@ pub async fn upload_file_chunk(
                             message: format!("Upload ID {} not found", chunk.upload_id),
                             msg_id,
                         },
-                        sid,
+                        id: WebFrameId::SessionId(sid),
                     }
                     .into(),
                 )

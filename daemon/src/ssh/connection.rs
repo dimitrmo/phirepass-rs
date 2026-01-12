@@ -4,7 +4,7 @@ use bytes::Bytes;
 use log::{debug, info, warn};
 use phirepass_common::protocol::Protocol;
 use phirepass_common::protocol::common::Frame;
-use phirepass_common::protocol::node::NodeFrameData;
+use phirepass_common::protocol::node::{NodeFrameData, WebFrameId};
 use phirepass_common::protocol::web::WebFrameData;
 use russh::client::Handle;
 use russh::{ChannelMsg, Disconnect, Preferred, client, kex};
@@ -182,7 +182,7 @@ pub async fn send_tunnel_data(tx: &Sender<Frame>, sid: u32, node_id: String, dat
                     sid,
                     data,
                 },
-                sid,
+                id: WebFrameId::SessionId(sid),
             }
             .into(),
         )
