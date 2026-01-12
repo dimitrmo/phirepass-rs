@@ -20,6 +20,7 @@ use ulid::Ulid;
 #[derive(Clone)]
 pub(crate) enum SFTPConfigAuth {
     UsernamePassword(String, String),
+    Username(String),
 }
 
 #[derive(Clone)]
@@ -61,10 +62,12 @@ impl SFTPConnection {
 
         let auth_res = match sftp_config.credentials {
             SFTPConfigAuth::UsernamePassword(username, password) => {
-                client_handler.authenticate_password(username, password)
+                client_handler
+                    .authenticate_password(username, password)
+                    .await
             }
-        }
-        .await?;
+            SFTPConfigAuth::Username(username) => client_handler.authenticate_none(username).await,
+        }?;
 
         if !auth_res.success() {
             anyhow::bail!("SFTP authentication failed. Please check your password.");

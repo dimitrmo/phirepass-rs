@@ -387,36 +387,31 @@ async fn handle_message(
             msg_id,
         } => {
             info!("received open tunnel with protocol {protocol}");
+
             match Protocol::try_from(protocol) {
-                Ok(Protocol::SFTP) => match &config.ssh_auth_mode {
-                    SSHAuthMethod::CredentialsPrompt => {
-                        start_sftp_tunnel(
-                            sender,
-                            cid,
-                            config,
-                            SFTPConfigAuth::UsernamePassword(username, password),
-                            sessions,
-                            uploads,
-                            downloads,
-                            msg_id,
-                        )
-                        .await;
-                    }
-                },
-                Ok(Protocol::SSH) => match &config.ssh_auth_mode {
-                    SSHAuthMethod::CredentialsPrompt => {
-                        start_ssh_tunnel(
-                            sender,
-                            node_id,
-                            cid,
-                            config,
-                            SSHConfigAuth::UsernamePassword(username, password),
-                            sessions,
-                            msg_id,
-                        )
-                        .await;
-                    }
-                },
+                Ok(Protocol::SFTP) => {
+                    let auth = match config.ssh_auth_mode {
+                        SSHAuthMethod::CredentialsPrompt => {
+                            SFTPConfigAuth::UsernamePassword(username.clone(), password.clone())
+                        }
+                        SSHAuthMethod::UsernamePrompt => SFTPConfigAuth::Username(username.clone()),
+                    };
+
+                    start_sftp_tunnel(
+                        sender, cid, config, auth, sessions, uploads, downloads, msg_id,
+                    )
+                    .await;
+                }
+                Ok(Protocol::SSH) => {
+                    let auth = match config.ssh_auth_mode {
+                        SSHAuthMethod::CredentialsPrompt => {
+                            SSHConfigAuth::UsernamePassword(username.clone(), password.clone())
+                        }
+                        SSHAuthMethod::UsernamePrompt => SSHConfigAuth::Username(username.clone()),
+                    };
+
+                    start_ssh_tunnel(sender, node_id, cid, config, auth, sessions, msg_id).await;
+                }
                 Err(err) => warn!("invalid protocol value {protocol}: {err:?}"),
             }
         }

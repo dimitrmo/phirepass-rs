@@ -19,6 +19,7 @@ use ulid::Ulid;
 #[derive(Clone)]
 pub(crate) enum SSHConfigAuth {
     UsernamePassword(String, String),
+    Username(String),
 }
 
 #[derive(Clone)]
@@ -60,10 +61,12 @@ impl SSHConnection {
 
         let auth_res = match ssh_config.credentials {
             SSHConfigAuth::UsernamePassword(username, password) => {
-                client_handler.authenticate_password(username, password)
+                client_handler
+                    .authenticate_password(username, password)
+                    .await
             }
-        }
-        .await?;
+            SSHConfigAuth::Username(username) => client_handler.authenticate_none(username).await,
+        }?;
 
         if !auth_res.success() {
             anyhow::bail!("SSH authentication failed. Please check your password.");
