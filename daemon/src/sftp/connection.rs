@@ -97,6 +97,15 @@ impl SFTPConnection {
         mut shutdown_rx: oneshot::Receiver<()>,
     ) -> anyhow::Result<()> {
         debug!("connecting sftp...");
+
+        let client = self.create_client().await?;
+
+        debug!("sftp connected");
+
+        let channel = client.channel_open_session().await?;
+        channel.request_subsystem(true, "sftp").await?;
+        let stream = channel.into_stream();
+        let sftp = SftpSession::new(stream).await?;
         let sid = self.get_session_id();
 
         send_frame_data(
@@ -108,15 +117,6 @@ impl SFTPConnection {
                 msg_id,
             },
         );
-
-        let client = self.create_client().await?;
-
-        debug!("sftp connected");
-
-        let channel = client.channel_open_session().await?;
-        channel.request_subsystem(true, "sftp").await?;
-        let stream = channel.into_stream();
-        let sftp = SftpSession::new(stream).await?;
 
         info!("sftp[id={sid}] tunnel opened");
 

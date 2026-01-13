@@ -1,9 +1,20 @@
+use std::fmt::Display;
+
 #[derive(Clone, Debug)]
 pub enum SSHAuthMethod {
     // both username and password are required
     Password,
     // only username is required
     None,
+}
+
+impl Display for SSHAuthMethod {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SSHAuthMethod::Password => write!(f, "Password"),
+            SSHAuthMethod::None => write!(f, "None"),
+        }
+    }
 }
 
 impl std::str::FromStr for SSHAuthMethod {

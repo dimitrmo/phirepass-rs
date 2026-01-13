@@ -653,6 +653,8 @@ async fn handle_web_open_tunnel(
         return;
     };
 
+    info!("notifying daemon to open tunnel {protocol}");
+
     if tx
         .send(NodeFrameData::OpenTunnel {
             protocol,

@@ -824,16 +824,34 @@ fn ensure_credentials(
     password: &Option<String>,
     msg_id: Option<u32>,
 ) -> anyhow::Result<()> {
-    if username.is_none() {
-        send_requires_username_error(sender, cid, msg_id);
-        anyhow::bail!("received open tunnel without username")
-    };
+    match username {
+        None => {
+            send_requires_username_error(sender, cid, msg_id);
+            anyhow::bail!("received open tunnel without username")
+        }
+        Some(username) => {
+            if username.trim().is_empty() {
+                send_requires_username_error(sender, cid, msg_id);
+                anyhow::bail!("received open tunnel without username")
+            }
+        }
+    }
 
     if let SSHAuthMethod::Password = config.ssh_auth_mode {
-        if password.is_none() {
-            send_requires_password_error(sender, cid, msg_id);
-            anyhow::bail!("received open tunnel without password")
-        };
+        info!("what are we even doing here?");
+
+        match password {
+            Some(password) => {
+                if password.trim().is_empty() {
+                    send_requires_password_error(sender, cid, msg_id);
+                    anyhow::bail!("received open tunnel without password")
+                }
+            },
+            None => {
+                send_requires_password_error(sender, cid, msg_id);
+                anyhow::bail!("received open tunnel without password")
+            },
+        }
     }
 
     Ok(())

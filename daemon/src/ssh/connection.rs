@@ -92,6 +92,16 @@ impl SSHConnection {
         mut shutdown_rx: oneshot::Receiver<()>,
     ) -> anyhow::Result<()> {
         debug!("connecting ssh...");
+
+        let client = self.create_client().await?;
+
+        debug!("ssh connected");
+
+        let mut channel = client.channel_open_session().await?;
+        channel
+            .request_pty(true, "xterm-256color", 80, 24, 0, 0, &[])
+            .await?;
+        channel.request_shell(true).await?;
         let sid = self.get_session_id();
 
         send_frame_data(
@@ -103,16 +113,6 @@ impl SSHConnection {
                 msg_id,
             },
         );
-
-        let client = self.create_client().await?;
-
-        debug!("ssh connected");
-
-        let mut channel = client.channel_open_session().await?;
-        channel
-            .request_pty(true, "xterm-256color", 80, 24, 0, 0, &[])
-            .await?;
-        channel.request_shell(true).await?;
 
         info!("ssh[id={sid}] tunnel opened");
 
