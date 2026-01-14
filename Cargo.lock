@@ -646,9 +646,9 @@ dependencies = [
 
 [[package]]
 name = "crypto-bigint"
-version = "0.7.0-rc.17"
+version = "0.7.0-rc.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cfc44c334576a43ddece6194e3bf6f177b402728fde319648e36aaf617a473c7"
+checksum = "37387ceb32048ff590f2cbd24d8b05fffe63c3f69a5cfa089d4f722ca4385a19"
 dependencies = [
  "ctutils",
  "num-traits",
@@ -682,7 +682,7 @@ version = "0.7.0-pre.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e79c98a281f9441200b24e3151407a629bfbe720399186e50516da939195e482"
 dependencies = [
- "crypto-bigint 0.7.0-rc.17",
+ "crypto-bigint 0.7.0-rc.18",
  "libm",
  "rand_core 0.10.0-rc-3",
 ]
@@ -2300,6 +2300,7 @@ dependencies = [
  "rustls",
  "serde",
  "serde_json",
+ "thiserror 2.0.17",
  "tokio",
  "tokio-tungstenite",
  "tokio-util",
@@ -2362,6 +2363,7 @@ dependencies = [
  "rustls",
  "serde",
  "serde_json",
+ "thiserror 2.0.17",
  "tokio",
  "tokio-tungstenite",
  "tokio-util",
@@ -2580,7 +2582,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6db2770f06117d490610c7488547d543617b21bfa07796d7a12f6f1bd53850d1"
 dependencies = [
  "rand_chacha 0.9.0",
- "rand_core 0.9.4",
+ "rand_core 0.9.5",
 ]
 
 [[package]]
@@ -2600,7 +2602,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d3022b5f1df60f26e1ffddd6c66e8aa15de382ae63b3a0c1bfc0e4d3e3f325cb"
 dependencies = [
  "ppv-lite86",
- "rand_core 0.9.4",
+ "rand_core 0.9.5",
 ]
 
 [[package]]
@@ -2614,9 +2616,9 @@ dependencies = [
 
 [[package]]
 name = "rand_core"
-version = "0.9.4"
+version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f1b3bc831f92381018fd9c6350b917c7b21f1eed35a65a51900e0e55a3d7afa"
+checksum = "76afc826de14238e6e8c374ddcc1fa19e374fd8dd986b0d2af0d02377261d83c"
 dependencies = [
  "getrandom 0.3.4",
 ]
@@ -2715,7 +2717,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c9a2b1eacbc34fbaf77f6f1db1385518446008d49b9f9f59dc9d1340fce4ca9e"
 dependencies = [
  "const-oid 0.10.2",
- "crypto-bigint 0.7.0-rc.17",
+ "crypto-bigint 0.7.0-rc.18",
  "crypto-primes",
  "digest 0.11.0-rc.5",
  "pkcs1",
@@ -4139,6 +4141,6 @@ dependencies = [
 
 [[package]]
 name = "zmij"
-version = "1.0.13"
+version = "1.0.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac93432f5b761b22864c774aac244fa5c0fd877678a4c37ebf6cf42208f9c9ec"
+checksum = "bd8f3f50b848df28f887acb68e41201b5aea6bc8a8dacc00fb40635ff9a72fea"

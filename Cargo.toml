@@ -46,8 +46,10 @@ tower-http = { workspace = true }
 russh-sftp = { workspace = true }
 dashmap = { workspace = true }
 tokio-util = { workspace = true }
+thiserror = { workspace = true }
 
 [workspace.dependencies]
+thiserror = "2.0.17"
 russh = { version =  "0.56.0" }
 russh-sftp = { version = "2.1.1"}
 tokio = { version = "1.49.0", features = ["full"]}

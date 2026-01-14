@@ -15,7 +15,7 @@ use log::{debug, error, info, warn};
 use phirepass_common::env::Mode;
 use phirepass_common::protocol::Protocol;
 use phirepass_common::protocol::common::{Frame, FrameData, FrameError};
-use phirepass_common::protocol::node::{NodeFrameData, WebFrameId};
+use phirepass_common::protocol::node::NodeFrameData;
 use phirepass_common::protocol::web::WebFrameData;
 use phirepass_common::stats::Stats;
 use phirepass_common::time::now_millis;
@@ -846,11 +846,11 @@ fn ensure_credentials(
                     send_requires_password_error(sender, cid, msg_id);
                     anyhow::bail!("received open tunnel without password")
                 }
-            },
+            }
             None => {
                 send_requires_password_error(sender, cid, msg_id);
                 anyhow::bail!("received open tunnel without password")
-            },
+            }
         }
     }
 
@@ -900,8 +900,8 @@ async fn start_sftp_tunnel(
             )
             .await
         {
-            Ok(_) => {
-                info!("sftp connection {cid} ended");
+            Ok(sid) => {
+                info!("sftp connection {sid}:{cid} ended");
                 send_frame_data(
                     &sender,
                     NodeFrameData::TunnelClosed {
@@ -912,12 +912,12 @@ async fn start_sftp_tunnel(
                     },
                 );
             }
-            Err(err) => {
+            Err((id, err)) => {
                 warn!("sftp connection error for {cid}: {err}");
                 send_frame_data(
                     &tx_for_opened,
                     NodeFrameData::WebFrame {
-                        id: WebFrameId::SessionId(sid),
+                        id,
                         frame: WebFrameData::Error {
                             kind: FrameError::Generic,
                             message: err.to_string(),
@@ -981,8 +981,8 @@ async fn start_ssh_tunnel(
             .connect(node_id, cid, &sender, msg_id, stdin_rx, stop_rx)
             .await
         {
-            Ok(_) => {
-                info!("ssh connection {cid} ended");
+            Ok(sid) => {
+                info!("ssh connection {sid}:{cid} ended");
                 send_frame_data(
                     &sender,
                     NodeFrameData::TunnelClosed {
@@ -993,12 +993,12 @@ async fn start_ssh_tunnel(
                     },
                 );
             }
-            Err(err) => {
+            Err((id, err)) => {
                 warn!("ssh connection error for {cid}: {err}");
                 send_frame_data(
                     &tx_for_opened,
                     NodeFrameData::WebFrame {
-                        id: WebFrameId::SessionId(sid),
+                        id,
                         frame: WebFrameData::Error {
                             kind: FrameError::Generic,
                             message: err.to_string(),

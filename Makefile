@@ -1,4 +1,5 @@
 export RUST_LOG=info
+export RUST_BACKTRACE=full
 
 server:
 	cargo run --bin server -- start

@@ -4,6 +4,7 @@ mod cli;
 mod common;
 mod daemon;
 mod env;
+mod error;
 mod http;
 mod session;
 mod sftp;

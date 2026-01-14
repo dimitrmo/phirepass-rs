@@ -1,4 +1,5 @@
 use crate::common::{send_frame_data, send_tunnel_data};
+use crate::error::{DaemonError, message_error};
 use crate::session::generate_session_id;
 use crate::ssh::client::SSHClient;
 use crate::ssh::session::SSHCommand;
@@ -6,7 +7,7 @@ use bytes::Bytes;
 use log::{debug, info, warn};
 use phirepass_common::protocol::Protocol;
 use phirepass_common::protocol::common::Frame;
-use phirepass_common::protocol::node::NodeFrameData;
+use phirepass_common::protocol::node::{NodeFrameData, WebFrameId};
 use russh::client::Handle;
 use russh::{ChannelMsg, Disconnect, Preferred, client, kex};
 use std::borrow::Cow;
@@ -31,6 +32,8 @@ pub(crate) struct SSHConfig {
     pub inactivity_timeout: Option<Duration>,
 }
 
+type HandleType = Handle<SSHClient>;
+
 pub(crate) struct SSHConnection {
     session_id: u32,
     config: SSHConfig,
@@ -46,7 +49,7 @@ impl SSHConnection {
         self.session_id
     }
 
-    async fn create_client(&self) -> anyhow::Result<Handle<SSHClient>> {
+    async fn create_client(&self) -> Result<HandleType, DaemonError> {
         let ssh_config: SSHConfig = self.config.clone();
 
         let config = Arc::new(client::Config {
@@ -76,7 +79,7 @@ impl SSHConnection {
         }?;
 
         if !auth_res.success() {
-            anyhow::bail!("SSH authentication failed");
+            return message_error::<HandleType>("SSH authentication failed");
         }
 
         Ok(client_handler)
@@ -90,18 +93,9 @@ impl SSHConnection {
         msg_id: Option<u32>,
         mut cmd_rx: Receiver<SSHCommand>,
         mut shutdown_rx: oneshot::Receiver<()>,
-    ) -> anyhow::Result<()> {
+    ) -> Result<u32, (WebFrameId, DaemonError)> {
         debug!("connecting ssh...");
 
-        let client = self.create_client().await?;
-
-        debug!("ssh connected");
-
-        let mut channel = client.channel_open_session().await?;
-        channel
-            .request_pty(true, "xterm-256color", 80, 24, 0, 0, &[])
-            .await?;
-        channel.request_shell(true).await?;
         let sid = self.get_session_id();
 
         send_frame_data(
@@ -113,6 +107,27 @@ impl SSHConnection {
                 msg_id,
             },
         );
+
+        let client = self
+            .create_client()
+            .await
+            .map_err(|e| (WebFrameId::SessionId(sid), e))?;
+
+        debug!("ssh connected");
+
+        let mut channel = client
+            .channel_open_session()
+            .await
+            .map_err(|e| (WebFrameId::SessionId(sid), DaemonError::Russh(e)))?;
+
+        channel
+            .request_pty(true, "xterm-256color", 80, 24, 0, 0, &[])
+            .await
+            .map_err(|e| (WebFrameId::SessionId(sid), DaemonError::Russh(e)))?;
+        channel
+            .request_shell(true)
+            .await
+            .map_err(|e| (WebFrameId::SessionId(sid), DaemonError::Russh(e)))?;
 
         info!("ssh[id={sid}] tunnel opened");
 
@@ -183,8 +198,9 @@ impl SSHConnection {
 
         client
             .disconnect(Disconnect::ByApplication, "", "English")
-            .await?;
+            .await
+            .map_err(|e| (WebFrameId::SessionId(sid), DaemonError::Russh(e)))?;
 
-        Ok(())
+        Ok(sid)
     }
 }

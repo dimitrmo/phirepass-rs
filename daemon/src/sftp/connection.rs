@@ -1,4 +1,5 @@
 use crate::common::send_frame_data;
+use crate::error::{DaemonError, message_error};
 use crate::session::generate_session_id;
 use crate::sftp::actions::delete::delete_file;
 use crate::sftp::actions::download;
@@ -10,9 +11,9 @@ use crate::sftp::{SFTPActiveDownloads, SFTPActiveUploads};
 use log::{debug, info};
 use phirepass_common::protocol::Protocol;
 use phirepass_common::protocol::common::Frame;
-use phirepass_common::protocol::node::NodeFrameData;
+use phirepass_common::protocol::node::{NodeFrameData, WebFrameId};
 use russh::client::Handle;
-use russh::{Preferred, client, kex};
+use russh::{Preferred, client, kex, Disconnect};
 use russh_sftp::client::SftpSession;
 use std::borrow::Cow;
 use std::sync::Arc;
@@ -35,6 +36,8 @@ pub(crate) struct SFTPConfig {
     pub inactivity_timeout: Option<Duration>,
 }
 
+type HandleType = Handle<SFTPClient>;
+
 pub(crate) struct SFTPConnection {
     session_id: u32,
     config: SFTPConfig,
@@ -50,7 +53,7 @@ impl SFTPConnection {
         self.session_id
     }
 
-    async fn create_client(&self) -> anyhow::Result<Handle<SFTPClient>> {
+    async fn create_client(&self) -> Result<HandleType, DaemonError> {
         let sftp_config: SFTPConfig = self.config.clone();
 
         let config = Arc::new(client::Config {
@@ -80,7 +83,7 @@ impl SFTPConnection {
         }?;
 
         if !auth_res.success() {
-            anyhow::bail!("SFTP authentication failed");
+            return message_error::<HandleType>("SFTP authentication failed");
         }
 
         Ok(client_handler)
@@ -95,17 +98,8 @@ impl SFTPConnection {
         downloads: &SFTPActiveDownloads,
         mut cmd_rx: Receiver<SFTPCommand>,
         mut shutdown_rx: oneshot::Receiver<()>,
-    ) -> anyhow::Result<()> {
+    ) -> Result<u32, (WebFrameId, DaemonError)> {
         debug!("connecting sftp...");
-
-        let client = self.create_client().await?;
-
-        debug!("sftp connected");
-
-        let channel = client.channel_open_session().await?;
-        channel.request_subsystem(true, "sftp").await?;
-        let stream = channel.into_stream();
-        let sftp = SftpSession::new(stream).await?;
         let sid = self.get_session_id();
 
         send_frame_data(
@@ -117,6 +111,27 @@ impl SFTPConnection {
                 msg_id,
             },
         );
+
+        let client = self
+            .create_client()
+            .await
+            .map_err(|e| (WebFrameId::SessionId(sid), e))?;
+
+        debug!("sftp connected");
+
+        let channel = client
+            .channel_open_session()
+            .await
+            .map_err(|e| (WebFrameId::SessionId(sid), DaemonError::Russh(e)))?;
+
+        channel
+            .request_subsystem(true, "sftp")
+            .await
+            .map_err(|e| (WebFrameId::SessionId(sid), DaemonError::Russh(e)))?;
+        let stream = channel.into_stream();
+        let sftp = SftpSession::new(stream)
+            .await
+            .map_err(|e| (WebFrameId::SessionId(sid), DaemonError::RusshSFTP(e)))?;
 
         info!("sftp[id={sid}] tunnel opened");
 
@@ -158,6 +173,11 @@ impl SFTPConnection {
             }
         }
 
-        Ok(())
+        client
+            .disconnect(Disconnect::ByApplication, "", "English")
+            .await
+            .map_err(|e| (WebFrameId::SessionId(sid), DaemonError::Russh(e)))?;
+
+        Ok(sid)
     }
 }
