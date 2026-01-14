@@ -111,6 +111,36 @@ export class SFTPBrowser {
         }
     }
 
+    handleListComplete(msgId, path) {
+        // Handle completion of directory listing, even if empty
+        if (!this.pendingListings.has(msgId)) {
+            // Initialize with empty items if not already tracking
+            this.pendingListings.set(msgId, {
+                path: path,
+                items: []
+            });
+        }
+
+        const listing = this.pendingListings.get(msgId);
+
+        // Update path and UI
+        this.currentPath = path;
+        this.pathInput.value = path;
+        this.backBtn.disabled = path === "/";
+
+        // Only render if this is the current path being viewed
+        if (path === this.currentPath) {
+            this.currentItems = listing.items;
+            this.errorMessage = null; // Clear any previous error on successful listing
+            this.renderBrowser();
+            // Save successful state for recovery
+            this.previousState = {
+                path: path,
+                items: [...listing.items]
+            };
+        }
+    }
+
     listDirectory(path) {
         if (!this.socket || !this.sessionId) {
             this.browser.innerHTML = '<div class="sftp-item-loading">Not connected</div>';

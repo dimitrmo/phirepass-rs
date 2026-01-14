@@ -467,6 +467,8 @@ function connectSFTP() {
                                 frame.data.web.dir.path
                             );
                         });
+                        // Always call handleListComplete after processing all items (even if empty)
+                        sftpBrowser.handleListComplete(frame.data.web.msg_id, frame.data.web.dir.path);
                     }
                 }
                 break;
