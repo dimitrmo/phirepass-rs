@@ -158,7 +158,7 @@ jobs:
                   build-args: |
                       APP_NAME=${{ matrix.images.binary }}
 
-     Wasm:
+    Wasm:
         runs-on: ubuntu-latest
         needs:
             - Build
