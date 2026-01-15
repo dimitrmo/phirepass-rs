@@ -180,6 +180,11 @@ jobs:
                             --out-dir pkg/release \
                             --release
 
+            - uses: actions/setup-node@v6
+              with:
+                node-version: '20.x'
+                registry-url: 'https://registry.npmjs.org'
+
             - name: Publish
               run: |
                 cd channel/pkg/release && \
