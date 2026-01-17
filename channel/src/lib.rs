@@ -21,6 +21,8 @@ extern "C" {
     fn warn(s: &str);
 }
 
+pub use phirepass_common::protocol::common::Frame as MessageData;
+
 #[derive(Default)]
 struct ChannelState {
     socket: Option<WebSocket>,
