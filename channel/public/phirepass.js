@@ -644,7 +644,7 @@ function connect() {
                 break;
             case "Error":
                 switch (frame.data.web.kind) {
-                    case ErrorType.RequiredUsername:
+                    case ErrorType.RequiresUsername:
                         // Only username required, password should be empty
                         term.reset();
                         setStatus("Username required", "warn");
