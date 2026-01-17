@@ -13,7 +13,7 @@ use phirepass_common::protocol::Protocol;
 use phirepass_common::protocol::common::Frame;
 use phirepass_common::protocol::node::{NodeFrameData, WebFrameId};
 use russh::client::Handle;
-use russh::{Preferred, client, kex, Disconnect};
+use russh::{Disconnect, Preferred, client, kex};
 use russh_sftp::client::SftpSession;
 use std::borrow::Cow;
 use std::sync::Arc;

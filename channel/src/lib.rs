@@ -21,8 +21,6 @@ extern "C" {
     fn warn(s: &str);
 }
 
-pub use phirepass_common::protocol::common::Frame as MessageData;
-
 #[derive(Default)]
 struct ChannelState {
     socket: Option<WebSocket>,
@@ -364,7 +362,7 @@ impl Channel {
         })
     }
 
-    pub fn is_open(&self) -> bool {
+    pub fn is_connected(&self) -> bool {
         if let Some(socket) = self.state.borrow().socket.as_ref() {
             socket.ready_state() == WebSocket::OPEN
         } else {
@@ -372,8 +370,16 @@ impl Channel {
         }
     }
 
+    pub fn is_disconnected(&self) -> bool {
+        if let Some(socket) = self.state.borrow().socket.as_ref() {
+            socket.ready_state() == WebSocket::CLOSED
+        } else {
+            false
+        }
+    }
+
     fn send_frame_data(&self, data: WebFrameData) {
-        if !self.is_open() {
+        if !self.is_connected() {
             console_warn!("Cannot send raw message: socket not open");
             return;
         }
