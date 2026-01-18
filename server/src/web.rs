@@ -281,34 +281,6 @@ async fn update_web_heartbeat(state: &AppState, cid: &Ulid) {
     }
 }
 
-async fn get_node_id_by_cid(
-    state: &AppState,
-    cid: &Ulid,
-    node_id: String,
-    sid: u32,
-) -> anyhow::Result<Ulid> {
-    // Parse the node_id string to Ulid for the composite key
-    let node_ulid =
-        Ulid::from_string(&node_id).map_err(|_| anyhow::anyhow!("invalid node_id format"))?;
-
-    let key = crate::http::TunnelSessionKey::new(node_ulid, sid);
-    let (client_id, node_id) = match state.tunnel_sessions.get(&key) {
-        Some(entry) => {
-            let (cid, nid) = entry.value();
-            (*cid, *nid)
-        }
-        _ => {
-            anyhow::bail!("node not found for session id {sid}")
-        }
-    };
-
-    if !client_id.eq(cid) {
-        anyhow::bail!("correct cid was not found for sid {sid}")
-    }
-
-    Ok(node_id)
-}
-
 async fn handle_web_tunnel_data(
     state: &AppState,
     cid: Ulid,
@@ -319,7 +291,7 @@ async fn handle_web_tunnel_data(
 ) {
     debug!("tunnel data received: {} bytes", data.len());
 
-    let node_id = match get_node_id_by_cid(state, &cid, node_id, sid).await {
+    let node_id = match state.get_node_id_by_cid_and_sid(&cid, node_id, sid).await {
         Ok(node_id) => node_id,
         Err(err) => {
             warn!("error getting node id: {err}");
@@ -360,7 +332,7 @@ async fn handle_sftp_list(
 ) {
     debug!("handle sftp list request");
 
-    let node_id = match get_node_id_by_cid(state, &cid, target, sid).await {
+    let node_id = match state.get_node_id_by_cid_and_sid(&cid, target, sid).await {
         Ok(id) => id,
         Err(err) => {
             warn!("error getting node id: {err}");
@@ -399,7 +371,7 @@ async fn handle_sftp_download_start(
 ) {
     debug!("handle sftp download start request");
 
-    let node_id = match get_node_id_by_cid(state, &cid, target, sid).await {
+    let node_id = match state.get_node_id_by_cid_and_sid(&cid, target, sid).await {
         Ok(id) => id,
         Err(err) => {
             warn!("error getting node id: {err}");
@@ -439,7 +411,7 @@ async fn handle_sftp_download_chunk_request(
 ) {
     debug!("handle sftp download chunk request");
 
-    let node_id = match get_node_id_by_cid(state, &cid, target, sid).await {
+    let node_id = match state.get_node_id_by_cid_and_sid(&cid, target, sid).await {
         Ok(id) => id,
         Err(err) => {
             warn!("error getting node id: {err}");
@@ -481,7 +453,7 @@ async fn handle_sftp_upload_start(
 ) {
     debug!("handle sftp upload start request");
 
-    let node_id = match get_node_id_by_cid(state, &cid, target, sid).await {
+    let node_id = match state.get_node_id_by_cid_and_sid(&cid, target, sid).await {
         Ok(id) => id,
         Err(err) => {
             warn!("error getting node id: {err}");
@@ -520,7 +492,7 @@ async fn handle_sftp_upload(
 ) {
     debug!("handle sftp upload request");
 
-    let node_id = match get_node_id_by_cid(state, &cid, target, sid).await {
+    let node_id = match state.get_node_id_by_cid_and_sid(&cid, target, sid).await {
         Ok(id) => id,
         Err(err) => {
             warn!("error getting node id: {err}");
@@ -559,7 +531,7 @@ async fn handle_sftp_delete(
 ) {
     debug!("handle sftp delete request");
 
-    let node_id = match get_node_id_by_cid(state, &cid, target, sid).await {
+    let node_id = match state.get_node_id_by_cid_and_sid(&cid, target, sid).await {
         Ok(id) => id,
         Err(err) => {
             warn!("error getting node id: {err}");
@@ -598,7 +570,7 @@ async fn handle_web_resize(
 ) {
     debug!("tunnel ssh resize received");
 
-    let node_id = match get_node_id_by_cid(state, &cid, target, sid).await {
+    let node_id = match state.get_node_id_by_cid_and_sid(&cid, target, sid).await {
         Ok(id) => id,
         Err(err) => {
             warn!("error getting node id: {err}");
@@ -627,22 +599,6 @@ async fn handle_web_resize(
     }
 }
 
-async fn respond_to_client(state: &AppState, cid: Ulid, frame: WebFrameData) {
-    info!("respond to client {cid}");
-    debug!("\tdata: {:?}", frame);
-
-    let connection = state.connections.get(&cid);
-    match connection {
-        Some(connection) => match connection.tx.send(frame).await {
-            Ok(_) => debug!("response sent to client {cid}"),
-            Err(err) => warn!("failed to respond to client {cid}: {err}"),
-        },
-        None => {
-            warn!("failed to find connection by id {cid}");
-        }
-    }
-}
-
 async fn handle_web_open_tunnel(
     state: &AppState,
     cid: Ulid,
@@ -667,16 +623,17 @@ async fn handle_web_open_tunnel(
     let Some(tx) = node_tx else {
         warn!("node not found {node_id}");
 
-        respond_to_client(
-            state,
+        if let Err(err) = state.notify_client_by_cid(
             cid,
             WebFrameData::Error {
                 kind: FrameError::Generic,
-                message: String::from("Node could not be found"),
+                message: format!("Node[id={}] could not be found", node_id),
                 msg_id,
             },
         )
-        .await;
+        .await {
+            warn!("error notifying clients by cid on node {node_id}: {err}");
+        }
 
         return;
     };

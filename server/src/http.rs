@@ -1,11 +1,14 @@
 use crate::connection::{NodeConnection, WebConnection};
 use crate::env;
 use crate::env::Env;
+use crate::error::ServerError;
 use axum::Json;
 use axum::extract::State;
 use axum::http::{HeaderValue, Method};
 use axum::response::IntoResponse;
 use dashmap::DashMap;
+use log::debug;
+use phirepass_common::protocol::web::WebFrameData;
 use phirepass_common::stats::Stats;
 use serde_json::json;
 use std::sync::Arc;
@@ -39,6 +42,81 @@ pub(crate) struct AppState {
     pub(crate) nodes: Nodes,
     pub(crate) connections: Connections,
     pub(crate) tunnel_sessions: TunnelSessions,
+}
+
+impl AppState {
+    pub async fn get_node_id_by_cid_and_sid(
+        &self,
+        cid: &Ulid,
+        node_id: String,
+        sid: u32,
+    ) -> Result<Ulid, ServerError> {
+        debug!("get_node_id_by_cid_and_sid [cid={cid}, sid={sid}, node_id={node_id})]");
+
+        let node_ulid = Ulid::from_string(&node_id).map_err(|_| {
+            return format!("failed to decode ulid {}", node_id);
+        })?;
+
+        let key = TunnelSessionKey::new(node_ulid, sid);
+
+        let (client_id, node_id) = match self.tunnel_sessions.get(&key) {
+            Some(entry) => {
+                let (cid, nid) = entry.value();
+                (*cid, *nid)
+            }
+            _ => return Err(format!("node not found for session id {sid}").into()),
+        };
+
+        if !client_id.eq(cid) {
+            return Err(format!("correct cid was not found for sid {sid}").into());
+        }
+
+        Ok(node_id)
+    }
+
+    pub async fn get_connection_id_by_sid(
+        &self,
+        sid: u32,
+        target: Ulid,
+    ) -> Result<Ulid, ServerError> {
+        let key = TunnelSessionKey::new(target, sid);
+        let (client_id, node_id) = match self.tunnel_sessions.get(&key) {
+            Some(entry) => {
+                let (cid, nid) = entry.value();
+                (*cid, *nid)
+            }
+            _ => {
+                return Err(format!("node not found for session id {sid}").into());
+            }
+        };
+
+        if !node_id.eq(&target) {
+            return Err(format!("correct node_id was not found for sid {sid}").into());
+        }
+
+        Ok(client_id)
+    }
+
+    pub async fn notify_client_by_cid(
+        &self,
+        cid: Ulid,
+        frame: WebFrameData,
+    ) -> Result<(), ServerError> {
+        debug!("notify_client_by_cid {cid}");
+        debug!("\tdata: {:?}", frame);
+
+        let Some(connection) = self.connections.get(&cid) else {
+            return Err(format!("connection {cid} not found").into());
+        };
+
+        connection.tx.send(frame).await.map_err(|err| {
+            return format!("failed to send frame to client {cid}: {err}");
+        })?;
+
+        debug!("frame sent to web client {cid}");
+
+        Ok(())
+    }
 }
 
 pub fn build_cors(state: &AppState) -> CorsLayer {

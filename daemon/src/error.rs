@@ -6,7 +6,7 @@ struct DaemonMessageError(pub &'static str);
 
 impl Display for DaemonMessageError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "daemon error: {0}", self.0)
+        write!(f, "{0}", self.0)
     }
 }
 

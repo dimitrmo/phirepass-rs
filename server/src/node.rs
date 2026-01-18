@@ -150,7 +150,7 @@ async fn handle_node_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
 
 /// Handles incoming WebSocket messages. Always returns to parent for cleanup.
 async fn handle_node_messages(
-    ws_rx: &mut futures_util::stream::SplitStream<axum::extract::ws::WebSocket>,
+    ws_rx: &mut futures_util::stream::SplitStream<WebSocket>,
     state: &AppState,
     id: Ulid,
     tx: &mpsc::Sender<NodeFrameData>,
@@ -220,7 +220,7 @@ async fn handle_node_messages(
                     }
                     // daemon notified server with data for web
                     NodeFrameData::WebFrame { .. } => {
-                        handle_frame_response(&state, node_frame, &id).await;
+                        handle_frame_response(&state, node_frame, id).await;
                     }
                     // daemon notified server with data for web
                     NodeFrameData::TunnelClosed {
@@ -241,30 +241,7 @@ async fn handle_node_messages(
     }
 }
 
-async fn get_connection_id_by_sid(
-    state: &AppState,
-    sid: u32,
-    target: &Ulid,
-) -> anyhow::Result<Ulid> {
-    let key = crate::http::TunnelSessionKey::new(*target, sid);
-    let (client_id, node_id) = match state.tunnel_sessions.get(&key) {
-        Some(entry) => {
-            let (cid, nid) = entry.value();
-            (*cid, *nid)
-        }
-        _ => {
-            anyhow::bail!("node not found for session id {sid}")
-        }
-    };
-
-    if !node_id.eq(target) {
-        anyhow::bail!("correct node_id was not found for sid {sid}")
-    }
-
-    Ok(client_id)
-}
-
-async fn handle_frame_response(state: &AppState, node_frame: NodeFrameData, node_id: &Ulid) {
+async fn handle_frame_response(state: &AppState, node_frame: NodeFrameData, node_id: Ulid) {
     debug!("web frame response received");
 
     let NodeFrameData::WebFrame { frame, id } = node_frame else {
@@ -274,7 +251,7 @@ async fn handle_frame_response(state: &AppState, node_frame: NodeFrameData, node
 
     let cid = match id {
         WebFrameId::ConnectionId(cid) => cid,
-        WebFrameId::SessionId(sid) => match get_connection_id_by_sid(state, sid, node_id).await {
+        WebFrameId::SessionId(sid) => match state.get_connection_id_by_sid(sid, node_id).await {
             Ok(client_id) => client_id,
             Err(err) => {
                 warn!("error getting client id: {err}");
@@ -283,16 +260,9 @@ async fn handle_frame_response(state: &AppState, node_frame: NodeFrameData, node
         },
     };
 
-    let tx = state.connections.get(&cid).map(|info| info.tx.clone());
-
-    let Some(tx) = tx else {
-        warn!("tx for client {cid} not found {node_id}");
-        return;
-    };
-
-    match tx.send(frame).await {
+    match state.notify_client_by_cid(cid, frame).await {
         Ok(_) => debug!("forwarded tunnel data to node {node_id} for client {cid}"),
-        Err(err) => warn!("failed to forward tunnel data to node {node_id}: {err}"),
+        Err(_) => {} // Error already logged in notify_client_by_cid
     }
 }
 
@@ -306,27 +276,22 @@ async fn handle_tunnel_closed(
 ) {
     debug!("handling tunnel closed for connection {cid} with session {sid}");
 
-    let Some(connection) = state.connections.get(&cid) else {
-        warn!("connection {cid} not found");
-        return;
-    };
+    let key = crate::http::TunnelSessionKey::new(*node_id, sid);
+    state.tunnel_sessions.remove(&key);
 
-    {
-        let key = crate::http::TunnelSessionKey::new(*node_id, sid);
-        state.tunnel_sessions.remove(&key);
-    }
-
-    match connection
-        .tx
-        .send(WebFrameData::TunnelClosed {
-            protocol,
-            sid,
-            msg_id,
-        })
+    match state
+        .notify_client_by_cid(
+            cid,
+            WebFrameData::TunnelClosed {
+                protocol,
+                sid,
+                msg_id,
+            },
+        )
         .await
     {
         Ok(..) => info!("tunnel closed notification sent to web client {cid}"),
-        Err(err) => warn!("failed to send tunnel closed to client {cid}: {err}"),
+        Err(_) => {} // Error already logged in notify_client_by_cid
     }
 }
 
@@ -340,27 +305,22 @@ async fn handle_tunnel_opened(
 ) {
     debug!("handling tunnel opened for connection {cid} with session {sid}");
 
-    let Some(connection) = state.connections.get(&cid) else {
-        warn!("connection {cid} not found");
-        return;
-    };
+    let key = crate::http::TunnelSessionKey::new(*node_id, sid);
+    state.tunnel_sessions.insert(key, (cid, *node_id));
 
-    {
-        let key = crate::http::TunnelSessionKey::new(*node_id, sid);
-        state.tunnel_sessions.insert(key, (cid, *node_id));
-    }
-
-    match connection
-        .tx
-        .send(WebFrameData::TunnelOpened {
-            protocol,
-            sid,
-            msg_id,
-        })
+    match state
+        .notify_client_by_cid(
+            cid,
+            WebFrameData::TunnelOpened {
+                protocol,
+                sid,
+                msg_id,
+            },
+        )
         .await
     {
         Ok(..) => info!("tunnel opened notification sent to web client {cid}"),
-        Err(err) => warn!("failed to send tunnel opened to client {cid}: {err}"),
+        Err(_) => {} // Error already logged in notify_client_by_cid
     }
 }
 
@@ -372,7 +332,41 @@ async fn disconnect_node(state: &AppState, id: Ulid) {
             "node {id} ({}) removed after {:.1?} (total: {})",
             info.node.ip, alive, total
         );
+        let total = notify_all_clients_for_closed_tunnel(state, id).await;
+        info!("notified {total} client(s) for node {id} shutdown",)
     }
+}
+
+async fn notify_all_clients_for_closed_tunnel(state: &AppState, id: Ulid) -> u32 {
+    let mut count = 0u32;
+
+    let sessions_to_close: Vec<_> = state
+        .tunnel_sessions
+        .iter()
+        .filter(|entry| entry.key().node_id == id)
+        .map(|entry| (entry.key().clone(), entry.value().clone()))
+        .collect();
+
+    for (key, (cid, _)) in sessions_to_close {
+        state.tunnel_sessions.remove(&key);
+
+        if let Ok(_) = state
+            .notify_client_by_cid(
+                cid,
+                WebFrameData::TunnelClosed {
+                    protocol: 0,
+                    sid: key.sid,
+                    msg_id: None,
+                },
+            )
+            .await
+        {
+            count += 1;
+            info!("tunnel closed notification sent to web client {cid} due to node disconnect");
+        }
+    }
+
+    count
 }
 
 async fn update_node_heartbeat(state: &AppState, id: &Ulid, stats: Option<Stats>) {

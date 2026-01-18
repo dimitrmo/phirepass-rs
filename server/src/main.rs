@@ -3,6 +3,7 @@ use phirepass_common::runtime::RuntimeBuilder;
 mod cli;
 mod connection;
 mod env;
+mod error;
 mod http;
 mod node;
 mod server;
