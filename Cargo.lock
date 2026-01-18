@@ -2283,7 +2283,7 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
 name = "phirepass"
-version = "0.1.95"
+version = "0.1.96"
 dependencies = [
  "anyhow",
  "axum",
@@ -2310,7 +2310,7 @@ dependencies = [
 
 [[package]]
 name = "phirepass-channel"
-version = "0.1.95"
+version = "0.1.96"
 dependencies = [
  "bytes",
  "gloo-timers",
@@ -2323,7 +2323,7 @@ dependencies = [
 
 [[package]]
 name = "phirepass-common"
-version = "0.1.95"
+version = "0.1.96"
 dependencies = [
  "anyhow",
  "axum",
@@ -2345,7 +2345,7 @@ dependencies = [
 
 [[package]]
 name = "phirepass-daemon"
-version = "0.1.95"
+version = "0.1.96"
 dependencies = [
  "anyhow",
  "axum",
@@ -2372,7 +2372,7 @@ dependencies = [
 
 [[package]]
 name = "phirepass-server"
-version = "0.1.95"
+version = "0.1.96"
 dependencies = [
  "anyhow",
  "axum",
@@ -4142,6 +4142,6 @@ dependencies = [
 
 [[package]]
 name = "zmij"
-version = "1.0.14"
+version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bd8f3f50b848df28f887acb68e41201b5aea6bc8a8dacc00fb40635ff9a72fea"
+checksum = "94f63c051f4fe3c1509da62131a678643c5b6fbdc9273b2b79d4378ebda003d2"
