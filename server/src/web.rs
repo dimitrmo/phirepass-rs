@@ -7,7 +7,7 @@ use axum_client_ip::ClientIp;
 use bytes::Bytes;
 use futures_util::{SinkExt, StreamExt};
 use log::{debug, info, warn};
-use phirepass_common::protocol::common::{Frame, FrameData};
+use phirepass_common::protocol::common::{Frame, FrameData, FrameError};
 use phirepass_common::protocol::node::NodeFrameData;
 use phirepass_common::protocol::web::WebFrameData;
 use std::net::IpAddr;
@@ -627,6 +627,22 @@ async fn handle_web_resize(
     }
 }
 
+async fn respond_to_client(state: &AppState, cid: Ulid, frame: WebFrameData) {
+    info!("respond to client {cid}");
+    debug!("\tdata: {:?}", frame);
+
+    let connection = state.connections.get(&cid);
+    match connection {
+        Some(connection) => match connection.tx.send(frame).await {
+            Ok(_) => debug!("response sent to client {cid}"),
+            Err(err) => warn!("failed to respond to client {cid}: {err}"),
+        },
+        None => {
+            warn!("failed to find connection by id {cid}");
+        }
+    }
+}
+
 async fn handle_web_open_tunnel(
     state: &AppState,
     cid: Ulid,
@@ -649,7 +665,19 @@ async fn handle_web_open_tunnel(
     let node_tx = state.nodes.get(&node_id).map(|info| info.tx.clone());
 
     let Some(tx) = node_tx else {
-        warn!("tx for node not found {node_id}");
+        warn!("node not found {node_id}");
+
+        respond_to_client(
+            state,
+            cid,
+            WebFrameData::Error {
+                kind: FrameError::Generic,
+                message: String::from("Node could not be found"),
+                msg_id,
+            },
+        )
+        .await;
+
         return;
     };
 
