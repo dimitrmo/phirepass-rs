@@ -2,7 +2,7 @@ use phirepass_common::runtime::RuntimeBuilder;
 
 mod cli;
 mod common;
-mod daemon;
+mod agent;
 mod env;
 mod error;
 mod http;
@@ -22,9 +22,9 @@ fn main() -> anyhow::Result<()> {
         let cli = cli::parse();
         match cli.command {
             Some(cli::Commands::Start) | None => {
-                phirepass_common::logger::init("phirepass:daemon");
+                phirepass_common::logger::init("phirepass:agent");
                 let config = env::init()?;
-                daemon::start(config).await
+                agent::start(config).await
             }
             Some(cli::Commands::Version) => {
                 println!("{}", env::version());

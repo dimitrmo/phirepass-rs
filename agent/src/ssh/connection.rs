@@ -1,5 +1,5 @@
 use crate::common::{send_frame_data, send_tunnel_data};
-use crate::error::{DaemonError, message_error};
+use crate::error::{AgentError, message_error};
 use crate::session::generate_session_id;
 use crate::ssh::client::SSHClient;
 use crate::ssh::session::SSHCommand;
@@ -49,7 +49,7 @@ impl SSHConnection {
         self.session_id
     }
 
-    async fn create_client(&self) -> Result<HandleType, DaemonError> {
+    async fn create_client(&self) -> Result<HandleType, AgentError> {
         let ssh_config: SSHConfig = self.config.clone();
 
         let config = Arc::new(client::Config {
@@ -93,7 +93,7 @@ impl SSHConnection {
         msg_id: Option<u32>,
         mut cmd_rx: Receiver<SSHCommand>,
         mut shutdown_rx: oneshot::Receiver<()>,
-    ) -> Result<u32, (WebFrameId, DaemonError)> {
+    ) -> Result<u32, (WebFrameId, AgentError)> {
         debug!("connecting ssh...");
 
         let sid = self.get_session_id();
@@ -118,16 +118,16 @@ impl SSHConnection {
         let mut channel = client
             .channel_open_session()
             .await
-            .map_err(|e| (WebFrameId::SessionId(sid), DaemonError::Russh(e)))?;
+            .map_err(|e| (WebFrameId::SessionId(sid), AgentError::Russh(e)))?;
 
         channel
             .request_pty(true, "xterm-256color", 80, 24, 0, 0, &[])
             .await
-            .map_err(|e| (WebFrameId::SessionId(sid), DaemonError::Russh(e)))?;
+            .map_err(|e| (WebFrameId::SessionId(sid), AgentError::Russh(e)))?;
         channel
             .request_shell(true)
             .await
-            .map_err(|e| (WebFrameId::SessionId(sid), DaemonError::Russh(e)))?;
+            .map_err(|e| (WebFrameId::SessionId(sid), AgentError::Russh(e)))?;
 
         info!("ssh[id={sid}] tunnel opened");
 
@@ -199,7 +199,7 @@ impl SSHConnection {
         client
             .disconnect(Disconnect::ByApplication, "", "English")
             .await
-            .map_err(|e| (WebFrameId::SessionId(sid), DaemonError::Russh(e)))?;
+            .map_err(|e| (WebFrameId::SessionId(sid), AgentError::Russh(e)))?;
 
         Ok(sid)
     }

@@ -91,16 +91,16 @@ jobs:
                             file: "server/Dockerfile",
                         },
                         {
-                            image: "dimitrmok/phirepass-daemon",
-                            binary: "daemon",
-                            file: "daemon/Dockerfile",
+                            image: "dimitrmok/phirepass-agent",
+                            binary: "agent",
+                            file: "agent/Dockerfile",
                         },
                         {
-                            image: "dimitrmok/phirepass-daemon-sandbox",
-                            binary: "daemon",
-                            file: "daemon/sandbox/Dockerfile",
+                            image: "dimitrmok/phirepass-agent-sandbox",
+                            binary: "agent",
+                            file: "agent/sandbox/Dockerfile",
                         },
-                        # { image: "dimitrmok/phirepass-sshd", binary: "daemon", file: "daemon/sshd/Dockerfile" },
+                        # { image: "dimitrmok/phirepass-sshd", binary: "agent", file: "agent/sshd/Dockerfile" },
                     ]
         steps:
             - name: Checkout

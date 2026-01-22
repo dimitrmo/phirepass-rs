@@ -9,7 +9,7 @@ pub(crate) struct Cli {
 
 #[derive(Subcommand)]
 pub(crate) enum Commands {
-    /// Start the daemon
+    /// Start the agent
     Start,
     /// Print version information
     Version,

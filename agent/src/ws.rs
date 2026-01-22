@@ -107,7 +107,7 @@ impl WebSocketConnection {
         // Store the node_id for future reconnections
         *self.stored_node_id.write().await = Some(node_id);
 
-        info!("daemon authenticated successfully {node_id} with server version {version}");
+        info!("agent authenticated successfully {node_id} with server version {version}");
         // todo: proper authentication
         // todo: compare version for system compatibility
 

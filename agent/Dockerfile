@@ -2,7 +2,7 @@ FROM --platform=$BUILDPLATFORM rust:1.92-slim-trixie AS builder
 
 ARG TARGETARCH
 ARG BUILDPLATFORM
-ARG APP_NAME=daemon
+ARG APP_NAME=agent
 
 WORKDIR /app
 
@@ -36,9 +36,9 @@ FROM gcr.io/distroless/cc-debian13:nonroot AS runtime
 
 ENV RUST_LOG=info
 
-COPY --from=builder /app-bin /app/daemon
+COPY --from=builder /app-bin /app/agent
 
 USER nonroot
 
-ENTRYPOINT ["/app/daemon"]
+ENTRYPOINT ["/app/agent"]
 CMD ["start"]

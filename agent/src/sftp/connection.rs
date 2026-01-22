@@ -1,5 +1,5 @@
 use crate::common::send_frame_data;
-use crate::error::{DaemonError, message_error};
+use crate::error::{AgentError, message_error};
 use crate::session::generate_session_id;
 use crate::sftp::actions::delete::delete_file;
 use crate::sftp::actions::download;
@@ -53,7 +53,7 @@ impl SFTPConnection {
         self.session_id
     }
 
-    async fn create_client(&self) -> Result<HandleType, DaemonError> {
+    async fn create_client(&self) -> Result<HandleType, AgentError> {
         let sftp_config: SFTPConfig = self.config.clone();
 
         let config = Arc::new(client::Config {
@@ -98,7 +98,7 @@ impl SFTPConnection {
         downloads: &SFTPActiveDownloads,
         mut cmd_rx: Receiver<SFTPCommand>,
         mut shutdown_rx: oneshot::Receiver<()>,
-    ) -> Result<u32, (WebFrameId, DaemonError)> {
+    ) -> Result<u32, (WebFrameId, AgentError)> {
         debug!("connecting sftp...");
         let sid = self.get_session_id();
 
@@ -122,16 +122,16 @@ impl SFTPConnection {
         let channel = client
             .channel_open_session()
             .await
-            .map_err(|e| (WebFrameId::SessionId(sid), DaemonError::Russh(e)))?;
+            .map_err(|e| (WebFrameId::SessionId(sid), AgentError::Russh(e)))?;
 
         channel
             .request_subsystem(true, "sftp")
             .await
-            .map_err(|e| (WebFrameId::SessionId(sid), DaemonError::Russh(e)))?;
+            .map_err(|e| (WebFrameId::SessionId(sid), AgentError::Russh(e)))?;
         let stream = channel.into_stream();
         let sftp = SftpSession::new(stream)
             .await
-            .map_err(|e| (WebFrameId::SessionId(sid), DaemonError::RusshSFTP(e)))?;
+            .map_err(|e| (WebFrameId::SessionId(sid), AgentError::RusshSFTP(e)))?;
 
         info!("sftp[id={sid}] tunnel opened");
 
@@ -176,7 +176,7 @@ impl SFTPConnection {
         client
             .disconnect(Disconnect::ByApplication, "", "English")
             .await
-            .map_err(|e| (WebFrameId::SessionId(sid), DaemonError::Russh(e)))?;
+            .map_err(|e| (WebFrameId::SessionId(sid), AgentError::Russh(e)))?;
 
         Ok(sid)
     }

@@ -60,7 +60,7 @@ async fn wait_for_auth(
         NodeFrameData::Auth {
             token: _,
             node_id: received_node_id,
-            version: daemon_version,
+            version: agent_version,
         } => {
             // Use provided node_id if available, otherwise generate a new one
             let id = match received_node_id {
@@ -76,7 +76,7 @@ async fn wait_for_auth(
             };
 
             info!(
-                "node {id} authenticated from {ip} (daemon version: {daemon_version}, reusing id: {})",
+                "node {id} authenticated from {ip} (agent version: {agent_version}, reusing id: {})",
                 received_node_id.is_some()
             );
 
@@ -197,7 +197,7 @@ async fn handle_node_messages(
                     NodeFrameData::Auth { .. } => {
                         warn!("received Auth message after initial authentication from node {id}");
                     }
-                    // ping from daemon
+                    // ping from agent
                     NodeFrameData::Ping { sent_at } => {
                         let now = now_millis();
                         let latency = now.saturating_sub(sent_at);
@@ -209,7 +209,7 @@ async fn handle_node_messages(
                             info!("pong response to node {id} sent");
                         }
                     }
-                    // daemon notified server that a tunnel has been opened
+                    // agent notified server that a tunnel has been opened
                     NodeFrameData::TunnelOpened {
                         protocol,
                         cid,
@@ -218,11 +218,11 @@ async fn handle_node_messages(
                     } => {
                         handle_tunnel_opened(&state, protocol, cid, sid, &id, msg_id).await;
                     }
-                    // daemon notified server with data for web
+                    // agent notified server with data for web
                     NodeFrameData::WebFrame { .. } => {
                         handle_frame_response(&state, node_frame, id).await;
                     }
-                    // daemon notified server with data for web
+                    // agent notified server with data for web
                     NodeFrameData::TunnelClosed {
                         protocol,
                         cid,

@@ -2,7 +2,7 @@ FROM --platform=$BUILDPLATFORM rust:1.92-slim-trixie AS builder
 
 ARG TARGETARCH
 ARG BUILDPLATFORM
-ARG APP_NAME=daemon
+ARG APP_NAME=agent
 
 WORKDIR /app
 

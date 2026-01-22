@@ -180,7 +180,7 @@ async fn handle_web_messages(
                         .await;
                     }
                     WebFrameData::SFTPDownloadChunk { msg_id: _, .. } => {
-                        // Download chunks are sent from daemon to web client, not web client to daemon
+                        // Download chunks are sent from agent to web client, not web client to agent
                         warn!(
                             "received sftp download chunk which is invalid if sent by web client"
                         );
@@ -638,7 +638,7 @@ async fn handle_web_open_tunnel(
         return;
     };
 
-    info!("notifying daemon to open tunnel {protocol}");
+    info!("notifying agent to open tunnel {protocol}");
 
     if tx
         .send(NodeFrameData::OpenTunnel {

@@ -1,5 +1,5 @@
 [package]
-name = "phirepass-daemon"
+name = "phirepass-agent"
 version = { workspace = true }
 edition = { workspace = true }
 repository = { workspace = true }
