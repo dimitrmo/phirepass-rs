@@ -32,13 +32,14 @@ lint:
 	cargo clippy --all --all-targets -- -D warnings -D dead_code
 
 docker-server:
-	docker buildx build \
-		-t dimitrmok/phirepass-server:latest \
-		--platform linux/amd64,linux/arm64 \
-		-f server/Dockerfile \
-		--progress=plain \
-		--push \
-		.
+	docker build -f server/Dockerfile -t dimitrmok/phirepass-server:latest .
+#	docker buildx build \
+#		-t dimitrmok/phirepass-server:latest \
+#		--platform linux/amd64,linux/arm64 \
+#		-f server/Dockerfile \
+#		--progress=plain \
+#		--push \
+#		.
 
 docker-agent:
 	docker buildx build \
