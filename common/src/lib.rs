@@ -1,7 +1,5 @@
 #[cfg(feature = "env")]
 pub mod env;
-#[cfg(feature = "ip")]
-pub mod ip;
 pub mod logger;
 #[cfg(feature = "node")]
 pub mod node;

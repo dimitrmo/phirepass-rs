@@ -51,13 +51,13 @@ jobs:
               uses: docker/setup-buildx-action@v3
 
             - name: Build
-              run: cargo build --all-features
+              run: cargo build --locked --all-features
 
             - name: Run tests
-              run: cargo test --all-features
+              run: cargo test --locked --all-features
 
             - name: Build release
-              run: cargo build --all-features --release
+              run: cargo build --locked --all-features --release
 
             - name: Install wasm-pack
               run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
@@ -67,7 +67,8 @@ jobs:
                   cd channel && \
                         wasm-pack build --target web \
                             --out-name phirepass-channel \
-                            --out-dir pkg/debug
+                            --out-dir pkg/debug \
+                            --locked
 
             - name: Build wasm prod
               run: |
@@ -75,6 +76,7 @@ jobs:
                         wasm-pack build --target web \
                             --out-name phirepass-channel \
                             --out-dir pkg/release \
+                            --locked \
                             --release
 
 

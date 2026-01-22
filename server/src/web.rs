@@ -2,7 +2,6 @@ use crate::connection::WebConnection;
 use crate::http::AppState;
 use axum::extract::ws::{Message, WebSocket};
 use axum::extract::{State, WebSocketUpgrade};
-use axum::http::HeaderMap;
 use axum_client_ip::ClientIp;
 use bytes::Bytes;
 use futures_util::{SinkExt, StreamExt};
@@ -19,9 +18,7 @@ pub(crate) async fn ws_web_handler(
     State(state): State<AppState>,
     ClientIp(ip): ClientIp,
     ws: WebSocketUpgrade,
-    headers: HeaderMap,
 ) -> impl axum::response::IntoResponse {
-    let ip = phirepass_common::ip::extract_ip_from_headers(&headers).unwrap_or(ip);
     ws.on_upgrade(move |socket| handle_web_socket(socket, state, ip))
 }
 
