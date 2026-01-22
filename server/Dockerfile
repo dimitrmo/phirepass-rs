@@ -28,7 +28,7 @@ COPY . .
 
 RUN RUST_TARGET="$(cat /rust_target)" && \
     rustup target add "${RUST_TARGET}" && \
-    cargo install --bin ${APP_NAME} --verbose --path . --target "${RUST_TARGET}" && \
+    cargo install --locked --bin ${APP_NAME} --verbose --path . --target "${RUST_TARGET}" && \
     cp target/"${RUST_TARGET}"/release/"${APP_NAME}" /app-bin && \
     rm -rf src target/"${RUST_TARGET}"/release/*
 

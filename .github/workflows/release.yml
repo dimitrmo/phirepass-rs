@@ -25,7 +25,7 @@ jobs:
     Setup:
         runs-on: ubuntu-latest
         steps:
-            - name: Cargo install
+            - name: Install cargo verison
               uses: dimitrmo/cargo-verison-action@v1.0.38
               with:
                   workspace: true
