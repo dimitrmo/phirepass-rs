@@ -1,4 +1,5 @@
 use crate::connection::{NodeConnection, WebConnection};
+use crate::db::Database;
 use crate::env;
 use crate::env::Env;
 use crate::error::ServerError;
@@ -39,6 +40,7 @@ pub type TunnelSessions = Arc<DashMap<TunnelSessionKey, (Ulid, Ulid)>>;
 #[derive(Clone)]
 pub(crate) struct AppState {
     pub(crate) env: Arc<Env>,
+    pub(crate) db: Arc<Database>,
     pub(crate) nodes: Nodes,
     pub(crate) connections: Connections,
     pub(crate) tunnel_sessions: TunnelSessions,

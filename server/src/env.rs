@@ -29,6 +29,12 @@ pub(crate) struct Env {
 
     #[envconfig(from = "ACCESS_CONTROL_ALLOW_ORIGIN")]
     pub access_control_allowed_origin: Option<String>,
+
+    #[envconfig(from = "DATABASE_URL")]
+    pub database_url: String,
+
+    #[envconfig(from = "DATABASE_MAX_CONNECTIONS", default = "5")]
+    pub database_max_connections: u32,
 }
 
 pub fn init() -> anyhow::Result<Env> {

@@ -1,15 +1,22 @@
 use crate::connection::NodeConnection;
 use crate::env;
 use crate::http::AppState;
+use argon2::{PasswordHash, PasswordVerifier};
+use axum::Json;
 use axum::extract::ws::{Message, WebSocket};
 use axum::extract::{State, WebSocketUpgrade};
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
 use axum_client_ip::ClientIp;
+use chrono::Utc;
 use futures_util::{SinkExt, StreamExt};
 use log::{debug, info, warn};
 use phirepass_common::protocol::common::{Frame, FrameData};
 use phirepass_common::protocol::node::{NodeFrameData, WebFrameId};
 use phirepass_common::protocol::web::WebFrameData;
 use phirepass_common::stats::Stats;
+use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::net::IpAddr;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
@@ -19,7 +26,7 @@ pub(crate) async fn ws_node_handler(
     State(state): State<AppState>,
     ClientIp(ip): ClientIp,
     ws: WebSocketUpgrade,
-) -> impl axum::response::IntoResponse {
+) -> impl IntoResponse {
     ws.on_upgrade(move |socket| handle_node_socket(socket, state, ip))
 }
 
@@ -393,4 +400,151 @@ fn now_millis() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AuthRequest {
+    pub token: String,
+    pub version: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[allow(dead_code)]
+pub struct AuthResponse {
+    pub node_id: String,
+    pub success: bool,
+}
+
+fn unauthorized(value: serde_json::Value) -> Response {
+    (StatusCode::UNAUTHORIZED, Json(value)).into_response()
+}
+
+fn success(value: serde_json::Value) -> Response {
+    (StatusCode::OK, Json(value)).into_response()
+}
+
+pub async fn authenticate_node(
+    State(state): State<AppState>,
+    Json(payload): Json<AuthRequest>,
+) -> impl IntoResponse {
+    info!(
+        "authenticating node with token version: {}",
+        payload.version
+    );
+
+    let token = payload.token.trim();
+    if token.is_empty() {
+        return unauthorized(json!({
+            "success": false,
+            "error": "token is required",
+        }));
+    }
+
+    info!("validating token for node...");
+
+    if !token.starts_with("pat_") {
+        warn!("token does not look like a PAT");
+        return unauthorized(json!({
+            "success": false,
+            "error": "invalid token format",
+        }));
+    }
+
+    info!("found token starting with pat_");
+
+    let Some(pat_body) = token.strip_prefix("pat_") else {
+        warn!("token missing pat_ prefix after trim");
+        return unauthorized(json!({
+            "success": false,
+            "error": "broken token format",
+        }));
+    };
+
+    info!("token body extracted");
+
+    let (token_id, secret) = match pat_body.split_once('.') {
+        Some((token_id, secret)) => (token_id, Some(secret)),
+        None => (pat_body, None), // allow legacy pat_<id> tokens without a secret
+    };
+
+    let Some(secret) = secret else {
+        warn!("token missing secret");
+        return unauthorized(json!({
+            "success": false,
+            "error": "invalid token format",
+        }));
+    };
+
+    info!("token format verified: contains secret");
+
+    let token_record = match state.db.get_token_by_id(token_id).await {
+        Ok(record) => record,
+        Err(err) => {
+            warn!("database error while validating token {token_id}: {err}");
+            return unauthorized(json!({
+                "success": false,
+                "error": "invalid token",
+            }));
+        }
+    };
+
+    info!("token record {} found", token_record.id);
+
+    if let Some(expires_at) = token_record.expires_at {
+        if expires_at < Utc::now() {
+            warn!("token expired: {}", token_id);
+            return unauthorized(json!({
+                "success": false,
+                "error": "token has expired",
+            }));
+        }
+    }
+
+    info!("token is still valid");
+
+    let parsed_hash = match PasswordHash::new(&token_record.token_hash) {
+        Ok(hash) => hash,
+        Err(err) => {
+            warn!("failed to parse stored password hash: {}", err);
+            return unauthorized(json!({
+                "success": false,
+                "error": "failed to validate token",
+            }));
+        }
+    };
+
+    info!("password hash calculated");
+
+    if let Err(e) = state
+        .db
+        .hasher
+        .verify_password(secret.as_bytes(), &parsed_hash)
+    {
+        warn!("invalid token secret for token_id={}: {}", token_id, e);
+        return unauthorized(json!({
+            "success": false,
+            "error": "failed to verify token",
+        }));
+    }
+
+    info!("password verified successfully");
+
+    let node_record = match state.db.create_node_from_token(&token_record).await {
+        Ok(record) => record,
+        Err(err) => {
+            warn!("failed to create node for token {token_id}: {err}");
+            return unauthorized(json!({
+                "success": false,
+                "error": "failed to create node",
+            }));
+        }
+    };
+
+    let node_id = node_record.id;
+    info!("node authenticated successfully: {}", node_id);
+
+    success(json!({
+        "success": true,
+        "node_id": node_id.to_string(),
+    }))
 }

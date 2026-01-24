@@ -31,13 +31,24 @@ pub(crate) struct Env {
     #[envconfig(from = "PING_INTERVAL", default = "30")]
     pub ping_interval: u16,
 
-    #[envconfig(from = "SERVER_HOST", default = "0.0.0.0")]
+    #[cfg_attr(
+        debug_assertions,
+        envconfig(from = "SERVER_HOST", default = "localhost")
+    )]
+    #[cfg_attr(
+        not(debug_assertions),
+        envconfig(from = "SERVER_HOST", default = "api.phirepass.io")
+    )]
     pub server_host: String,
 
-    #[envconfig(from = "SERVER_PORT", default = "8080")]
+    #[cfg_attr(debug_assertions, envconfig(from = "SERVER_PORT", default = "8080"))]
+    #[cfg_attr(
+        not(debug_assertions),
+        envconfig(from = "SERVER_PORT", default = "443")
+    )]
     pub server_port: u16,
 
-    #[envconfig(from = "SSH_HOST", default = "0.0.0.0")]
+    #[envconfig(from = "SSH_HOST", default = "localhost")]
     pub ssh_host: String,
 
     #[envconfig(from = "SSH_PORT", default = "22")]

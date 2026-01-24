@@ -2,12 +2,13 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
+use crate::db::Database;
 use crate::env::Env;
 use crate::http::{AppState, build_cors, get_stats, get_version, list_connections, list_nodes};
-use crate::node::ws_node_handler;
+use crate::node::{authenticate_node, ws_node_handler};
 use crate::web::ws_web_handler;
 use axum::Router;
-use axum::routing::get;
+use axum::routing::{get, post};
 use dashmap::DashMap;
 use log::{info, warn};
 use phirepass_common::stats::Stats;
@@ -20,8 +21,11 @@ pub async fn start(config: Env) -> anyhow::Result<()> {
     let stats_refresh_interval = config.stats_refresh_interval;
     let (shutdown_tx, _shutdown_rx) = broadcast::channel(1);
 
+    let db = Database::create(&config).await?;
+
     let state = AppState {
         env: Arc::new(config),
+        db: Arc::new(db),
         nodes: Arc::new(DashMap::new()),
         connections: Arc::new(DashMap::new()),
         tunnel_sessions: Arc::new(DashMap::new()),
@@ -66,6 +70,7 @@ fn start_http_server(
 
         let app = Router::new()
             .route("/api/web/ws", get(ws_web_handler))
+            .route("/api/nodes/auth", post(authenticate_node))
             .route("/api/nodes/ws", get(ws_node_handler))
             .route("/api/nodes", get(list_nodes))
             .route("/api/connections", get(list_connections))

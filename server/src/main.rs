@@ -2,6 +2,7 @@ use phirepass_common::runtime::RuntimeBuilder;
 
 mod cli;
 mod connection;
+mod db;
 mod env;
 mod error;
 mod http;

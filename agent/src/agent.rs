@@ -1,3 +1,4 @@
+use crate::creds::TokenStore;
 use crate::env::Env;
 use crate::http::{AppState, get_version};
 use crate::ws;
@@ -5,9 +6,13 @@ use axum::Router;
 use axum::routing::get;
 use log::{info, warn};
 use phirepass_common::stats::Stats;
+use secrecy::SecretString;
+use serde_json::json;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::fs;
 use tokio::signal;
 use tokio::sync::broadcast;
 
@@ -45,6 +50,77 @@ pub(crate) async fn start(config: Env) -> anyhow::Result<()> {
     Ok(())
 }
 
+pub(crate) async fn login(
+    server_host: String,
+    server_port: u16,
+    file: Option<PathBuf>,
+) -> anyhow::Result<()> {
+    info!("logging in with {server_host}:{server_port}");
+
+    let token = if let Some(file_path) = file {
+        info!("reading token from file: {}", file_path.display());
+        if !file_path.exists() {
+            return Err(anyhow::anyhow!("file does not exist"));
+        }
+
+        let token = fs::read_to_string(&file_path).await?;
+        token.trim().to_string()
+    } else {
+        rpassword::prompt_password("Enter authentication token: ")?
+    };
+
+    let scheme = if server_port == 443 { "https" } else { "http" };
+    let url = format!(
+        "{}://{}:{}/api/nodes/auth",
+        scheme, server_host, server_port
+    );
+
+    info!("authenticating with server at {}", url);
+
+    let client = reqwest::Client::new();
+    let response = client
+        .post(&url)
+        .json(&json!({
+            "token": token,
+            "version": crate::env::version(),
+        }))
+        .send()
+        .await?;
+
+    if !response.status().is_success() {
+        anyhow::bail!("authentication failed with status: {}", response.status());
+    }
+
+    let body = response.json::<serde_json::Value>().await?;
+
+    // Extract node_id from response
+    let node_id = body
+        .get("node_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow::anyhow!("node_id not found in response"))?
+        .to_string();
+
+    info!("successfully authenticated node_id={node_id}");
+
+    let username = whoami::username()?;
+    let ts = TokenStore::new(
+        "phirepass",
+        "agent",
+        server_host.as_str(),
+        username.as_str(),
+    )?;
+    ts.save(Some(&node_id), Some(&SecretString::from(token)))?;
+
+    Ok(())
+}
+
+pub(crate) fn load_stored_node_id(server_host: &str) -> Option<ulid::Ulid> {
+    let username = whoami::username().ok()?;
+    let ts = TokenStore::new("phirepass", "agent", server_host, username.as_str()).ok()?;
+    let (node_id, _) = ts.load().ok()?;
+    node_id.and_then(|id| id.parse().ok())
+}
+
 fn start_http_server(
     state: AppState,
     mut shutdown: broadcast::Receiver<()>,
@@ -78,7 +154,9 @@ fn start_ws_connection(
     let env = Arc::clone(&state.env);
     tokio::spawn(async move {
         let mut attempt: u32 = 0;
-        let stored_node_id = Arc::new(tokio::sync::RwLock::new(None));
+
+        let node_id = load_stored_node_id(&env.server_host);
+        let stored_node_id = Arc::new(tokio::sync::RwLock::new(node_id));
 
         loop {
             let conn = ws::WebSocketConnection::new(stored_node_id.clone());

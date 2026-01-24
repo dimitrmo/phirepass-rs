@@ -1,8 +1,9 @@
 use phirepass_common::runtime::RuntimeBuilder;
 
+mod agent;
 mod cli;
 mod common;
-mod agent;
+mod creds;
 mod env;
 mod error;
 mod http;
@@ -25,6 +26,10 @@ fn main() -> anyhow::Result<()> {
                 phirepass_common::logger::init("phirepass:agent");
                 let config = env::init()?;
                 agent::start(config).await
+            }
+            Some(cli::Commands::Login(args)) => {
+                phirepass_common::logger::init("phirepass:agent");
+                agent::login(args.server_host, args.server_port, args.from_file).await
             }
             Some(cli::Commands::Version) => {
                 println!("{}", env::version());

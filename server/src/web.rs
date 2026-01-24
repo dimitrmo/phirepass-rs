@@ -620,15 +620,17 @@ async fn handle_web_open_tunnel(
     let Some(tx) = node_tx else {
         warn!("node not found {node_id}");
 
-        if let Err(err) = state.notify_client_by_cid(
-            cid,
-            WebFrameData::Error {
-                kind: FrameError::Generic,
-                message: format!("Node[id={}] could not be found", node_id),
-                msg_id,
-            },
-        )
-        .await {
+        if let Err(err) = state
+            .notify_client_by_cid(
+                cid,
+                WebFrameData::Error {
+                    kind: FrameError::Generic,
+                    message: format!("Node[id={}] could not be found", node_id),
+                    msg_id,
+                },
+            )
+            .await
+        {
             warn!("error notifying clients by cid on node {node_id}: {err}");
         }
 
