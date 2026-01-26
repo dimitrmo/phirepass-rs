@@ -118,7 +118,7 @@ pub(crate) fn load_stored_node_id(server_host: &str) -> Option<ulid::Ulid> {
     let username = whoami::username().ok()?;
     let ts = TokenStore::new("phirepass", "agent", server_host, username.as_str()).ok()?;
     let (node_id, _) = ts.load().ok()?;
-    node_id.and_then(|id| id.parse().ok())
+    node_id.parse().ok()
 }
 
 fn start_http_server(

@@ -16,8 +16,8 @@ pub struct TokenStore {
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone)]
 pub struct StoredState {
-    pub node_id: Option<String>,
-    pub token: Option<String>, // used only for fallback
+    pub node_id: String,
+    pub token: String, // used only for fallback
 }
 
 impl TokenStore {
@@ -44,7 +44,7 @@ impl TokenStore {
         let mut state = self.load_state()?.unwrap_or_default();
 
         if let Some(n) = node_id {
-            state.node_id = Some(n.to_owned());
+            state.node_id = n.to_owned();
         }
 
         let mut keyring_ok = false;
@@ -53,30 +53,31 @@ impl TokenStore {
                 if entry.set_password(tok.expose_secret()).is_ok() {
                     keyring_ok = true;
                     // don’t keep token in file when keyring works
-                    state.token = None;
+                    state.token = String::new();
                 }
             }
+
             if !keyring_ok {
                 // fallback: store token in file
-                state.token = Some(tok.expose_secret().to_owned());
+                state.token = tok.expose_secret().to_owned();
             }
         }
 
         self.save_state(&state)
     }
 
-    pub fn load(&self) -> std::io::Result<(Option<String>, Option<SecretString>)> {
+    pub fn load(&self) -> std::io::Result<(String, SecretString)> {
         let state = self.load_state()?.unwrap_or_default();
 
         // token: keyring first
         if let Ok(entry) = keyring::Entry::new(&self.service, &self.account) {
             if let Ok(s) = entry.get_password() {
-                return Ok((state.node_id, Some(SecretString::from(s))));
+                return Ok((state.node_id, SecretString::from(s)));
             }
         }
 
         // fallback token from file
-        let token = state.token.map(SecretString::from);
+        let token = SecretString::from(state.token);
         Ok((state.node_id, token))
     }
 
@@ -84,6 +85,7 @@ impl TokenStore {
         if let Ok(entry) = keyring::Entry::new(&self.service, &self.account) {
             let _ = entry.delete_credential();
         }
+
         match fs::remove_file(&self.state_path) {
             Ok(_) => Ok(()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
