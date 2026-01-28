@@ -2811,7 +2811,7 @@ dependencies = [
  "tower-http",
  "ulid",
  "uuid",
- "whoami 2.0.2",
+ "whoami 2.1.0",
 ]
 
 [[package]]
@@ -2845,7 +2845,7 @@ dependencies = [
  "tokio-tungstenite",
  "tokio-util",
  "ulid",
- "whoami 2.0.2",
+ "whoami 2.1.0",
 ]
 
 [[package]]
@@ -4908,9 +4908,9 @@ dependencies = [
 
 [[package]]
 name = "whoami"
-version = "2.0.2"
+version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ace4d5c7b5ab3d99629156d4e0997edbe98a4beb6d5ba99e2cae830207a81983"
+checksum = "8fae98cf96deed1b7572272dfc777713c249ae40aa1cf8862e091e8b745f5361"
 dependencies = [
  "libredox",
  "wasite 1.0.2",
