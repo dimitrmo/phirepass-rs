@@ -93,7 +93,7 @@ keyring = "3.6.3"
 directories = "6.0.0"
 tempfile = "3.24.0"
 secrecy = "0.10.3"
-whoami = "2.0.2"
+whoami = "2.1.0"
 
 [profile.release]
 lto = "fat"
