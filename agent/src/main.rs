@@ -29,7 +29,11 @@ fn main() -> anyhow::Result<()> {
             }
             Some(cli::Commands::Login(args)) => {
                 phirepass_common::logger::init("phirepass:agent");
-                agent::login(args.server_host, args.server_port, args.from_file).await
+                agent::login(args.server_host, args.server_port, args.from_file, args.from_stdin).await
+            }
+            Some(cli::Commands::Logout(args)) => {
+                phirepass_common::logger::init("phirepass:agent");
+                agent::logout(args.server_host, args.server_port).await
             }
             Some(cli::Commands::Version) => {
                 println!("{}", env::version());

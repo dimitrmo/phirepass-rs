@@ -23,7 +23,6 @@ rustls = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 russh-sftp = { workspace = true }
-ulid = { workspace = true }
 dashmap = { workspace = true }
 bytes = { workspace = true }
 thiserror = { workspace = true }
@@ -34,3 +33,4 @@ directories = { workspace = true }
 tempfile = { workspace = true }
 secrecy = { workspace = true }
 whoami = { workspace = true }
+uuid = { workspace = true }

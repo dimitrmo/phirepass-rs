@@ -6,9 +6,9 @@ use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use tokio::sync::mpsc::Sender;
-use ulid::Ulid;
+use uuid::Uuid;
 
-pub type TunnelSessions = Arc<DashMap<(Ulid, u32), SessionHandle>>;
+pub type TunnelSessions = Arc<DashMap<(Uuid, u32), SessionHandle>>;
 
 static SESSION_ID: AtomicU32 = AtomicU32::new(1);
 

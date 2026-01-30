@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::oneshot;
-use ulid::Ulid;
+use uuid::Uuid;
 
 #[derive(Clone)]
 pub(crate) enum SSHConfigAuth {
@@ -87,8 +87,8 @@ impl SSHConnection {
 
     pub async fn connect(
         &self,
-        node_id: Ulid,
-        cid: Ulid,
+        node_id: Uuid,
+        cid: Uuid,
         tx: &Sender<Frame>,
         msg_id: Option<u32>,
         mut cmd_rx: Receiver<SSHCommand>,

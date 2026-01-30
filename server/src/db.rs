@@ -71,6 +71,37 @@ impl Database {
         Ok(node_record)
     }
 
+    pub async fn create_node_from_token_exclusive(
+        &self,
+        token: &TokenRecord,
+    ) -> anyhow::Result<NodeRecord> {
+        if let Ok(existing_node) = self.get_node_by_token_id(&token.id).await {
+            anyhow::bail!(
+                "Token is already in use by node {}. \
+                 Please close the existing connection or logout first before using this token again.",
+                existing_node.id
+            );
+        }
+
+        self.create_node_from_token(token).await
+    }
+
+    pub async fn get_node_by_token_id(&self, token_id: &Uuid) -> anyhow::Result<NodeRecord> {
+        let node_record = sqlx::query_as::<_, NodeRecord>(
+            r#"
+            SELECT *
+            FROM nodes
+            WHERE token_id = $1
+            "#,
+        )
+        .persistent(false)
+        .bind(token_id)
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(node_record)
+    }
+
     pub async fn get_token_by_id(&self, token_id: &str) -> anyhow::Result<TokenRecord> {
         let token_record = sqlx::query_as::<_, TokenRecord>(
             r#"
@@ -85,5 +116,20 @@ impl Database {
         .await?;
 
         Ok(token_record)
+    }
+
+    pub async fn delete_node(&self, node_id: &Uuid) -> anyhow::Result<()> {
+        sqlx::query(
+            r#"
+            DELETE FROM nodes
+            WHERE id = $1
+            "#,
+        )
+        .persistent(false)
+        .bind(node_id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
     }
 }

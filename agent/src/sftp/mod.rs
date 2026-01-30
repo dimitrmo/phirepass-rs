@@ -4,7 +4,7 @@ use russh_sftp::client::fs::File;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, SystemTime};
-use ulid::Ulid;
+use uuid::Uuid;
 
 pub const CHUNK_SIZE: usize = 64 * 1024; // 64KB chunks
 
@@ -32,8 +32,8 @@ pub struct FileDownload {
     pub last_updated: SystemTime,
 }
 
-pub type SFTPActiveUploads = Arc<DashMap<(Ulid, u32), FileUpload>>;
-pub type SFTPActiveDownloads = Arc<DashMap<(Ulid, u32), FileDownload>>;
+pub type SFTPActiveUploads = Arc<DashMap<(Uuid, u32), FileUpload>>;
+pub type SFTPActiveDownloads = Arc<DashMap<(Uuid, u32), FileDownload>>;
 
 static ID_COUNTER: AtomicU32 = AtomicU32::new(1);
 
@@ -47,7 +47,7 @@ pub async fn cleanup_abandoned_uploads(uploads: &SFTPActiveUploads) {
     const TIMEOUT: Duration = Duration::from_secs(15 * 60); // 15 minutes
 
     let now = SystemTime::now();
-    let keys_to_remove: Vec<(Ulid, u32)> = uploads
+    let keys_to_remove: Vec<(Uuid, u32)> = uploads
         .iter()
         .filter_map(|entry| {
             let upload = entry.value();
@@ -76,7 +76,7 @@ pub async fn cleanup_abandoned_downloads(downloads: &SFTPActiveDownloads) {
     const TIMEOUT: Duration = Duration::from_secs(15 * 60); // 15 minutes
 
     let now = SystemTime::now();
-    let keys_to_remove: Vec<(Ulid, u32)> = downloads
+    let keys_to_remove: Vec<(Uuid, u32)> = downloads
         .iter()
         .filter_map(|entry| {
             let download = entry.value();

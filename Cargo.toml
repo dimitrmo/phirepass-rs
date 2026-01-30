@@ -33,7 +33,6 @@ anyhow = { workspace = true }
 phirepass-common = { workspace = true, features = ["full"] }
 futures-util = { workspace = true }
 tokio-tungstenite = { workspace = true }
-ulid = { workspace = true }
 serde = { workspace = true }
 bytes = { workspace = true }
 russh = { workspace = true }
@@ -73,10 +72,9 @@ axum = { version = "0.8.8", features = ["ws"]}
 anyhow = "1.0.100"
 env_logger = "0.11.8"
 log = "0.4.29"
-ulid = { version = "1.2.1", features = ["serde"] }
 rmp-serde = "1.3.1"
 futures-util = "0.3.31"
-clap = { version = "4.5.54", features = ["derive"] }
+clap = { version = "4.5.56", features = ["derive"] }
 phirepass-common = { path = "common" }
 envconfig = "0.11.1"
 axum-client-ip = { version = "1.3.1", features = ["serde", "forwarded-header"] }
@@ -93,7 +91,7 @@ keyring = "3.6.3"
 directories = "6.0.0"
 tempfile = "3.24.0"
 secrecy = "0.10.3"
-whoami = "2.0.2"
+whoami = "2.1.0"
 
 [profile.release]
 lto = "fat"

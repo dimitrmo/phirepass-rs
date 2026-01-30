@@ -14,7 +14,7 @@ use std::time::SystemTime;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio::sync::mpsc::Sender;
 use tokio::time::{Duration, sleep};
-use ulid::Ulid;
+use uuid::Uuid;
 
 // Download rate limiting configuration
 // Set DOWNLOAD_CHUNK_DELAY_MS to add delay before sending each chunk
@@ -30,7 +30,7 @@ pub async fn start_download(
     tx: &Sender<Frame>,
     sftp_session: &SftpSession,
     download: &SFTPDownloadStart,
-    cid: Ulid,
+    cid: Uuid,
     sid: u32,
     msg_id: Option<u32>,
     downloads: &SFTPActiveDownloads,
@@ -137,7 +137,7 @@ pub async fn start_download(
 
 pub async fn download_file_chunk(
     tx: &Sender<Frame>,
-    cid: Ulid,
+    cid: Uuid,
     sid: u32,
     msg_id: Option<u32>,
     download_id: u32,

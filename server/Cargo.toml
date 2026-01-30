@@ -6,7 +6,6 @@ repository = { workspace = true }
 license-file = { workspace = true }
 
 [dependencies]
-ulid = { workspace = true }
 rmp-serde = { workspace = true }
 futures-util = { workspace = true }
 clap = { workspace = true }

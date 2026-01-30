@@ -15,27 +15,27 @@ use serde_json::json;
 use std::sync::Arc;
 use std::time::SystemTime;
 use tower_http::cors::{Any, CorsLayer};
-use ulid::Ulid;
+use uuid::Uuid;
 
 /// Composite key for tunnel sessions: (node_id, session_id)
 /// This avoids string formatting on every tunnel operation
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TunnelSessionKey {
-    pub node_id: Ulid,
+    pub node_id: Uuid,
     pub sid: u32,
 }
 
 impl TunnelSessionKey {
-    pub fn new(node_id: Ulid, sid: u32) -> Self {
+    pub fn new(node_id: Uuid, sid: u32) -> Self {
         Self { node_id, sid }
     }
 }
 
-pub type Nodes = Arc<DashMap<Ulid, NodeConnection>>;
+pub type Nodes = Arc<DashMap<Uuid, NodeConnection>>;
 
-pub type Connections = Arc<DashMap<Ulid, WebConnection>>;
+pub type Connections = Arc<DashMap<Uuid, WebConnection>>;
 
-pub type TunnelSessions = Arc<DashMap<TunnelSessionKey, (Ulid, Ulid)>>;
+pub type TunnelSessions = Arc<DashMap<TunnelSessionKey, (Uuid, Uuid)>>;
 
 #[derive(Clone)]
 pub(crate) struct AppState {
@@ -49,17 +49,17 @@ pub(crate) struct AppState {
 impl AppState {
     pub async fn get_node_id_by_cid_and_sid(
         &self,
-        cid: &Ulid,
+        cid: &Uuid,
         node_id: String,
         sid: u32,
-    ) -> Result<Ulid, ServerError> {
+    ) -> Result<Uuid, ServerError> {
         debug!("get_node_id_by_cid_and_sid [cid={cid}, sid={sid}, node_id={node_id})]");
 
-        let node_ulid = Ulid::from_string(&node_id).map_err(|_| {
-            return format!("failed to decode ulid {}", node_id);
+        let node_uuid = Uuid::parse_str(&node_id).map_err(|err| {
+            return format!("failed to decode uuid {node_id}: {err}");
         })?;
 
-        let key = TunnelSessionKey::new(node_ulid, sid);
+        let key = TunnelSessionKey::new(node_uuid, sid);
 
         let (client_id, node_id) = match self.tunnel_sessions.get(&key) {
             Some(entry) => {
@@ -79,8 +79,8 @@ impl AppState {
     pub async fn get_connection_id_by_sid(
         &self,
         sid: u32,
-        target: Ulid,
-    ) -> Result<Ulid, ServerError> {
+        target: Uuid,
+    ) -> Result<Uuid, ServerError> {
         let key = TunnelSessionKey::new(target, sid);
         let (client_id, node_id) = match self.tunnel_sessions.get(&key) {
             Some(entry) => {
@@ -101,7 +101,7 @@ impl AppState {
 
     pub async fn notify_client_by_cid(
         &self,
-        cid: Ulid,
+        cid: Uuid,
         frame: WebFrameData,
     ) -> Result<(), ServerError> {
         debug!("notify_client_by_cid {cid}");

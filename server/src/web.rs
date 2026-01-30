@@ -12,7 +12,7 @@ use phirepass_common::protocol::web::WebFrameData;
 use std::net::IpAddr;
 use std::time::{Duration, SystemTime};
 use tokio::sync::mpsc;
-use ulid::Ulid;
+use uuid::Uuid;
 
 pub(crate) async fn ws_web_handler(
     State(state): State<AppState>,
@@ -23,7 +23,7 @@ pub(crate) async fn ws_web_handler(
 }
 
 async fn handle_web_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
-    let cid = Ulid::new();
+    let cid = Uuid::new_v4();
 
     let (mut ws_tx, mut ws_rx) = socket.split();
 
@@ -63,20 +63,20 @@ async fn handle_web_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
     // Always abort write task regardless of how we exited message loop
     drop(tx); // Close sender first to wake write task
     write_task.abort();
-    disconnect_web_client(&state, cid).await;
+    disconnect_web_client(&state, &cid).await;
 }
 
 /// Handles incoming WebSocket messages. Always returns to parent for cleanup.
 async fn handle_web_messages(
     ws_rx: &mut futures_util::stream::SplitStream<WebSocket>,
     state: &AppState,
-    cid: Ulid,
+    cid: Uuid,
 ) {
     while let Some(msg) = ws_rx.next().await {
         let msg = match msg {
             Ok(msg) => msg,
             Err(_) => {
-                disconnect_web_client(&state, cid).await;
+                disconnect_web_client(&state, &cid).await;
                 return;
             }
         };
@@ -249,8 +249,8 @@ async fn handle_web_messages(
     }
 }
 
-async fn disconnect_web_client(state: &AppState, cid: Ulid) {
-    if let Some((_, info)) = state.connections.remove(&cid) {
+async fn disconnect_web_client(state: &AppState, cid: &Uuid) {
+    if let Some((_, info)) = state.connections.remove(cid) {
         let alive = info.connected_at.elapsed();
         let total = state.connections.len();
         info!(
@@ -262,7 +262,7 @@ async fn disconnect_web_client(state: &AppState, cid: Ulid) {
     notify_nodes_client_disconnect(state, cid).await;
 }
 
-async fn update_web_heartbeat(state: &AppState, cid: &Ulid) {
+async fn update_web_heartbeat(state: &AppState, cid: &Uuid) {
     if let Some(mut info) = state.connections.get_mut(cid) {
         let since_last = info
             .last_heartbeat
@@ -280,7 +280,7 @@ async fn update_web_heartbeat(state: &AppState, cid: &Ulid) {
 
 async fn handle_web_tunnel_data(
     state: &AppState,
-    cid: Ulid,
+    cid: Uuid,
     protocol: u8,
     sid: u32,
     node_id: String,
@@ -321,7 +321,7 @@ async fn handle_web_tunnel_data(
 
 async fn handle_sftp_list(
     state: &AppState,
-    cid: Ulid,
+    cid: Uuid,
     sid: u32,
     target: String,
     path: String,
@@ -360,7 +360,7 @@ async fn handle_sftp_list(
 
 async fn handle_sftp_download_start(
     state: &AppState,
-    cid: Ulid,
+    cid: Uuid,
     sid: u32,
     target: String,
     msg_id: Option<u32>,
@@ -399,7 +399,7 @@ async fn handle_sftp_download_start(
 
 async fn handle_sftp_download_chunk_request(
     state: &AppState,
-    cid: Ulid,
+    cid: Uuid,
     sid: u32,
     target: String,
     msg_id: Option<u32>,
@@ -442,7 +442,7 @@ async fn handle_sftp_download_chunk_request(
 
 async fn handle_sftp_upload_start(
     state: &AppState,
-    cid: Ulid,
+    cid: Uuid,
     sid: u32,
     target: String,
     msg_id: Option<u32>,
@@ -481,7 +481,7 @@ async fn handle_sftp_upload_start(
 
 async fn handle_sftp_upload(
     state: &AppState,
-    cid: Ulid,
+    cid: Uuid,
     sid: u32,
     target: String,
     msg_id: Option<u32>,
@@ -520,7 +520,7 @@ async fn handle_sftp_upload(
 
 async fn handle_sftp_delete(
     state: &AppState,
-    cid: Ulid,
+    cid: Uuid,
     sid: u32,
     target: String,
     msg_id: Option<u32>,
@@ -559,7 +559,7 @@ async fn handle_sftp_delete(
 
 async fn handle_web_resize(
     state: &AppState,
-    cid: Ulid,
+    cid: Uuid,
     sid: u32,
     target: String,
     cols: u32,
@@ -598,7 +598,7 @@ async fn handle_web_resize(
 
 async fn handle_web_open_tunnel(
     state: &AppState,
-    cid: Ulid,
+    cid: Uuid,
     protocol: u8,
     target: String,
     msg_id: Option<u32>,
@@ -607,7 +607,7 @@ async fn handle_web_open_tunnel(
 ) {
     info!("received open tunnel message protocol={protocol} node_id={target}");
 
-    let node_id = match Ulid::from_string(&target) {
+    let node_id = match Uuid::parse_str(&target) {
         Ok(id) => id,
         Err(err) => {
             warn!("invalid node id {target}: {err}");
@@ -659,12 +659,12 @@ async fn handle_web_open_tunnel(
     }
 }
 
-async fn notify_nodes_client_disconnect(state: &AppState, cid: Ulid) {
+async fn notify_nodes_client_disconnect(state: &AppState, cid: &Uuid) {
     for entry in state.nodes.iter() {
         let (node_id, conn) = entry.pair();
         match conn
             .tx
-            .send(NodeFrameData::ConnectionDisconnect { cid })
+            .send(NodeFrameData::ConnectionDisconnect { cid: *cid })
             .await
         {
             Ok(..) => info!("notified node {node_id} about client {cid} disconnect"),

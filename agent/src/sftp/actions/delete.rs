@@ -6,13 +6,13 @@ use phirepass_common::protocol::sftp::SFTPDelete;
 use phirepass_common::protocol::web::WebFrameData;
 use russh_sftp::client::SftpSession;
 use tokio::sync::mpsc::Sender;
-use ulid::Ulid;
+use uuid::Uuid;
 
 pub async fn delete_file(
     tx: &Sender<Frame>,
     sftp_session: &SftpSession,
     data: &SFTPDelete,
-    cid: Ulid,
+    cid: Uuid,
     sid: u32,
     msg_id: Option<u32>,
     uploads: &SFTPActiveUploads,

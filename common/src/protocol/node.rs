@@ -5,12 +5,12 @@ use crate::protocol::web::WebFrameData;
 use crate::stats::Stats;
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
-use ulid::Ulid;
+use uuid::Uuid;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum WebFrameId {
     SessionId(u32),
-    ConnectionId(Ulid),
+    ConnectionId(Uuid),
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -20,21 +20,24 @@ pub enum NodeFrameData {
         stats: Stats,
     },
 
+    /// agent has already logged in and acquired a token and a node_id,
+    /// and it sends this request to validate
     Auth {
         token: String,
-        node_id: Option<Ulid>,
+        node_id: Uuid,
         version: String,
     },
 
+    /// server must validate token again and again and respond
     AuthResponse {
-        node_id: Ulid,
+        node_id: Uuid,
         success: bool,
         version: String,
     },
 
     OpenTunnel {
         protocol: u8,
-        cid: Ulid,
+        cid: Uuid,
         username: Option<String>,
         password: Option<String>,
         msg_id: Option<u32>, // custom web user supplied. easier to track responses and map them to requests
@@ -42,48 +45,48 @@ pub enum NodeFrameData {
 
     TunnelOpened {
         protocol: u8,
-        cid: Ulid,
+        cid: Uuid,
         sid: u32,            // tunnel session id. exists only after we have a tunnel opened
         msg_id: Option<u32>, // custom web user supplied. easier to track responses and map them to requests
     },
 
     TunnelData {
         protocol: u8,
-        cid: Ulid,
+        cid: Uuid,
         sid: u32,
         data: Bytes,
     },
 
     TunnelClosed {
         protocol: u8,
-        cid: Ulid,
+        cid: Uuid,
         sid: u32,
         msg_id: Option<u32>, // echo back the user supplied msg_id
     }, // notify web that tunnel is closed
 
     SSHWindowResize {
-        cid: Ulid,
+        cid: Uuid,
         sid: u32,
         cols: u32,
         rows: u32,
     },
 
     SFTPList {
-        cid: Ulid,
+        cid: Uuid,
         path: String,
         sid: u32,
         msg_id: Option<u32>, // echo back the user supplied msg_id
     },
 
     SFTPDownloadStart {
-        cid: Ulid,
+        cid: Uuid,
         sid: u32,
         msg_id: Option<u32>,
         download: SFTPDownloadStart,
     },
 
     SFTPDownloadChunkRequest {
-        cid: Ulid,
+        cid: Uuid,
         sid: u32,
         msg_id: Option<u32>,
         download_id: u32,
@@ -91,28 +94,28 @@ pub enum NodeFrameData {
     },
 
     SFTPDownloadChunk {
-        cid: Ulid,
+        cid: Uuid,
         sid: u32,
         msg_id: Option<u32>,
         chunk: SFTPDownloadChunk,
     },
 
     SFTPUploadStart {
-        cid: Ulid,
+        cid: Uuid,
         sid: u32,
         msg_id: Option<u32>,
         upload: SFTPUploadStart,
     },
 
     SFTPUpload {
-        cid: Ulid,
+        cid: Uuid,
         sid: u32,
         msg_id: Option<u32>,
         chunk: SFTPUploadChunk,
     },
 
     SFTPDelete {
-        cid: Ulid,
+        cid: Uuid,
         sid: u32,
         msg_id: Option<u32>,
         data: SFTPDelete,
@@ -132,7 +135,7 @@ pub enum NodeFrameData {
     },
 
     ConnectionDisconnect {
-        cid: Ulid,
+        cid: Uuid,
     },
 }
 

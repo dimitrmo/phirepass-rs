@@ -22,9 +22,6 @@ pub(crate) struct Env {
     #[envconfig(from = "PORT", default = "8081")]
     pub port: u16,
 
-    #[envconfig(from = "PAT_TOKEN", default = "")]
-    pub token: String,
-
     #[envconfig(from = "STATS_REFRESH_INTERVAL", default = "60")]
     pub stats_refresh_interval: u16,
 

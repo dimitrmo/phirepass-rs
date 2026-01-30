@@ -1,4 +1,5 @@
 use crate::connection::NodeConnection;
+use crate::db::{Database, TokenRecord};
 use crate::env;
 use crate::http::AppState;
 use argon2::{PasswordHash, PasswordVerifier};
@@ -15,12 +16,14 @@ use phirepass_common::protocol::common::{Frame, FrameData};
 use phirepass_common::protocol::node::{NodeFrameData, WebFrameId};
 use phirepass_common::protocol::web::WebFrameData;
 use phirepass_common::stats::Stats;
+use phirepass_common::token::extract_creds;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::net::IpAddr;
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
-use ulid::Ulid;
+use uuid::Uuid;
 
 pub(crate) async fn ws_node_handler(
     State(state): State<AppState>,
@@ -33,8 +36,9 @@ pub(crate) async fn ws_node_handler(
 async fn wait_for_auth(
     ws_rx: &mut futures_util::stream::SplitStream<WebSocket>,
     tx: &mpsc::Sender<NodeFrameData>,
-    ip: IpAddr,
-) -> anyhow::Result<Ulid> {
+    db: Arc<Database>,
+    _ip: IpAddr,
+) -> anyhow::Result<Uuid> {
     // Wait for the first message which must be Auth
     let msg = ws_rx
         .next()
@@ -62,40 +66,43 @@ async fn wait_for_auth(
 
     match node_frame {
         NodeFrameData::Auth {
-            token: _,
-            node_id: received_node_id,
-            version: agent_version,
+            token,
+            node_id,
+            version: _,
         } => {
-            // Use provided node_id if available, otherwise generate a new one
-            let id = match received_node_id {
-                Some(node_id) => {
-                    info!("suggested node id found: {node_id}");
-                    node_id
+            info!("auth request received for node {node_id}");
+
+            let mut response: Option<NodeFrameData> = None;
+            let mut correct_node_id = Uuid::nil();
+
+            if let Ok((token_id, token_secret)) = extract_creds(token) {
+                if let Ok(token) = validate_creds(db.clone(), token_id, token_secret).await {
+                    if let Ok(node_record) = db.get_node_by_token_id(&token.id).await {
+                        correct_node_id = node_record.id;
+                        if node_record.id.eq(&node_id) {
+                            response = Some(NodeFrameData::AuthResponse {
+                                node_id: correct_node_id,
+                                success: true,
+                                version: env::version().to_string(),
+                            });
+                        }
+                    }
                 }
-                None => {
-                    let id = Ulid::new();
-                    info!("assigning new node id: {id}");
-                    id
-                }
-            };
+            }
 
-            info!(
-                "node {id} authenticated from {ip} (agent version: {agent_version}, reusing id: {})",
-                received_node_id.is_some()
-            );
+            if response.is_none() {
+                response = Some(NodeFrameData::AuthResponse {
+                    node_id: correct_node_id,
+                    success: false,
+                    version: env::version().to_string(),
+                });
+            }
 
-            // Send auth response
-            let resp = NodeFrameData::AuthResponse {
-                node_id: id,
-                success: true,
-                version: env::version().to_string(),
-            };
-
-            tx.send(resp)
+            tx.send(response.unwrap())
                 .await
                 .map_err(|err| anyhow::anyhow!("failed to send auth response: {err}"))?;
 
-            Ok(id)
+            Ok(node_id)
         }
         other => {
             anyhow::bail!("expected Auth as first message, got: {:?}", other);
@@ -110,7 +117,7 @@ async fn handle_node_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
     let (tx, mut rx) = mpsc::channel::<NodeFrameData>(256);
 
     // Wait for authentication as the first message
-    let id = match wait_for_auth(&mut ws_rx, &tx, ip).await {
+    let id = match wait_for_auth(&mut ws_rx, &tx, state.db.clone(), ip).await {
         Ok(node_id) => node_id,
         Err(err) => {
             warn!("authentication failed from {ip}: {err}");
@@ -156,7 +163,7 @@ async fn handle_node_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
 async fn handle_node_messages(
     ws_rx: &mut futures_util::stream::SplitStream<WebSocket>,
     state: &AppState,
-    id: Ulid,
+    node_id: Uuid,
     tx: &mpsc::Sender<NodeFrameData>,
 ) {
     while let Some(msg) = ws_rx.next().await {
@@ -164,7 +171,7 @@ async fn handle_node_messages(
             Ok(msg) => msg,
             Err(err) => {
                 warn!("node web socket error: {err}");
-                disconnect_node(&state, id).await;
+                disconnect_node(&state, node_id).await;
                 return;
             }
         };
@@ -178,8 +185,7 @@ async fn handle_node_messages(
                 let frame = match Frame::decode(&data) {
                     Ok(frame) => frame,
                     Err(err) => {
-                        warn!("received malformed frame 23: {err}");
-                        warn!("received frame: {data:?}");
+                        warn!("received malformed frame: {err:?}");
                         break;
                     }
                 };
@@ -196,21 +202,23 @@ async fn handle_node_messages(
 
                 match node_frame {
                     NodeFrameData::Heartbeat { stats } => {
-                        update_node_heartbeat(&state, &id, Some(stats)).await;
+                        update_node_heartbeat(&state, &node_id, Some(stats)).await;
                     }
                     NodeFrameData::Auth { .. } => {
-                        warn!("received Auth message after initial authentication from node {id}");
+                        warn!(
+                            "received Auth message after initial authentication from node {node_id}"
+                        );
                     }
                     // ping from agent
                     NodeFrameData::Ping { sent_at } => {
                         let now = now_millis();
                         let latency = now.saturating_sub(sent_at);
-                        info!("ping from node {id}; latency={}ms", latency);
+                        info!("ping from node {node_id}; latency={}ms", latency);
                         let pong = NodeFrameData::Pong { sent_at: now };
                         if let Err(err) = tx.send(pong).await {
-                            warn!("failed to queue pong for node {id}: {err}");
+                            warn!("failed to queue pong for node {node_id}: {err}");
                         } else {
-                            info!("pong response to node {id} sent");
+                            info!("pong response to node {node_id} sent");
                         }
                     }
                     // agent notified server that a tunnel has been opened
@@ -220,11 +228,11 @@ async fn handle_node_messages(
                         sid,
                         msg_id,
                     } => {
-                        handle_tunnel_opened(&state, protocol, cid, sid, &id, msg_id).await;
+                        handle_tunnel_opened(&state, protocol, cid, sid, &node_id, msg_id).await;
                     }
                     // agent notified server with data for web
                     NodeFrameData::WebFrame { .. } => {
-                        handle_frame_response(&state, node_frame, id).await;
+                        handle_frame_response(&state, node_frame, node_id).await;
                     }
                     // agent notified server with data for web
                     NodeFrameData::TunnelClosed {
@@ -233,7 +241,7 @@ async fn handle_node_messages(
                         sid,
                         msg_id,
                     } => {
-                        handle_tunnel_closed(&state, protocol, cid, sid, &id, msg_id).await;
+                        handle_tunnel_closed(&state, protocol, cid, sid, &node_id, msg_id).await;
                     }
                     o => warn!("unhandled node frame: {o:?}"),
                 }
@@ -245,7 +253,7 @@ async fn handle_node_messages(
     }
 }
 
-async fn handle_frame_response(state: &AppState, node_frame: NodeFrameData, node_id: Ulid) {
+async fn handle_frame_response(state: &AppState, node_frame: NodeFrameData, node_id: Uuid) {
     debug!("web frame response received");
 
     let NodeFrameData::WebFrame { frame, id } = node_frame else {
@@ -273,9 +281,9 @@ async fn handle_frame_response(state: &AppState, node_frame: NodeFrameData, node
 async fn handle_tunnel_closed(
     state: &AppState,
     protocol: u8,
-    cid: Ulid,
+    cid: Uuid,
     sid: u32,
-    node_id: &Ulid,
+    node_id: &Uuid,
     msg_id: Option<u32>,
 ) {
     debug!("handling tunnel closed for connection {cid} with session {sid}");
@@ -302,9 +310,9 @@ async fn handle_tunnel_closed(
 async fn handle_tunnel_opened(
     state: &AppState,
     protocol: u8,
-    cid: Ulid,
+    cid: Uuid,
     sid: u32,
-    node_id: &Ulid,
+    node_id: &Uuid,
     msg_id: Option<u32>,
 ) {
     debug!("handling tunnel opened for connection {cid} with session {sid}");
@@ -328,7 +336,7 @@ async fn handle_tunnel_opened(
     }
 }
 
-async fn disconnect_node(state: &AppState, id: Ulid) {
+async fn disconnect_node(state: &AppState, id: Uuid) {
     if let Some((_, info)) = state.nodes.remove(&id) {
         let alive = info.node.connected_at.elapsed();
         let total = state.nodes.len();
@@ -341,7 +349,7 @@ async fn disconnect_node(state: &AppState, id: Ulid) {
     }
 }
 
-async fn notify_all_clients_for_closed_tunnel(state: &AppState, id: Ulid) -> u32 {
+async fn notify_all_clients_for_closed_tunnel(state: &AppState, id: Uuid) -> u32 {
     let mut count = 0u32;
 
     let sessions_to_close: Vec<_> = state
@@ -373,7 +381,7 @@ async fn notify_all_clients_for_closed_tunnel(state: &AppState, id: Ulid) -> u32
     count
 }
 
-async fn update_node_heartbeat(state: &AppState, id: &Ulid, stats: Option<Stats>) {
+async fn update_node_heartbeat(state: &AppState, id: &Uuid, stats: Option<Stats>) {
     if let Some(mut info) = state.nodes.get_mut(id) {
         let since_last = info.node.last_heartbeat.elapsed();
         info.node.last_heartbeat = SystemTime::now();
@@ -423,7 +431,56 @@ fn success(value: serde_json::Value) -> Response {
     (StatusCode::OK, Json(value)).into_response()
 }
 
-pub async fn authenticate_node(
+async fn validate_creds(
+    db: Arc<Database>,
+    token_id: String,
+    token_secret: String,
+) -> anyhow::Result<TokenRecord> {
+    info!("validating credentials against db");
+
+    let token_record = match db.get_token_by_id(token_id.as_str()).await {
+        Ok(record) => record,
+        Err(err) => {
+            warn!("database error while validating token {token_id}: {err}");
+            anyhow::bail!("error while validating token {token_id}")
+        }
+    };
+
+    debug!("token record {} found", token_record.id);
+
+    if let Some(expires_at) = token_record.expires_at {
+        if expires_at < Utc::now() {
+            warn!("token {} expired: {:?}", token_id, token_record.expires_at);
+            anyhow::bail!("token has expired")
+        }
+    }
+
+    debug!("token is still valid");
+
+    let parsed_hash = match PasswordHash::new(&token_record.token_hash) {
+        Ok(hash) => hash,
+        Err(err) => {
+            warn!("failed to parse stored password hash: {}", err);
+            anyhow::bail!("failed to parse stored password hash")
+        }
+    };
+
+    debug!("token hash generated");
+
+    if let Err(e) = db
+        .hasher
+        .verify_password(token_secret.as_bytes(), &parsed_hash)
+    {
+        warn!("invalid token secret for token_id={}: {}", token_id, e);
+        anyhow::bail!("failed to verify token")
+    }
+
+    debug!("password verified successfully");
+
+    Ok(token_record)
+}
+
+pub async fn login_node(
     State(state): State<AppState>,
     Json(payload): Json<AuthRequest>,
 ) -> impl IntoResponse {
@@ -432,119 +489,101 @@ pub async fn authenticate_node(
         payload.version
     );
 
-    let token = payload.token.trim();
-    if token.is_empty() {
-        return unauthorized(json!({
-            "success": false,
-            "error": "token is required",
-        }));
-    }
-
-    info!("validating token for node...");
-
-    if !token.starts_with("pat_") {
-        warn!("token does not look like a PAT");
-        return unauthorized(json!({
-            "success": false,
-            "error": "invalid token format",
-        }));
-    }
-
-    info!("found token starting with pat_");
-
-    let Some(pat_body) = token.strip_prefix("pat_") else {
-        warn!("token missing pat_ prefix after trim");
-        return unauthorized(json!({
-            "success": false,
-            "error": "broken token format",
-        }));
+    let (token_id, token_secret) = match extract_creds(payload.token) {
+        Ok((token_id, token_secret)) => (token_id, token_secret),
+        Err(err) => {
+            return unauthorized(json!({
+                "success": false,
+                "error": err.to_string(),
+            }));
+        }
     };
 
-    info!("token body extracted");
+    info!("credentials extracted [id={}, secret=***]", token_id);
 
-    let (token_id, secret) = match pat_body.split_once('.') {
-        Some((token_id, secret)) => (token_id, Some(secret)),
-        None => (pat_body, None), // allow legacy pat_<id> tokens without a secret
+    let token = match validate_creds(state.db.clone(), token_id, token_secret).await {
+        Ok(node_id) => node_id,
+        Err(err) => {
+            return unauthorized(json!({
+                "success": false,
+                "error": err.to_string(),
+            }));
+        }
     };
 
-    let Some(secret) = secret else {
-        warn!("token missing secret");
-        return unauthorized(json!({
-            "success": false,
-            "error": "invalid token format",
-        }));
-    };
+    info!("token ready {}", token.id);
 
-    info!("token format verified: contains secret");
-
-    let token_record = match state.db.get_token_by_id(token_id).await {
+    let node = match state.db.create_node_from_token_exclusive(&token).await {
         Ok(record) => record,
         Err(err) => {
-            warn!("database error while validating token {token_id}: {err}");
+            warn!(
+                "failed to create exclusive node for token {}: {}",
+                token.id, err
+            );
             return unauthorized(json!({
                 "success": false,
-                "error": "invalid token",
+                "error": err.to_string(),
             }));
         }
     };
 
-    info!("token record {} found", token_record.id);
-
-    if let Some(expires_at) = token_record.expires_at {
-        if expires_at < Utc::now() {
-            warn!("token expired: {}", token_id);
-            return unauthorized(json!({
-                "success": false,
-                "error": "token has expired",
-            }));
-        }
-    }
-
-    info!("token is still valid");
-
-    let parsed_hash = match PasswordHash::new(&token_record.token_hash) {
-        Ok(hash) => hash,
-        Err(err) => {
-            warn!("failed to parse stored password hash: {}", err);
-            return unauthorized(json!({
-                "success": false,
-                "error": "failed to validate token",
-            }));
-        }
-    };
-
-    info!("password hash calculated");
-
-    if let Err(e) = state
-        .db
-        .hasher
-        .verify_password(secret.as_bytes(), &parsed_hash)
-    {
-        warn!("invalid token secret for token_id={}: {}", token_id, e);
-        return unauthorized(json!({
-            "success": false,
-            "error": "failed to verify token",
-        }));
-    }
-
-    info!("password verified successfully");
-
-    let node_record = match state.db.create_node_from_token(&token_record).await {
-        Ok(record) => record,
-        Err(err) => {
-            warn!("failed to create node for token {token_id}: {err}");
-            return unauthorized(json!({
-                "success": false,
-                "error": "failed to create node",
-            }));
-        }
-    };
-
-    let node_id = node_record.id;
-    info!("node authenticated successfully: {}", node_id);
+    info!("node ready {}", node.id);
 
     success(json!({
         "success": true,
-        "node_id": node_id.to_string(),
+        "node_id": node.id,
     }))
+}
+
+#[derive(Deserialize)]
+pub struct LogoutRequest {
+    pub node_id: Uuid,
+    pub token: String,
+}
+
+pub async fn logout_node(
+    State(state): State<AppState>,
+    Json(payload): Json<LogoutRequest>,
+) -> impl IntoResponse {
+    info!("logout request for node {}", payload.node_id);
+
+    // Validate token
+    let (token_id, token_secret) = match extract_creds(payload.token) {
+        Ok((token_id, token_secret)) => (token_id, token_secret),
+        Err(err) => {
+            return unauthorized(json!({
+                "success": false,
+                "error": err.to_string(),
+            }));
+        }
+    };
+
+    // Validate credentials
+    match validate_creds(state.db.clone(), token_id, token_secret).await {
+        Ok(_) => {}
+        Err(err) => {
+            return unauthorized(json!({
+                "success": false,
+                "error": err.to_string(),
+            }));
+        }
+    }
+
+    // Delete the node
+    match state.db.delete_node(&payload.node_id).await {
+        Ok(_) => {
+            info!("node {} successfully deleted", payload.node_id);
+            success(json!({
+                "success": true,
+                "message": "Node deleted and token is now available for reuse"
+            }))
+        }
+        Err(err) => {
+            warn!("failed to delete node {}: {}", payload.node_id, err);
+            unauthorized(json!({
+                "success": false,
+                "error": err.to_string(),
+            }))
+        }
+    }
 }

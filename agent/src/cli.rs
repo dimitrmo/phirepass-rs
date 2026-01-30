@@ -14,6 +14,8 @@ pub(crate) enum Commands {
     Start,
     /// Login
     Login(LoginArgs),
+    /// Logout and delete node from server
+    Logout(LogoutArgs),
     /// Print version information
     Version,
 }
@@ -24,6 +26,23 @@ pub(crate) struct LoginArgs {
     #[arg(long, value_name = "PATH")]
     pub from_file: Option<PathBuf>,
 
+    /// Read token from stdin (recommended for Docker)
+    #[arg(long)]
+    pub from_stdin: bool,
+
+    /// Server host to connect to
+    #[cfg_attr(debug_assertions, arg(long, default_value = "localhost"))]
+    #[cfg_attr(not(debug_assertions), arg(long, default_value = "api.phirepass.io"))]
+    pub server_host: String,
+
+    /// Server port to connect to
+    #[cfg_attr(debug_assertions, arg(long, default_value_t = 8080))]
+    #[cfg_attr(not(debug_assertions), arg(long, default_value_t = 443))]
+    pub server_port: u16,
+}
+
+#[derive(Args, Debug)]
+pub(crate) struct LogoutArgs {
     /// Server host to connect to
     #[cfg_attr(debug_assertions, arg(long, default_value = "localhost"))]
     #[cfg_attr(not(debug_assertions), arg(long, default_value = "api.phirepass.io"))]

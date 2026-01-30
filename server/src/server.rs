@@ -5,7 +5,7 @@ use std::time::{Duration, SystemTime};
 use crate::db::Database;
 use crate::env::Env;
 use crate::http::{AppState, build_cors, get_stats, get_version, list_connections, list_nodes};
-use crate::node::{authenticate_node, ws_node_handler};
+use crate::node::{login_node, logout_node, ws_node_handler};
 use crate::web::ws_web_handler;
 use axum::Router;
 use axum::routing::{get, post};
@@ -70,7 +70,8 @@ fn start_http_server(
 
         let app = Router::new()
             .route("/api/web/ws", get(ws_web_handler))
-            .route("/api/nodes/auth", post(authenticate_node))
+            .route("/api/nodes/login", post(login_node))
+            .route("/api/nodes/logout", post(logout_node))
             .route("/api/nodes/ws", get(ws_node_handler))
             .route("/api/nodes", get(list_nodes))
             .route("/api/connections", get(list_connections))

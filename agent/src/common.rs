@@ -6,7 +6,7 @@ use phirepass_common::protocol::node::{NodeFrameData, WebFrameId};
 use phirepass_common::protocol::web::WebFrameData;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::mpsc::error::TrySendError;
-use ulid::Ulid;
+use uuid::Uuid;
 
 #[inline]
 pub fn send_frame_data(sender: &Sender<Frame>, data: NodeFrameData) {
@@ -47,7 +47,7 @@ pub async fn send_tunnel_data(tx: &Sender<Frame>, sid: u32, node_id: String, dat
 }
 
 #[inline]
-pub fn send_requires_username_error(sender: &Sender<Frame>, cid: Ulid, msg_id: Option<u32>) {
+pub fn send_requires_username_error(sender: &Sender<Frame>, cid: Uuid, msg_id: Option<u32>) {
     send_frame_data(
         sender,
         NodeFrameData::WebFrame {
@@ -62,7 +62,7 @@ pub fn send_requires_username_error(sender: &Sender<Frame>, cid: Ulid, msg_id: O
 }
 
 #[inline]
-pub fn send_requires_password_error(sender: &Sender<Frame>, cid: Ulid, msg_id: Option<u32>) {
+pub fn send_requires_password_error(sender: &Sender<Frame>, cid: Uuid, msg_id: Option<u32>) {
     send_frame_data(
         sender,
         NodeFrameData::WebFrame {

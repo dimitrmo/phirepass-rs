@@ -19,24 +19,25 @@ use phirepass_common::protocol::node::NodeFrameData;
 use phirepass_common::protocol::web::WebFrameData;
 use phirepass_common::stats::Stats;
 use phirepass_common::time::now_millis;
+use secrecy::{ExposeSecret, SecretString};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpStream;
-use tokio::sync::RwLock;
 use tokio::sync::mpsc::{Receiver, Sender, channel};
 use tokio::sync::oneshot;
 use tokio_tungstenite::{
     MaybeTlsStream, WebSocketStream, connect_async, tungstenite::protocol::Message,
 };
 use tokio_util::sync::CancellationToken;
-use ulid::Ulid;
+use uuid::Uuid;
 
 type WebSocketReader = SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>;
 
 pub(crate) struct WebSocketConnection {
+    node_id: Uuid,
+    token: SecretString,
     writer: Sender<Frame>,
     reader: Receiver<Frame>,
-    stored_node_id: Arc<RwLock<Option<Ulid>>>,
     sessions: TunnelSessions,
     uploads: SFTPActiveUploads,
     downloads: SFTPActiveDownloads,
@@ -62,13 +63,14 @@ fn generate_server_endpoint(mode: &Mode, server_host: &String, server_port: u16)
 }
 
 impl WebSocketConnection {
-    pub fn new(stored_node_id: Arc<RwLock<Option<Ulid>>>) -> Self {
+    pub fn new(node_id: Uuid, token: SecretString) -> Self {
         // Cap the outbound queue to avoid unbounded memory use when the socket is back-pressured.
         let (tx, rx) = channel::<Frame>(1024);
         Self {
+            node_id,
+            token,
             reader: rx,
             writer: tx,
-            stored_node_id,
             sessions: Arc::new(Default::default()),
             uploads: Arc::new(Default::default()),
             downloads: Arc::new(Default::default()),
@@ -88,12 +90,12 @@ impl WebSocketConnection {
         let (stream, _) = connect_async(endpoint).await?;
         let (mut write, mut read) = stream.split();
 
-        // Check if we have a stored node_id from a previous connection
-        let stored_node_id = self.stored_node_id.read().await.clone();
+        let node_id = self.node_id.clone();
+        let token = self.token.expose_secret().to_owned();
 
         let frame: Frame = NodeFrameData::Auth {
-            token: config.token.clone(),
-            node_id: stored_node_id,
+            token,
+            node_id,
             version: crate::env::version().to_string(),
         }
         .into();
@@ -102,14 +104,25 @@ impl WebSocketConnection {
             .send(Message::Binary(frame.to_bytes()?.into()))
             .await?;
 
-        let (node_id, version) = read_auth_response(&mut read).await?;
+        let (received_node_id, version) = read_auth_response(&mut read).await?;
 
-        // Store the node_id for future reconnections
-        *self.stored_node_id.write().await = Some(node_id);
+        if node_id != received_node_id {
+            error!(
+                "CRITICAL: node_id mismatch. Expected: {}, Received: {}. \
+                 This may indicate token corruption or server misconfiguration.",
+                node_id, received_node_id
+            );
+            anyhow::bail!(
+                "node_id mismatch: local={}, server={}",
+                node_id,
+                received_node_id
+            )
+        }
 
-        info!("agent authenticated successfully {node_id} with server version {version}");
-        // todo: proper authentication
-        // todo: compare version for system compatibility
+        info!(
+            "agent authenticated successfully with server version {}",
+            version
+        );
 
         let mut rx = self.reader;
         let write_task = tokio::spawn(async move {
@@ -222,7 +235,7 @@ async fn spawn_cleanup_task(
 }
 
 async fn spawn_reader_task(
-    target: Ulid,
+    target: Uuid,
     mut reader: WebSocketReader,
     sender: Sender<Frame>,
     config: Arc<Env>,
@@ -315,7 +328,7 @@ async fn spawn_heartbeat_task(
     })
 }
 
-async fn read_auth_response(reader: &mut WebSocketReader) -> anyhow::Result<(Ulid, String)> {
+async fn read_auth_response(reader: &mut WebSocketReader) -> anyhow::Result<(Uuid, String)> {
     match read_next_frame(reader).await {
         None => anyhow::bail!("failed to read auth response"),
         Some(frame) => {
@@ -367,7 +380,7 @@ async fn read_next_frame(reader: &mut WebSocketReader) -> Option<NodeFrameData> 
 }
 
 async fn handle_message(
-    node_id: Ulid,
+    node_id: Uuid,
     data: NodeFrameData,
     sender: &Sender<Frame>,
     config: &Arc<Env>,
@@ -545,7 +558,7 @@ async fn handle_message(
 }
 
 async fn send_sftp_list_data(
-    cid: Ulid,
+    cid: Uuid,
     sid: u32,
     path: String,
     sessions: &TunnelSessions,
@@ -568,7 +581,7 @@ async fn send_sftp_list_data(
 }
 
 async fn send_sftp_upload_start_data(
-    cid: Ulid,
+    cid: Uuid,
     sid: u32,
     msg_id: Option<u32>,
     upload: phirepass_common::protocol::sftp::SFTPUploadStart,
@@ -591,7 +604,7 @@ async fn send_sftp_upload_start_data(
 }
 
 async fn send_sftp_upload_data(
-    cid: Ulid,
+    cid: Uuid,
     sid: u32,
     msg_id: Option<u32>,
     chunk: phirepass_common::protocol::sftp::SFTPUploadChunk,
@@ -614,7 +627,7 @@ async fn send_sftp_upload_data(
 }
 
 async fn send_sftp_delete_data(
-    cid: Ulid,
+    cid: Uuid,
     sid: u32,
     msg_id: Option<u32>,
     data: phirepass_common::protocol::sftp::SFTPDelete,
@@ -637,7 +650,7 @@ async fn send_sftp_delete_data(
 }
 
 async fn send_sftp_download_start_data(
-    cid: Ulid,
+    cid: Uuid,
     sid: u32,
     msg_id: Option<u32>,
     download: phirepass_common::protocol::sftp::SFTPDownloadStart,
@@ -660,7 +673,7 @@ async fn send_sftp_download_start_data(
 }
 
 async fn send_sftp_download_chunk_request(
-    cid: Ulid,
+    cid: Uuid,
     sid: u32,
     msg_id: Option<u32>,
     download_id: u32,
@@ -691,7 +704,7 @@ async fn send_sftp_download_chunk_request(
 }
 
 async fn send_sftp_download_chunk_data(
-    cid: Ulid,
+    cid: Uuid,
     sid: u32,
     msg_id: Option<u32>,
     chunk: phirepass_common::protocol::sftp::SFTPDownloadChunk,
@@ -714,7 +727,7 @@ async fn send_sftp_download_chunk_data(
 }
 
 async fn send_ssh_tunnel_data(
-    cid: Ulid,
+    cid: Uuid,
     sid: u32,
     data: Bytes,
     sessions: &TunnelSessions,
@@ -736,7 +749,7 @@ async fn send_ssh_tunnel_data(
 }
 
 async fn send_ssh_forward_resize(
-    cid: Ulid,
+    cid: Uuid,
     sid: u32,
     cols: u32,
     rows: u32,
@@ -758,10 +771,10 @@ async fn send_ssh_forward_resize(
         .map_err(|err| anyhow!(err))
 }
 
-async fn close_downloads_for_cid(cid: Ulid, downloads: &SFTPActiveDownloads) {
+async fn close_downloads_for_cid(cid: Uuid, downloads: &SFTPActiveDownloads) {
     info!("closing downloads for connection {cid}");
 
-    let keys_to_remove: Vec<(Ulid, u32)> = downloads
+    let keys_to_remove: Vec<(Uuid, u32)> = downloads
         .iter()
         .filter(|entry| entry.key().0.eq(&cid))
         .map(|entry| *entry.key())
@@ -780,10 +793,10 @@ async fn close_downloads_for_cid(cid: Ulid, downloads: &SFTPActiveDownloads) {
     }
 }
 
-async fn close_uploads_for_cid(cid: Ulid, uploads: &SFTPActiveUploads) {
+async fn close_uploads_for_cid(cid: Uuid, uploads: &SFTPActiveUploads) {
     info!("closing uploads for connection {cid}");
 
-    let keys_to_remove: Vec<(Ulid, u32)> = uploads
+    let keys_to_remove: Vec<(Uuid, u32)> = uploads
         .iter()
         .filter(|entry| entry.key().0.eq(&cid))
         .map(|entry| *entry.key())
@@ -798,10 +811,10 @@ async fn close_uploads_for_cid(cid: Ulid, uploads: &SFTPActiveUploads) {
     }
 }
 
-async fn close_tunnels_for_cid(cid: Ulid, sessions: &TunnelSessions) {
+async fn close_tunnels_for_cid(cid: Uuid, sessions: &TunnelSessions) {
     info!("closing tunnels for connection {cid}");
 
-    let keys_to_remove: Vec<(Ulid, u32)> = sessions
+    let keys_to_remove: Vec<(Uuid, u32)> = sessions
         .iter()
         .filter(|entry| entry.key().0.eq(&cid))
         .map(|entry| *entry.key())
@@ -819,7 +832,7 @@ async fn close_tunnels_for_cid(cid: Ulid, sessions: &TunnelSessions) {
 fn ensure_credentials(
     sender: &Sender<Frame>,
     config: &Arc<Env>,
-    cid: Ulid,
+    cid: Uuid,
     username: &Option<String>,
     password: &Option<String>,
     msg_id: Option<u32>,
@@ -859,7 +872,7 @@ fn ensure_credentials(
 
 async fn start_sftp_tunnel(
     tx: &Sender<Frame>,
-    cid: Ulid,
+    cid: Uuid,
     config: &Arc<Env>,
     credentials: SFTPConfigAuth,
     sessions: &TunnelSessions,
@@ -946,8 +959,8 @@ async fn start_sftp_tunnel(
 
 async fn start_ssh_tunnel(
     tx: &Sender<Frame>,
-    node_id: Ulid,
-    cid: Ulid,
+    node_id: Uuid,
+    cid: Uuid,
     config: &Arc<Env>,
     credentials: SSHConfigAuth,
     sessions: &TunnelSessions,

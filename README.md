@@ -31,6 +31,37 @@ Server env (defaults): `APP_MODE=development|production`, `IP_SOURCE=ConnectInfo
 
 Agent env (defaults): `APP_MODE=development|production`, `HOST=0.0.0.0`, `PORT=8081`, `PAT_TOKEN` (sent in Auth, not yet enforced server-side), `STATS_REFRESH_INTERVAL=15`, `PING_INTERVAL=30`, `SERVER_HOST=0.0.0.0`, `SERVER_PORT=8080`, `SSH_HOST=0.0.0.0`, `SSH_PORT=22`, `SSH_AUTH_METHOD=credentials_prompt`.
 
+## Agent login
+
+The agent must be authenticated with a node token before starting. Three token input modes are available:
+
+- **Interactive prompt** (default): `phirepass-agent login` — prompts for the token interactively.
+- **File input**: `phirepass-agent login --from-file /path/to/token` — reads the token from a file (recommended for Kubernetes/Docker secrets).
+- **Stdin input**: `phirepass-agent login --from-stdin` — reads the token from stdin (recommended for Docker).
+
+### Docker usage
+
+To run the agent in Docker with token passed via stdin or environment variable:
+
+```bash
+# Via stdin
+echo "$AGENT_TOKEN" | docker run -i phirepass-agent:latest login --from-stdin
+
+# Via mounted secret file
+docker run -v /run/secrets/agent_token:/token phirepass-agent:latest login --from-file /token
+
+# Using Docker Compose with environment variable
+services:
+  agent:
+    image: phirepass-agent:latest
+    stdin_open: true
+    environment:
+      - AGENT_TOKEN=your-token-here
+    command: sh -c 'echo $$AGENT_TOKEN | /app/agent login --from-stdin && /app/agent start'
+```
+
+By default, the container runs `login --from-stdin`, which reads the token and then starts the agent.
+
 ## Local development
 - Build everything: `cargo build --all` (or `make build`); release: `make prod`.
 - Run server: `make server` (binds `0.0.0.0:8080`, uses `RUST_LOG=info`).

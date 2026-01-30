@@ -9,7 +9,7 @@ use russh_sftp::protocol::OpenFlags;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc::Sender;
 use tokio::time::{Duration, sleep};
-use ulid::Ulid;
+use uuid::Uuid;
 
 // Upload rate limiting configuration
 // Set UPLOAD_CHUNK_ACK_DELAY_MS to add delay before sending chunk acknowledgments
@@ -25,7 +25,7 @@ pub async fn start_upload(
     tx: &Sender<Frame>,
     sftp_session: &SftpSession,
     upload: &SFTPUploadStart,
-    cid: Ulid,
+    cid: Uuid,
     sid: u32,
     msg_id: Option<u32>,
     uploads: &SFTPActiveUploads,
@@ -116,7 +116,7 @@ pub async fn upload_file_chunk(
     tx: &Sender<Frame>,
     sftp_session: &SftpSession,
     chunk: &SFTPUploadChunk,
-    cid: Ulid,
+    cid: Uuid,
     sid: u32,
     msg_id: Option<u32>,
     uploads: &SFTPActiveUploads,
