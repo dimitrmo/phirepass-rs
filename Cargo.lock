@@ -754,9 +754,9 @@ dependencies = [
 
 [[package]]
 name = "crypto-common"
-version = "0.2.0-rc.13"
+version = "0.2.0-rc.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c7722afd27468475c9b6063dc03a57ef2ca833816981619f8ebe64d38d207eef"
+checksum = "5569e5de27d32e673283717728eb5b0e4f30898b523f151a19c51e6188006599"
 dependencies = [
  "hybrid-array",
 ]
@@ -884,13 +884,13 @@ dependencies = [
 
 [[package]]
 name = "digest"
-version = "0.11.0-rc.9"
+version = "0.11.0-rc.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bff8de092798697546237a3a701e4174fe021579faec9b854379af9bf1e31962"
+checksum = "afa94b64bfc6549e6e4b5a3216f22593224174083da7a90db47e951c4fb31725"
 dependencies = [
  "block-buffer 0.11.0",
  "const-oid 0.10.2",
- "crypto-common 0.2.0-rc.13",
+ "crypto-common 0.2.0-rc.14",
 ]
 
 [[package]]
@@ -1846,7 +1846,7 @@ checksum = "fe44f2bbd99fcb302e246e2d6bcf51aeda346d02a365f80296a07a8c711b6da6"
 dependencies = [
  "argon2",
  "bcrypt-pbkdf",
- "digest 0.11.0-rc.9",
+ "digest 0.11.0-rc.10",
  "ecdsa",
  "ed25519-dalek",
  "hex",
@@ -2778,7 +2778,7 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
 name = "phirepass"
-version = "0.1.101"
+version = "0.1.102"
 dependencies = [
  "anyhow",
  "argon2",
@@ -2815,7 +2815,7 @@ dependencies = [
 
 [[package]]
 name = "phirepass-agent"
-version = "0.1.101"
+version = "0.1.102"
 dependencies = [
  "anyhow",
  "axum",
@@ -2849,7 +2849,7 @@ dependencies = [
 
 [[package]]
 name = "phirepass-channel"
-version = "0.1.101"
+version = "0.1.102"
 dependencies = [
  "bytes",
  "gloo-timers",
@@ -2862,7 +2862,7 @@ dependencies = [
 
 [[package]]
 name = "phirepass-common"
-version = "0.1.101"
+version = "0.1.102"
 dependencies = [
  "anyhow",
  "bytes",
@@ -2883,7 +2883,7 @@ dependencies = [
 
 [[package]]
 name = "phirepass-server"
-version = "0.1.101"
+version = "0.1.102"
 dependencies = [
  "anyhow",
  "argon2",
@@ -3407,7 +3407,7 @@ dependencies = [
  "const-oid 0.10.2",
  "crypto-bigint 0.7.0-rc.18",
  "crypto-primes",
- "digest 0.11.0-rc.9",
+ "digest 0.11.0-rc.10",
  "pkcs1 0.8.0-rc.4",
  "pkcs8 0.11.0-rc.10",
  "rand_core 0.10.0-rc-3",
@@ -3856,7 +3856,7 @@ checksum = "9c777f0a122a53fddb0beb6e706771197000b8eb5c9f42b5b850f450ef48c788"
 dependencies = [
  "cfg-if",
  "cpufeatures",
- "digest 0.11.0-rc.9",
+ "digest 0.11.0-rc.10",
 ]
 
 [[package]]
@@ -3878,7 +3878,7 @@ checksum = "7535f94fa3339fe9e5e9be6260a909e62af97f6e14b32345ccf79b92b8b81233"
 dependencies = [
  "cfg-if",
  "cpufeatures",
- "digest 0.11.0-rc.9",
+ "digest 0.11.0-rc.10",
 ]
 
 [[package]]
@@ -3913,7 +3913,7 @@ version = "3.0.0-rc.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "597a96996ccff7dfa16f052bd995b4cecc72af22c35138738dc029f0ead6608d"
 dependencies = [
- "digest 0.11.0-rc.9",
+ "digest 0.11.0-rc.10",
  "rand_core 0.10.0-rc-3",
 ]
 
