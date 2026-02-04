@@ -754,9 +754,9 @@ dependencies = [
 
 [[package]]
 name = "crypto-common"
-version = "0.2.0-rc.15"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6f8441110cea75afde0b89a8d796e2bc67b23432f5a9566cb15d9d365d91a2b0"
+checksum = "211f05e03c7d03754740fd9e585de910a095d6b99f8bcfffdef8319fa02a8331"
 dependencies = [
  "hybrid-array",
 ]
@@ -890,7 +890,7 @@ checksum = "02b42f1d9edf5207c137646b568a0168ca0ec25b7f9eaf7f9961da51a3d91cea"
 dependencies = [
  "block-buffer 0.11.0",
  "const-oid 0.10.2",
- "crypto-common 0.2.0-rc.15",
+ "crypto-common 0.2.0",
 ]
 
 [[package]]
@@ -2777,7 +2777,7 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
 name = "phirepass"
-version = "0.1.103"
+version = "0.1.104"
 dependencies = [
  "anyhow",
  "argon2",
@@ -2814,7 +2814,7 @@ dependencies = [
 
 [[package]]
 name = "phirepass-agent"
-version = "0.1.103"
+version = "0.1.104"
 dependencies = [
  "anyhow",
  "axum",
@@ -2848,7 +2848,7 @@ dependencies = [
 
 [[package]]
 name = "phirepass-channel"
-version = "0.1.103"
+version = "0.1.104"
 dependencies = [
  "bytes",
  "gloo-timers",
@@ -2861,7 +2861,7 @@ dependencies = [
 
 [[package]]
 name = "phirepass-common"
-version = "0.1.103"
+version = "0.1.104"
 dependencies = [
  "anyhow",
  "bytes",
@@ -2882,7 +2882,7 @@ dependencies = [
 
 [[package]]
 name = "phirepass-server"
-version = "0.1.103"
+version = "0.1.104"
 dependencies = [
  "anyhow",
  "argon2",
