@@ -80,3 +80,23 @@ By default, the container runs `login --from-stdin`, which reads the token and t
 - `common/`: protocol types, stats gathering, logging helpers, env mode.
 - `channel/`: browser channel helper and demo assets (served via `make web`).
 - `Makefile`: convenience targets for running, building, Docker images, and wasm artifacts.
+
+## Database schema
+
+```sql
+create table public.nodes (
+  id uuid not null default gen_random_uuid (),
+  user_id uuid not null,
+  token_id uuid not null,
+  name text null,
+  created_at timestamp with time zone not null default (now() AT TIME ZONE 'utc'::text),
+  connected boolean not null default false,
+  connected_at timestamp with time zone null,
+  constraint nodes_pkey primary key (id),
+  constraint nodes_name_key unique (name),
+  constraint nodes_token_id_fkey foreign KEY (token_id) references pat_tokens (id),
+  constraint nodes_user_id_fkey foreign KEY (user_id) references users (id)
+) TABLESPACE pg_default;
+
+create index IF not exists idx_nodes_user_id on public.nodes using btree (user_id) TABLESPACE pg_default;
+```

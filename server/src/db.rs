@@ -132,4 +132,37 @@ impl Database {
 
         Ok(())
     }
+
+    pub async fn set_node_connected(&self, node_id: &Uuid) -> anyhow::Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE nodes
+            SET connected = true,
+                connected_at = (now() AT TIME ZONE 'utc')
+            WHERE id = $1
+            "#,
+        )
+        .persistent(false)
+        .bind(node_id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn set_node_disconnected(&self, node_id: &Uuid) -> anyhow::Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE nodes
+            SET connected = false
+            WHERE id = $1
+            "#,
+        )
+        .persistent(false)
+        .bind(node_id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
 }

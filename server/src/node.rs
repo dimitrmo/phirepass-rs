@@ -132,6 +132,10 @@ async fn handle_node_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
         info!("node {id} ({ip}) authenticated and registered (total: {total})");
     }
 
+    if let Err(err) = state.db.set_node_connected(&id).await {
+        warn!("failed to update node {id} as connected in db: {err}");
+    }
+
     let write_task = tokio::spawn(async move {
         while let Some(node_frame) = rx.recv().await {
             let frame: Frame = node_frame.into();
@@ -339,12 +343,17 @@ async fn handle_tunnel_opened(
 async fn disconnect_node(state: &AppState, id: Uuid) {
     if let Some((_, info)) = state.nodes.remove(&id) {
         let alive = info.node.connected_at.elapsed();
-        let total = state.nodes.len();
+        let mut total = state.nodes.len() as u32;
         info!(
             "node {id} ({}) removed after {:.1?} (total: {})",
             info.node.ip, alive, total
         );
-        let total = notify_all_clients_for_closed_tunnel(state, id).await;
+
+        if let Err(err) = state.db.set_node_disconnected(&id).await {
+            warn!("failed to update node {id} as disconnected in db: {err}");
+        }
+
+        total = notify_all_clients_for_closed_tunnel(state, id).await;
         info!("notified {total} client(s) for node {id} shutdown",)
     }
 }
