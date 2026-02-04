@@ -159,7 +159,7 @@ const renderNodes = (list, containerEl, tabType) => {
         card.addEventListener("click", () => {
             if (tabType === "ssh") {
                 // Check if there's an active SSH connection
-                if (socket && socket.is_open()) {
+                if (socket && socket.is_connected()) {
                     const confirmed = confirm(
                         `You are currently connected via SSH. Do you want to disconnect and switch to ${node.id}?`
                     );
@@ -177,7 +177,7 @@ const renderNodes = (list, containerEl, tabType) => {
                 socket = connect();
             } else if (tabType === "sftp") {
                 // Check if there's an active SFTP connection
-                if (sftpSocket && sftpSocket.is_open()) {
+                if (sftpSocket && sftpSocket.is_connected()) {
                     const confirmed = confirm(
                         `You are currently connected via SFTP. Do you want to disconnect and switch to ${node.id}?`
                     );
@@ -374,7 +374,7 @@ const handlePasswordKeystroke = (data) => {
 
 function socket_healthy() {
     if (socket) {
-        if (socket.is_open()) {
+        if (socket.is_connected()) {
             return true;
         }
     }
@@ -384,7 +384,7 @@ function socket_healthy() {
 
 function sftp_socket_healthy() {
     if (sftpSocket) {
-        if (sftpSocket.is_open()) {
+        if (sftpSocket.is_connected()) {
             return true;
         }
     }
@@ -798,21 +798,21 @@ document.addEventListener("DOMContentLoaded", () => {
             return;
         }
 
-        if (socket && socket.is_open() && !!selected_node_id && !!session_id) {
+        if (socket && socket.is_connected() && !!selected_node_id && !!session_id) {
             socket.send_ssh_tunnel_data(selected_node_id, session_id, data, 0);
         }
     });
 
     term.onResize(({ cols, rows }) => {
         fitAddon.fit();
-        if (socket && socket.is_open() && !!selected_node_id && !!session_id) {
+        if (socket && socket.is_connected() && !!selected_node_id && !!session_id) {
             socket.send_ssh_terminal_resize(selected_node_id, session_id, cols, rows, 0);
         }
     });
 
     const resizeObserver = new ResizeObserver(() => {
         fitAddon.fit();
-        if (socket && socket.is_open() && !!selected_node_id && !!session_id) {
+        if (socket && socket.is_connected() && !!selected_node_id && !!session_id) {
             socket.send_ssh_terminal_resize(selected_node_id, session_id, term.cols, term.rows);
         }
     });
