@@ -1,9 +1,12 @@
+use std::env;
 use crate::ssh::auth::SSHAuthMethod;
 use envconfig::Envconfig;
 use phirepass_common::env::Mode;
 use std::time::Duration;
+use log::info;
 
 #[derive(Envconfig)]
+#[derive(Debug)]
 pub(crate) struct Env {
     #[cfg_attr(
         debug_assertions,
@@ -68,7 +71,11 @@ impl Env {
 }
 
 pub(crate) fn init() -> anyhow::Result<Env> {
+    for (key, value) in env::vars() {
+        info!("{}={}", key, value);
+    }
     let config = Env::init_from_env()?;
+    info!("env from envconfig: {config:?}");
     Ok(config)
 }
 
