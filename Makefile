@@ -1,5 +1,8 @@
 export RUST_LOG=info
 export RUST_BACKTRACE=full
+export APP_MODE=development
+export SERVER_HOST=localhost
+export SERVER_PORT=8080
 
 server:
 	cargo run --bin server -- start

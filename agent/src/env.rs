@@ -8,15 +8,7 @@ use log::info;
 #[derive(Envconfig)]
 #[derive(Debug)]
 pub(crate) struct Env {
-    #[cfg_attr(
-        debug_assertions,
-        envconfig(from = "APP_MODE", default = "development")
-    )]
-    #[cfg_attr(
-        not(debug_assertions),
-        envconfig(from = "APP_MODE", default = "production")
-    )]
-    #[allow(dead_code)]
+    #[envconfig(from = "APP_MODE", default = "production")]
     pub mode: Mode,
 
     #[envconfig(from = "HOST", default = "0.0.0.0")]
@@ -31,21 +23,10 @@ pub(crate) struct Env {
     #[envconfig(from = "PING_INTERVAL", default = "30")]
     pub ping_interval: u16,
 
-    #[cfg_attr(
-        debug_assertions,
-        envconfig(from = "SERVER_HOST", default = "localhost")
-    )]
-    #[cfg_attr(
-        not(debug_assertions),
-        envconfig(from = "SERVER_HOST", default = "api.phirepass.io")
-    )]
+    #[envconfig(from = "SERVER_HOST", default = "api.phirepass.io")]
     pub server_host: String,
 
-    #[cfg_attr(debug_assertions, envconfig(from = "SERVER_PORT", default = "8080"))]
-    #[cfg_attr(
-        not(debug_assertions),
-        envconfig(from = "SERVER_PORT", default = "443")
-    )]
+    #[envconfig(from = "SERVER_PORT", default = "443")]
     pub server_port: u16,
 
     #[envconfig(from = "SSH_HOST", default = "localhost")]

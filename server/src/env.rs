@@ -4,15 +4,7 @@ use phirepass_common::env::Mode;
 
 #[derive(Envconfig)]
 pub(crate) struct Env {
-    #[cfg_attr(
-        debug_assertions,
-        envconfig(from = "APP_MODE", default = "development")
-    )]
-    #[cfg_attr(
-        not(debug_assertions),
-        envconfig(from = "APP_MODE", default = "production")
-    )]
-    #[allow(dead_code)]
+    #[envconfig(from = "APP_MODE", default = "production")]
     pub mode: Mode,
 
     #[envconfig(from = "IP_SOURCE", default = "ConnectInfo")]
