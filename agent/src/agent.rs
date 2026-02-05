@@ -78,11 +78,10 @@ pub(crate) async fn login(
         rpassword::prompt_password("Enter authentication token: ")?
     };
 
-    let scheme = if server_port == 443 { "https" } else { "http" };
-    let url = format!(
-        "{}://{}:{}/api/nodes/login",
-        scheme, server_host, server_port
-    );
+    let url = match server_port {
+        443 | 8443 => format!("https://{}/api/nodes/login", server_host),
+        port => format!("http://{}:{}/api/nodes/login", server_host, port),
+    };
 
     info!("authenticating with server at {}", url);
 
