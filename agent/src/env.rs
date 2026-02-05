@@ -53,7 +53,7 @@ impl Env {
 
 pub(crate) fn init() -> anyhow::Result<Env> {
     for (key, value) in env::vars() {
-        info!("{}={}", key, value);
+        info!(">> {}={}", key, value);
     }
     let config = Env::init_from_env()?;
     info!("env from envconfig: {config:?}");
