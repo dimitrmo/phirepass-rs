@@ -33,11 +33,7 @@ impl MemoryDB {
         Ok(())
     }
 
-    pub async fn update_node_stats(
-        &self,
-        node: &NodeRecord,
-        stats: &Stats,
-    ) -> anyhow::Result<()> {
+    pub async fn update_node_stats(&self, node: &NodeRecord, stats: &Stats) -> anyhow::Result<()> {
         let node_key = format!("phirepass:users:{}:nodes:{}", node.user_id, node.id);
         let stats_key = format!("phirepass:users:{}:nodes:{}:stats", node.user_id, node.id);
 

@@ -358,7 +358,11 @@ async fn disconnect_node(state: &AppState, id: Uuid) {
             info.node.ip, alive, total
         );
 
-        if let Err(err) = state.memory_db.set_node_disconnected(&info.node_record).await {
+        if let Err(err) = state
+            .memory_db
+            .set_node_disconnected(&info.node_record)
+            .await
+        {
             warn!("failed to update node {id} as disconnected in postgres: {err}");
         }
 

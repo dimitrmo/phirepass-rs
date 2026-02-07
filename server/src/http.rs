@@ -173,28 +173,12 @@ pub async fn get_stats(State(state): State<AppState>) -> impl IntoResponse {
 }
 
 pub async fn list_nodes(State(state): State<AppState>) -> impl IntoResponse {
-    let now = SystemTime::now();
-
     let data: Vec<_> = state
         .nodes
         .iter()
-        .map(|entry| {
-            let (id, info) = entry.pair();
-            json!({
-                "id": id,
-                "ip": info.node.ip,
-                "connected_for_secs": now
-                    .duration_since(info.node.connected_at)
-                    .unwrap()
-                    .as_secs(),
-                "since_last_heartbeat_secs": now
-                    .duration_since(info.node.last_heartbeat)
-                    .unwrap()
-                    .as_secs(),
-                "stats": &info.node.last_stats,
-            })
-        })
+        .map(|entry| entry.get_extended_stats())
         .collect();
+
     Json(data)
 }
 

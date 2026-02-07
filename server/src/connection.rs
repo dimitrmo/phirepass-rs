@@ -3,6 +3,7 @@ use phirepass_common::node::Node;
 use phirepass_common::protocol::node::NodeFrameData;
 use phirepass_common::protocol::web::WebFrameData;
 use serde::Serialize;
+use serde_json::json;
 use std::net::IpAddr;
 use std::time::SystemTime;
 use tokio::sync::mpsc::Sender;
@@ -51,5 +52,26 @@ impl NodeConnection {
             tx,
             node_record,
         }
+    }
+
+    pub fn get_extended_stats(&self) -> serde_json::Value {
+        let now = SystemTime::now();
+
+        let payload = json!({
+            "id": self.node_record.id,
+            "name": self.node_record.name,
+            "ip": self.node.ip,
+            "connected_for_secs": now
+                .duration_since(self.node.connected_at)
+                .unwrap()
+                .as_secs(),
+            "since_last_heartbeat_secs": now
+                .duration_since(self.node.last_heartbeat)
+                .unwrap()
+                .as_secs(),
+            "stats": &self.node.last_stats,
+        });
+
+        payload
     }
 }
