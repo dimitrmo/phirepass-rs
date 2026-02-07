@@ -138,9 +138,11 @@ async fn handle_node_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
     }
 
     {
-        state
-            .nodes
-            .insert(node_id, NodeConnection::new(ip, tx.clone(), node));
+        let server_id = state.id.as_ref().clone();
+        state.nodes.insert(
+            node_id,
+            NodeConnection::new(server_id, ip, tx.clone(), node),
+        );
         let total = state.nodes.len();
         info!("node {node_id} ({ip}) authenticated and registered (total: {total})");
     }
@@ -403,30 +405,35 @@ async fn notify_all_clients_for_closed_tunnel(state: &AppState, id: Uuid) -> u32
     count
 }
 
-async fn update_node_heartbeat(state: &AppState, id: &Uuid, stats: Option<Stats>) {
-    let mut info = match state.nodes.get_mut(id) {
+async fn update_node_heartbeat(state: &AppState, node_id: &Uuid, stats: Option<Stats>) {
+    let mut info = match state.nodes.get_mut(node_id) {
         Some(info) => info,
         None => {
-            warn!("node {id} not found");
+            warn!("node {node_id} not found");
             return;
         }
     };
 
     let Some(stats) = stats else {
-        warn!("node {id} stats not found");
+        warn!("node {node_id} stats not found");
+        return;
+    };
+
+    let Ok(extended_stats) = info.get_extended_stats() else {
+        warn!("failed to encode stats");
         return;
     };
 
     if let Err(err) = state
         .memory_db
-        .update_node_stats(&info.node_record, &stats)
+        .update_node_stats(&info.node_record, extended_stats)
         .await
     {
-        warn!("failed to update node stats for node {id}: {err}");
+        warn!("failed to update node stats for node {node_id}: {err}");
         return;
     };
 
-    info!("node {id} stats updated");
+    info!("node {node_id} stats updated");
 
     let since_last = info.node.last_heartbeat.elapsed();
 
@@ -437,13 +444,13 @@ async fn update_node_heartbeat(state: &AppState, id: &Uuid, stats: Option<Stats>
     match since_last {
         Ok(_) => {
             info!(
-                "heartbeat from node {id} ({}) after {:.1?}; \n{}",
+                "heartbeat from node {node_id} ({}) after {:.1?}; \n{}",
                 info.node.ip, since_last, log_line
             );
         }
         Err(_) => {
             info!(
-                "heartbeat from node {id} ({}); \n{}",
+                "heartbeat from node {node_id} ({}); \n{}",
                 info.node.ip, log_line
             );
         }

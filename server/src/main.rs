@@ -8,6 +8,7 @@ mod error;
 mod http;
 mod node;
 mod server;
+mod stun;
 mod web;
 
 fn main() -> anyhow::Result<()> {

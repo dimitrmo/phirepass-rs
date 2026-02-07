@@ -1,8 +1,9 @@
 use crate::db::common::NodeRecord;
 use crate::env::Env;
-use phirepass_common::stats::Stats;
 use redis::{Commands, Connection};
+use serde_json::json;
 use std::sync::{Arc, Mutex};
+use uuid::Uuid;
 
 pub struct MemoryDB {
     connection: Arc<Mutex<Connection>>,
@@ -33,7 +34,23 @@ impl MemoryDB {
         Ok(())
     }
 
-    pub async fn update_node_stats(&self, node: &NodeRecord, stats: &Stats) -> anyhow::Result<()> {
+    pub async fn save_server(&self, id: &Uuid, ip: &str, port: u16) -> anyhow::Result<()> {
+        let key = format!("phirepass:servers:{}", id);
+
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| anyhow::anyhow!("redis connection lock poisoned"))?;
+
+        let payload = json!({ "ip": ip.to_string(), "port": port, });
+        let ttl_seconds = 120u64;
+
+        let _: () = connection.set_ex(key, payload.to_string(), ttl_seconds)?;
+
+        Ok(())
+    }
+
+    pub async fn update_node_stats(&self, node: &NodeRecord, stats: String) -> anyhow::Result<()> {
         let node_key = format!("phirepass:users:{}:nodes:{}", node.user_id, node.id);
         let stats_key = format!("phirepass:users:{}:nodes:{}:stats", node.user_id, node.id);
 
@@ -43,11 +60,10 @@ impl MemoryDB {
             .map_err(|_| anyhow::anyhow!("redis connection lock poisoned"))?;
 
         let nodes_payload = node.to_json()?;
-        let stats_payload = stats.to_json()?;
         let ttl_seconds = 120u64;
 
         let _: () = connection.set_ex(node_key, nodes_payload, ttl_seconds)?;
-        let _: () = connection.set_ex(stats_key, stats_payload, ttl_seconds)?;
+        let _: () = connection.set_ex(stats_key, stats, ttl_seconds)?;
 
         Ok(())
     }

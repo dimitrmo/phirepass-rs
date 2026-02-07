@@ -5,8 +5,9 @@ use std::time::{Duration, SystemTime};
 use crate::db::postgres::Database;
 use crate::db::redis::MemoryDB;
 use crate::env::Env;
-use crate::http::{AppState, build_cors, get_stats, get_version, list_connections, list_nodes};
+use crate::http::{AppState, build_cors, get_stats, get_version, list_connections};
 use crate::node::{login_node, logout_node, ws_node_handler};
+use crate::stun;
 use crate::web::ws_web_handler;
 use axum::Router;
 use axum::routing::{get, post};
@@ -15,12 +16,16 @@ use log::{info, warn};
 use phirepass_common::stats::Stats;
 use tokio::signal;
 use tokio::sync::broadcast;
+use uuid::Uuid;
 
 pub async fn start(config: Env) -> anyhow::Result<()> {
     info!("running server on {} mode", config.mode);
 
     let stats_refresh_interval = config.stats_refresh_interval;
     let (shutdown_tx, _shutdown_rx) = broadcast::channel(1);
+
+    let address = stun::get_public_address()?;
+    info!("public ip: {}", address.ip());
 
     let db = Database::create(&config).await?;
     info!("connected to postgres");
@@ -29,6 +34,8 @@ pub async fn start(config: Env) -> anyhow::Result<()> {
     info!("connected to valkey");
 
     let state = AppState {
+        id: Arc::new(Uuid::new_v4()),
+        address: Arc::new(address),
         env: Arc::new(config),
         db: Arc::new(db),
         memory_db: Arc::new(memory_db),
@@ -37,6 +44,7 @@ pub async fn start(config: Env) -> anyhow::Result<()> {
         tunnel_sessions: Arc::new(DashMap::new()),
     };
 
+    let server_task = spawn_server_update_task(&state, 30u64);
     let conns_task = spawn_stats_connections_logger(&state, stats_refresh_interval as u64);
     let http_task = start_http_server(state.clone(), shutdown_tx.subscribe());
     let stats_task = spawn_stats_logger(stats_refresh_interval as u64, shutdown_tx.subscribe());
@@ -51,6 +59,7 @@ pub async fn start(config: Env) -> anyhow::Result<()> {
     };
 
     tokio::select! {
+        _ = server_task => warn!("server task terminated"),
         _ = http_task => warn!("http task ended"),
         _ = stats_task => warn!("stats logger task ended"),
         _ = conns_task => warn!("connections stats task ended"),
@@ -68,6 +77,8 @@ fn start_http_server(
     state: AppState,
     mut shutdown: broadcast::Receiver<()>,
 ) -> tokio::task::JoinHandle<()> {
+    info!("starting http server");
+
     let ip_source = state.env.ip_source.clone();
     let host = format!("{}:{}", state.env.host, state.env.port);
 
@@ -79,7 +90,6 @@ fn start_http_server(
             .route("/api/nodes/login", post(login_node))
             .route("/api/nodes/logout", post(logout_node))
             .route("/api/nodes/ws", get(ws_node_handler))
-            .route("/api/nodes", get(list_nodes))
             .route("/api/connections", get(list_connections))
             .route("/stats", get(get_stats))
             .route("/version", get(get_version))
@@ -102,9 +112,34 @@ fn start_http_server(
     })
 }
 
+fn spawn_server_update_task(state: &AppState, interval: u64) -> tokio::task::JoinHandle<()> {
+    info!("spawning server update task");
+
+    let db = state.memory_db.clone();
+    let id = state.id.clone();
+    let ip = state.address.ip().to_string();
+    let port = state.env.port;
+
+    tokio::spawn(async move {
+        let id = id.as_ref();
+        let ip = ip.clone();
+        let db = db.clone();
+        let mut interval = tokio::time::interval(Duration::from_secs(interval));
+        loop {
+            if let Err(err) = db.save_server(id, ip.as_ref(), port).await {
+                warn!("failed to save server info: {}", err);
+            }
+            interval.tick().await;
+        }
+    })
+}
+
 fn spawn_stats_connections_logger(state: &AppState, interval: u64) -> tokio::task::JoinHandle<()> {
+    info!("starting stats connections worker");
+
     let connections = state.connections.clone();
     let nodes = state.nodes.clone();
+
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(interval));
         loop {
@@ -119,6 +154,8 @@ fn spawn_stats_logger(
     interval: u64,
     mut shutdown: broadcast::Receiver<()>,
 ) -> tokio::task::JoinHandle<()> {
+    info!("starting stats logger");
+
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(interval));
         loop {
@@ -143,6 +180,8 @@ fn spawn_connection_cleanup_task(
     interval: u64,
     mut shutdown: broadcast::Receiver<()>,
 ) -> tokio::task::JoinHandle<()> {
+    info!("starting connection cleanup task");
+
     let connections = state.connections.clone();
     let nodes = state.nodes.clone();
 

@@ -13,6 +13,7 @@ use log::debug;
 use phirepass_common::protocol::web::WebFrameData;
 use phirepass_common::stats::Stats;
 use serde_json::json;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::SystemTime;
 use tower_http::cors::{Any, CorsLayer};
@@ -40,6 +41,8 @@ pub type TunnelSessions = Arc<DashMap<TunnelSessionKey, (Uuid, Uuid)>>;
 
 #[derive(Clone)]
 pub(crate) struct AppState {
+    pub(crate) id: Arc<Uuid>,
+    pub(crate) address: Arc<SocketAddr>,
     pub(crate) env: Arc<Env>,
     pub(crate) db: Arc<Database>,
     pub(crate) memory_db: Arc<MemoryDB>,
@@ -170,16 +173,6 @@ pub async fn get_stats(State(state): State<AppState>) -> impl IntoResponse {
     };
 
     Json(body)
-}
-
-pub async fn list_nodes(State(state): State<AppState>) -> impl IntoResponse {
-    let data: Vec<_> = state
-        .nodes
-        .iter()
-        .map(|entry| entry.get_extended_stats())
-        .collect();
-
-    Json(data)
 }
 
 pub async fn list_connections(State(state): State<AppState>) -> impl IntoResponse {
