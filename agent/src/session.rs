@@ -8,9 +8,9 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
 
-pub type TunnelSessions = Arc<DashMap<(Uuid, u32), SessionHandle>>;
-
 static SESSION_ID: AtomicU32 = AtomicU32::new(1);
+
+pub type TunnelSessions = Arc<DashMap<(Uuid, u32), SessionHandle>>;
 
 pub fn generate_session_id() -> u32 {
     SESSION_ID.fetch_add(1, Ordering::Relaxed)

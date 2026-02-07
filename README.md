@@ -125,8 +125,6 @@ CREATE TABLE public.nodes (
   token_id uuid NOT NULL,
   name text UNIQUE,
   created_at timestamp with time zone NOT NULL DEFAULT (now() AT TIME ZONE 'utc'::text),
-  connected boolean NOT NULL DEFAULT false,
-  connected_at timestamp with time zone,
   CONSTRAINT nodes_pkey PRIMARY KEY (id),
   CONSTRAINT nodes_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id),
   CONSTRAINT nodes_token_id_fkey FOREIGN KEY (token_id) REFERENCES public.pat_tokens(id)

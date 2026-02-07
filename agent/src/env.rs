@@ -1,11 +1,10 @@
-use std::env;
 use crate::ssh::auth::SSHAuthMethod;
 use envconfig::Envconfig;
 use phirepass_common::env::Mode;
+use std::env;
 use std::time::Duration;
 
-#[derive(Envconfig)]
-#[derive(Debug)]
+#[derive(Envconfig, Debug)]
 pub(crate) struct Env {
     #[envconfig(from = "APP_MODE", default = "production")]
     pub mode: Mode,

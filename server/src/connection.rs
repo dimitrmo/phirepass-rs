@@ -1,3 +1,4 @@
+use crate::db::common::NodeRecord;
 use phirepass_common::node::Node;
 use phirepass_common::protocol::node::NodeFrameData;
 use phirepass_common::protocol::web::WebFrameData;
@@ -32,10 +33,12 @@ pub(crate) struct NodeConnection {
     pub(crate) node: Node,
     #[serde(skip_serializing)]
     pub(crate) tx: Sender<NodeFrameData>,
+    #[serde(skip_serializing)]
+    pub(crate) node_record: NodeRecord,
 }
 
 impl NodeConnection {
-    pub(crate) fn new(ip: IpAddr, tx: Sender<NodeFrameData>) -> Self {
+    pub(crate) fn new(ip: IpAddr, tx: Sender<NodeFrameData>, node_record: NodeRecord) -> Self {
         let now = SystemTime::now();
 
         Self {
@@ -46,6 +49,7 @@ impl NodeConnection {
                 last_stats: None,
             },
             tx,
+            node_record,
         }
     }
 }

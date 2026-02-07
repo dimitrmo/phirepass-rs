@@ -1,5 +1,6 @@
 use crate::connection::{NodeConnection, WebConnection};
-use crate::db::Database;
+use crate::db::postgres::Database;
+use crate::db::redis::MemoryDB;
 use crate::env;
 use crate::env::Env;
 use crate::error::ServerError;
@@ -41,6 +42,7 @@ pub type TunnelSessions = Arc<DashMap<TunnelSessionKey, (Uuid, Uuid)>>;
 pub(crate) struct AppState {
     pub(crate) env: Arc<Env>,
     pub(crate) db: Arc<Database>,
+    pub(crate) memory_db: Arc<MemoryDB>,
     pub(crate) nodes: Nodes,
     pub(crate) connections: Connections,
     pub(crate) tunnel_sessions: TunnelSessions,

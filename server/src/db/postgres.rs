@@ -1,3 +1,5 @@
+use crate::db::common::NodeRecord;
+use crate::db::common::TokenRecord;
 use crate::env::Env;
 use argon2::Argon2;
 use sqlx::PgPool;
@@ -5,33 +7,9 @@ use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use std::str::FromStr;
 use uuid::Uuid;
 
-use chrono::{DateTime, Utc};
-// use sqlx::types::Uuid;
-
 pub struct Database {
     pool: PgPool,
-    pub hasher: argon2::Argon2<'static>,
-}
-
-#[derive(Debug, sqlx::FromRow)]
-#[allow(dead_code)]
-pub struct TokenRecord {
-    pub id: Uuid,
-    pub token_id: String,
-    pub token_hash: String,
-    pub user_id: Uuid,
-    pub expires_at: Option<DateTime<Utc>>,
-    pub scopes: Vec<String>,
-}
-
-#[derive(Debug, sqlx::FromRow)]
-#[allow(dead_code)]
-pub struct NodeRecord {
-    pub id: Uuid,
-    pub user_id: Uuid,
-    pub token_id: Uuid,
-    pub name: String,
-    pub created_at: DateTime<Utc>,
+    pub hasher: Argon2<'static>,
 }
 
 impl Database {
@@ -86,6 +64,22 @@ impl Database {
         self.create_node_from_token(token).await
     }
 
+    pub async fn get_node_by_id(&self, node_id: &Uuid) -> anyhow::Result<NodeRecord> {
+        let node_record = sqlx::query_as::<_, NodeRecord>(
+            r#"
+            SELECT *
+            FROM nodes
+            WHERE id = $1
+            "#,
+        )
+        .persistent(false)
+        .bind(node_id)
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(node_record)
+    }
+
     pub async fn get_node_by_token_id(&self, token_id: &Uuid) -> anyhow::Result<NodeRecord> {
         let node_record = sqlx::query_as::<_, NodeRecord>(
             r#"
@@ -122,39 +116,6 @@ impl Database {
         sqlx::query(
             r#"
             DELETE FROM nodes
-            WHERE id = $1
-            "#,
-        )
-        .persistent(false)
-        .bind(node_id)
-        .execute(&self.pool)
-        .await?;
-
-        Ok(())
-    }
-
-    pub async fn set_node_connected(&self, node_id: &Uuid) -> anyhow::Result<()> {
-        sqlx::query(
-            r#"
-            UPDATE nodes
-            SET connected = true,
-                connected_at = (now() AT TIME ZONE 'utc')
-            WHERE id = $1
-            "#,
-        )
-        .persistent(false)
-        .bind(node_id)
-        .execute(&self.pool)
-        .await?;
-
-        Ok(())
-    }
-
-    pub async fn set_node_disconnected(&self, node_id: &Uuid) -> anyhow::Result<()> {
-        sqlx::query(
-            r#"
-            UPDATE nodes
-            SET connected = false
             WHERE id = $1
             "#,
         )

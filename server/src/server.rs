@@ -2,7 +2,8 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use crate::db::Database;
+use crate::db::postgres::Database;
+use crate::db::redis::MemoryDB;
 use crate::env::Env;
 use crate::http::{AppState, build_cors, get_stats, get_version, list_connections, list_nodes};
 use crate::node::{login_node, logout_node, ws_node_handler};
@@ -22,10 +23,15 @@ pub async fn start(config: Env) -> anyhow::Result<()> {
     let (shutdown_tx, _shutdown_rx) = broadcast::channel(1);
 
     let db = Database::create(&config).await?;
+    info!("connected to postgres");
+
+    let memory_db = MemoryDB::create(&config).await?;
+    info!("connected to valkey");
 
     let state = AppState {
         env: Arc::new(config),
         db: Arc::new(db),
+        memory_db: Arc::new(memory_db),
         nodes: Arc::new(DashMap::new()),
         connections: Arc::new(DashMap::new()),
         tunnel_sessions: Arc::new(DashMap::new()),

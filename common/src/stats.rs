@@ -285,7 +285,7 @@ impl Stats {
         )
     }
 
-    pub fn encoded(&self) -> anyhow::Result<String> {
+    pub fn to_json(&self) -> anyhow::Result<String> {
         serde_json::to_string_pretty(&self).map_err(Into::into)
     }
 }

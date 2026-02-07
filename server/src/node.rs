@@ -1,5 +1,6 @@
 use crate::connection::NodeConnection;
-use crate::db::{Database, TokenRecord};
+use crate::db::common::TokenRecord;
+use crate::db::postgres::Database;
 use crate::env;
 use crate::http::AppState;
 use argon2::{PasswordHash, PasswordVerifier};
@@ -117,7 +118,7 @@ async fn handle_node_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
     let (tx, mut rx) = mpsc::channel::<NodeFrameData>(256);
 
     // Wait for authentication as the first message
-    let id = match wait_for_auth(&mut ws_rx, &tx, state.db.clone(), ip).await {
+    let node_id = match wait_for_auth(&mut ws_rx, &tx, state.db.clone(), ip).await {
         Ok(node_id) => node_id,
         Err(err) => {
             warn!("authentication failed from {ip}: {err}");
@@ -126,14 +127,22 @@ async fn handle_node_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
         }
     };
 
-    {
-        state.nodes.insert(id, NodeConnection::new(ip, tx.clone()));
-        let total = state.nodes.len();
-        info!("node {id} ({ip}) authenticated and registered (total: {total})");
+    let Ok(node) = state.db.get_node_by_id(&node_id).await else {
+        warn!("node {node_id} does not exist");
+        let _ = ws_tx.close().await;
+        return;
+    };
+
+    if let Err(err) = state.memory_db.set_node_connected(&node).await {
+        warn!("failed to update node {node_id} as connected in postgres: {err}");
     }
 
-    if let Err(err) = state.db.set_node_connected(&id).await {
-        warn!("failed to update node {id} as connected in db: {err}");
+    {
+        state
+            .nodes
+            .insert(node_id, NodeConnection::new(ip, tx.clone(), node));
+        let total = state.nodes.len();
+        info!("node {node_id} ({ip}) authenticated and registered (total: {total})");
     }
 
     let write_task = tokio::spawn(async move {
@@ -155,12 +164,12 @@ async fn handle_node_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
     });
 
     // Handle messages in separate function to ensure cleanup always happens
-    handle_node_messages(&mut ws_rx, &state, id, &tx).await;
+    handle_node_messages(&mut ws_rx, &state, node_id, &tx).await;
 
     // Always abort write task regardless of how we exited message loop
     drop(tx); // Close sender first to wake write task
     write_task.abort();
-    disconnect_node(&state, id).await;
+    disconnect_node(&state, node_id).await;
 }
 
 /// Handles incoming WebSocket messages. Always returns to parent for cleanup.
@@ -349,8 +358,8 @@ async fn disconnect_node(state: &AppState, id: Uuid) {
             info.node.ip, alive, total
         );
 
-        if let Err(err) = state.db.set_node_disconnected(&id).await {
-            warn!("failed to update node {id} as disconnected in db: {err}");
+        if let Err(err) = state.memory_db.set_node_disconnected(&info.node_record).await {
+            warn!("failed to update node {id} as disconnected in postgres: {err}");
         }
 
         total = notify_all_clients_for_closed_tunnel(state, id).await;
@@ -391,25 +400,50 @@ async fn notify_all_clients_for_closed_tunnel(state: &AppState, id: Uuid) -> u32
 }
 
 async fn update_node_heartbeat(state: &AppState, id: &Uuid, stats: Option<Stats>) {
-    if let Some(mut info) = state.nodes.get_mut(id) {
-        let since_last = info.node.last_heartbeat.elapsed();
-        info.node.last_heartbeat = SystemTime::now();
-        if let Some(stats) = stats {
-            let log_line = stats.log_line();
-            info.node.last_stats = Some(stats);
+    let mut info = match state.nodes.get_mut(id) {
+        Some(info) => info,
+        None => {
+            warn!("node {id} not found");
+            return;
+        }
+    };
+
+    let Some(stats) = stats else {
+        warn!("node {id} stats not found");
+        return;
+    };
+
+    if let Err(err) = state
+        .memory_db
+        .update_node_stats(&info.node_record, &stats)
+        .await
+    {
+        warn!("failed to update node stats for node {id}: {err}");
+        return;
+    };
+
+    info!("node {id} stats updated");
+
+    let since_last = info.node.last_heartbeat.elapsed();
+
+    let log_line = stats.log_line();
+    info.node.last_stats = Some(stats);
+    info.node.last_heartbeat = SystemTime::now();
+
+    match since_last {
+        Ok(_) => {
             info!(
                 "heartbeat from node {id} ({}) after {:.1?}; \n{}",
                 info.node.ip, since_last, log_line
             );
-        } else {
+        }
+        Err(_) => {
             info!(
-                "heartbeat from node {id} ({}) after {:.1?}",
-                info.node.ip, since_last
+                "heartbeat from node {id} ({}); \n{}",
+                info.node.ip, log_line
             );
         }
-    } else {
-        warn!("received heartbeat for unknown node {id}");
-    }
+    };
 }
 
 fn now_millis() -> u64 {
@@ -445,7 +479,7 @@ async fn validate_creds(
     token_id: String,
     token_secret: String,
 ) -> anyhow::Result<TokenRecord> {
-    info!("validating credentials against db");
+    info!("validating credentials against postgres");
 
     let token_record = match db.get_token_by_id(token_id.as_str()).await {
         Ok(record) => record,

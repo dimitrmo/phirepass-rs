@@ -29,7 +29,7 @@ format:
 	cargo fmt --all
 
 db:
-	docker run --rm -it --name phirepass-valkey -p 6379:6379 valkey/valkey:9
+	docker run --rm -it --name phirepass-valkey -p 6379:6379 valkey/valkey:8.1.4
 
 lint:
 	cargo clippy --all --all-targets -- -D warnings -D dead_code
