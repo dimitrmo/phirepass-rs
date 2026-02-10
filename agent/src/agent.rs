@@ -17,6 +17,7 @@ use tokio::fs;
 use tokio::signal;
 use tokio::sync::broadcast;
 use uuid::Uuid;
+use phirepass_common::token::mask_after_10;
 
 pub(crate) async fn start(config: Env) -> anyhow::Result<()> {
     info!("running server on {} mode", config.mode);
@@ -77,6 +78,8 @@ pub(crate) async fn login(
     } else {
         rpassword::prompt_password("Enter authentication token: ")?
     };
+
+    info!("token found: {}", mask_after_10(token.as_str()));
 
     let url = match server_port {
         443 | 8443 => format!("https://{}/api/nodes/login", server_host),

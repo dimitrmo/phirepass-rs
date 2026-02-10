@@ -7,6 +7,9 @@ pub(crate) struct Env {
     #[envconfig(from = "APP_MODE", default = "production")]
     pub mode: Mode,
 
+    #[envconfig(from = "FQDN", default = "localhost")]
+    pub fqdn: String,
+
     #[envconfig(from = "IP_SOURCE", default = "ConnectInfo")]
     pub(crate) ip_source: ClientIpSource,
 

@@ -7,6 +7,8 @@ pub mod node;
 pub mod protocol;
 #[cfg(feature = "runtime")]
 pub mod runtime;
+#[cfg(feature = "server")]
+pub mod server;
 #[cfg(feature = "stats")]
 pub mod stats;
 #[cfg(feature = "time")]

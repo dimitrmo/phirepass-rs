@@ -59,6 +59,7 @@ secrecy = { workspace = true }
 whoami = { workspace = true }
 redis = { workspace = true }
 stunclient = { workspace = true }
+local-ip-address = { workspace = true }
 
 [workspace.dependencies]
 thiserror = "2.0.18"
@@ -93,9 +94,10 @@ keyring = "3.6.3"
 directories = "6.0.0"
 tempfile = "3.24.0"
 secrecy = "0.10.3"
-whoami = "2.1.0"
+whoami = "2.1.1"
 redis = { version = "1.0.3", features = ["tls-rustls", "json", "uuid"] }
 stunclient = "0.4.2"
+local-ip-address = "0.6.10"
 
 [profile.release]
 lto = "fat"

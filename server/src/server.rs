@@ -119,14 +119,16 @@ fn spawn_server_update_task(state: &AppState, interval: u64) -> tokio::task::Joi
     let id = state.id.clone();
     let ip = state.address.ip().to_string();
     let port = state.env.port;
+    let fqdn = state.env.fqdn.clone();
 
     tokio::spawn(async move {
         let id = id.as_ref();
         let ip = ip.clone();
+        let fqdn = fqdn.clone();
         let db = db.clone();
         let mut interval = tokio::time::interval(Duration::from_secs(interval));
         loop {
-            if let Err(err) = db.save_server(id, ip.as_ref(), port).await {
+            if let Err(err) = db.save_server(id, ip.clone(), port, fqdn.clone()).await {
                 warn!("failed to save server info: {}", err);
             }
             interval.tick().await;

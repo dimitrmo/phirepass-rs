@@ -29,4 +29,4 @@ uuid = { workspace = true }
 argon2 = { workspace = true }
 redis = { workspace = true }
 stunclient = { workspace = true }
-
+local-ip-address = { workspace = true }

@@ -23,9 +23,10 @@ tokio ={ workspace = true, optional = true }
 uuid = { workspace = true, optional = true }
 
 [features]
-full = ["env", "logger", "node", "protocol", "stats", "time", "runtime", "token"]
+full = ["env", "logger", "node", "protocol", "stats", "time", "runtime", "token", "server"]
 env = []
 token = []
+server = []
 logger = ["dep:serde", "stats"]
 node = ["dep:serde", "dep:uuid", "stats"]
 runtime = ["dep:tokio"]

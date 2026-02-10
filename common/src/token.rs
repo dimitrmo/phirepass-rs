@@ -28,6 +28,14 @@ pub fn extract_creds(token: String) -> anyhow::Result<(String, String)> {
     Ok((token_id.to_string(), secret.to_string()))
 }
 
+pub fn mask_after_10(s: &str) -> String {
+    let mut chars = s.chars();
+    let first_10: String = chars.by_ref().take(10).collect();
+    let rest_count = chars.count();
+
+    first_10 + &"*".repeat(rest_count)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

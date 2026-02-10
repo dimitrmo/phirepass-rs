@@ -1,7 +1,7 @@
 use crate::db::common::NodeRecord;
 use crate::env::Env;
+use phirepass_common::server::ServerIdentifier;
 use redis::{Commands, Connection};
-use serde_json::json;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
@@ -34,18 +34,33 @@ impl MemoryDB {
         Ok(())
     }
 
-    pub async fn save_server(&self, id: &Uuid, ip: &str, port: u16) -> anyhow::Result<()> {
+    pub async fn save_server(
+        &self,
+        id: &Uuid,
+        public_ip: String,
+        port: u16,
+        fqdn: String,
+    ) -> anyhow::Result<()> {
         let key = format!("phirepass:servers:{}", id);
+        let private_ip = local_ip_address::local_ip()?.to_string();
+
+        let identifier = ServerIdentifier {
+            private_ip,
+            public_ip,
+            port,
+            fqdn,
+        };
+
+        let payload = identifier.get_encoded()?;
 
         let mut connection = self
             .connection
             .lock()
             .map_err(|_| anyhow::anyhow!("redis connection lock poisoned"))?;
 
-        let payload = json!({ "ip": ip.to_string(), "port": port, });
         let ttl_seconds = 120u64;
 
-        let _: () = connection.set_ex(key, payload.to_string(), ttl_seconds)?;
+        let _: () = connection.set_ex(key, payload, ttl_seconds)?;
 
         Ok(())
     }
