@@ -7,6 +7,7 @@ use axum::Router;
 use axum::routing::get;
 use log::{debug, info, warn};
 use phirepass_common::stats::Stats;
+use phirepass_common::token::mask_after_10;
 use secrecy::{ExposeSecret, SecretString};
 use serde_json::json;
 use std::net::SocketAddr;
@@ -17,7 +18,6 @@ use tokio::fs;
 use tokio::signal;
 use tokio::sync::broadcast;
 use uuid::Uuid;
-use phirepass_common::token::mask_after_10;
 
 pub(crate) async fn start(config: Env) -> anyhow::Result<()> {
     info!("running server on {} mode", config.mode);

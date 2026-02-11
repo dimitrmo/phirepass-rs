@@ -1,3 +1,4 @@
+use log::warn;
 use phirepass_common::runtime::RuntimeBuilder;
 
 mod agent;
@@ -29,17 +30,24 @@ fn main() -> anyhow::Result<()> {
             }
             Some(cli::Commands::Login(args)) => {
                 phirepass_common::logger::init("phirepass:agent");
-                agent::login(
+                if let Err(err) = agent::login(
                     args.server_host,
                     args.server_port,
                     args.from_file,
                     args.from_stdin,
                 )
                 .await
+                {
+                    warn!("error login in {}", err)
+                }
+                Ok(())
             }
             Some(cli::Commands::Logout(args)) => {
                 phirepass_common::logger::init("phirepass:agent");
-                agent::logout(args.server_host, args.server_port).await
+                if let Err(err) = agent::logout(args.server_host, args.server_port).await {
+                    warn!("error logging out {}", err);
+                }
+                Ok(())
             }
             Some(cli::Commands::Version) => {
                 println!("{}", env::version());
