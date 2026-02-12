@@ -81,6 +81,21 @@ pub(crate) async fn login(
 
     info!("token found: {}", mask_after_10(token.as_str()));
 
+    let username = whoami::username()?;
+    let ts = TokenStore::new(
+        "phirepass",
+        "agent",
+        server_host.as_str(),
+        username.as_str(),
+    )?;
+
+    let existing_node_id = match ts.load_state_public() {
+        Ok(Some(state)) if state.server_host == server_host && state.node_id != Uuid::nil() => {
+            Some(state.node_id)
+        }
+        _ => None,
+    };
+
     let url = match server_port {
         443 | 8443 => format!("https://{}/api/nodes/login", server_host),
         port => format!("http://{}:{}/api/nodes/login", server_host, port),
@@ -89,17 +104,35 @@ pub(crate) async fn login(
     info!("authenticating with server at {}", url);
 
     let client = reqwest::Client::new();
-    let response = client
-        .post(&url)
-        .json(&json!({
-            "token": token,
-            "version": crate::env::version(),
-        }))
-        .send()
-        .await?;
+    let mut payload = json!({
+        "token": token,
+        "version": crate::env::version(),
+    });
+
+    if let Some(node_id) = existing_node_id {
+        payload["node_id"] = json!(node_id);
+    }
+
+    let response = client.post(&url).json(&payload).send().await?;
 
     if !response.status().is_success() {
-        anyhow::bail!("authentication failed with status: {}", response.status());
+        let status = response.status();
+        let body_text = response.text().await.unwrap_or_default();
+        let body = serde_json::from_str::<serde_json::Value>(&body_text)
+            .unwrap_or_else(|_| json!({ "raw": body_text }));
+
+        let error_message = body
+            .get("error")
+            .and_then(|v| v.as_str())
+            .unwrap_or("authentication failed");
+
+        warn!("authentication failed: {}", error_message);
+
+        ts.delete().context("failed to delete local credentials")?;
+
+        info!("local credentials deleted due to token failure");
+
+        anyhow::bail!("authentication failed ({}): {}", status, error_message);
     }
 
     let body = response.json::<serde_json::Value>().await?;
@@ -118,16 +151,7 @@ pub(crate) async fn login(
 
     info!("successfully authenticated node_id={node_id_str}");
 
-    let username = whoami::username()?;
-
     info!("logging in with {username}");
-
-    let ts = TokenStore::new(
-        "phirepass",
-        "agent",
-        server_host.as_str(),
-        username.as_str(),
-    )?;
 
     ts.save(&node_id_str, &SecretString::from(token))
         .context("failed to save token")?;
@@ -168,26 +192,34 @@ pub(crate) async fn logout(server_host: String, server_port: u16) -> anyhow::Res
         .send()
         .await?;
 
-    if !response.status().is_success() {
-        anyhow::bail!("logout failed with status: {}", response.status());
+    let status = response.status();
+    let body_text = response.text().await.unwrap_or_default();
+    let body = serde_json::from_str::<serde_json::Value>(&body_text)
+        .unwrap_or_else(|_| json!({ "raw": body_text }));
+
+    let server_ok = status.is_success()
+        && body
+            .get("success")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+    if server_ok {
+        info!("successfully logged out from server");
+    } else {
+        warn!("logout request rejected by server: {:?}", body);
     }
 
-    let body = response.json::<serde_json::Value>().await?;
+    // Delete local credentials regardless of server response
+    ts.delete().context("failed to delete local credentials")?;
 
-    if let Some(success) = body.get("success").and_then(|v| v.as_bool()) {
-        if success {
-            info!("successfully logged out from server");
+    info!("local credentials deleted - token is now free for use with another node");
+    println!("Successfully logged out locally. Token is now available for reuse.");
 
-            // Delete local credentials
-            ts.delete().context("failed to delete local credentials")?;
-
-            info!("local credentials deleted - token is now free for use with another node");
-            println!("Successfully logged out. Token is now available for reuse.");
-            return Ok(());
-        }
+    if server_ok {
+        Ok(())
+    } else {
+        anyhow::bail!("logout request rejected by server: {:?}", body)
     }
-
-    anyhow::bail!("logout request rejected by server: {:?}", body)
 }
 
 fn start_http_server(

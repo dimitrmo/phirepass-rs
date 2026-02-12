@@ -468,6 +468,7 @@ fn now_millis() -> u64 {
 pub struct AuthRequest {
     pub token: String,
     pub version: String,
+    pub node_id: Option<Uuid>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -556,7 +557,7 @@ pub async fn login_node(
     info!("credentials extracted [id={}, secret=***]", token_id);
 
     let token = match validate_creds(state.db.clone(), token_id, token_secret).await {
-        Ok(node_id) => node_id,
+        Ok(token) => token,
         Err(err) => {
             return unauthorized(json!({
                 "success": false,
@@ -566,6 +567,32 @@ pub async fn login_node(
     };
 
     info!("token ready {}", token.id);
+
+    if let Some(node_id) = payload.node_id {
+        let node = match state.db.get_node_by_token_id(&token.id).await {
+            Ok(record) => record,
+            Err(err) => {
+                return unauthorized(json!({
+                    "success": false,
+                    "error": err.to_string(),
+                }));
+            }
+        };
+
+        if node.id != node_id {
+            return unauthorized(json!({
+                "success": false,
+                "error": "node_id does not match token",
+            }));
+        }
+
+        info!("node ready {}", node.id);
+
+        return success(json!({
+            "success": true,
+            "node_id": node.id,
+        }));
+    }
 
     let node = match state.db.create_node_from_token_exclusive(&token).await {
         Ok(record) => record,
@@ -613,20 +640,37 @@ pub async fn logout_node(
     };
 
     // Validate credentials
-    match validate_creds(state.db.clone(), token_id, token_secret).await {
-        Ok(_) => {}
+    let token_record = match validate_creds(state.db.clone(), token_id, token_secret).await {
+        Ok(record) => record,
         Err(err) => {
             return unauthorized(json!({
                 "success": false,
                 "error": err.to_string(),
             }));
         }
+    };
+
+    let node_record = match state.db.get_node_by_token_id(&token_record.id).await {
+        Ok(record) => record,
+        Err(err) => {
+            return unauthorized(json!({
+                "success": false,
+                "error": err.to_string(),
+            }));
+        }
+    };
+
+    if node_record.id != payload.node_id {
+        return unauthorized(json!({
+            "success": false,
+            "error": "node_id does not match token",
+        }));
     }
 
     // Delete the node
-    match state.db.delete_node(&payload.node_id).await {
+    match state.db.delete_node(&node_record.id).await {
         Ok(_) => {
-            info!("node {} successfully deleted", payload.node_id);
+            info!("node {} successfully deleted", node_record.id);
             success(json!({
                 "success": true,
                 "message": "Node deleted and token is now available for reuse"

@@ -22,32 +22,23 @@ fn main() -> anyhow::Result<()> {
 
     rt.block_on(async {
         let cli = cli::parse();
+        phirepass_common::logger::init("phirepass:agent");
         match cli.command {
             Some(cli::Commands::Start) | None => {
-                phirepass_common::logger::init("phirepass:agent");
                 let config = env::init()?;
                 agent::start(config).await
             }
             Some(cli::Commands::Login(args)) => {
-                phirepass_common::logger::init("phirepass:agent");
-                if let Err(err) = agent::login(
+                agent::login(
                     args.server_host,
                     args.server_port,
                     args.from_file,
                     args.from_stdin,
                 )
                 .await
-                {
-                    warn!("error login in {}", err)
-                }
-                Ok(())
             }
             Some(cli::Commands::Logout(args)) => {
-                phirepass_common::logger::init("phirepass:agent");
-                if let Err(err) = agent::logout(args.server_host, args.server_port).await {
-                    warn!("error logging out {}", err);
-                }
-                Ok(())
+                agent::logout(args.server_host, args.server_port).await
             }
             Some(cli::Commands::Version) => {
                 println!("{}", env::version());
