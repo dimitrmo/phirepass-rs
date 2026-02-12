@@ -1,4 +1,3 @@
-use log::warn;
 use phirepass_common::runtime::RuntimeBuilder;
 
 mod agent;

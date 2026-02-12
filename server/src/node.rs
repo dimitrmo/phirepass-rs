@@ -75,6 +75,7 @@ async fn wait_for_auth(
 
             let mut response: Option<NodeFrameData> = None;
             let mut correct_node_id = Uuid::nil();
+            let mut auth_ok = false;
 
             if let Ok((token_id, token_secret)) = extract_creds(token) {
                 if let Ok(token) = validate_creds(db.clone(), token_id, token_secret).await {
@@ -86,6 +87,7 @@ async fn wait_for_auth(
                                 success: true,
                                 version: env::version().to_string(),
                             });
+                            auth_ok = true;
                         }
                     }
                 }
@@ -102,6 +104,10 @@ async fn wait_for_auth(
             tx.send(response.unwrap())
                 .await
                 .map_err(|err| anyhow::anyhow!("failed to send auth response: {err}"))?;
+
+            if !auth_ok {
+                anyhow::bail!("authentication failed for node {node_id}");
+            }
 
             Ok(node_id)
         }

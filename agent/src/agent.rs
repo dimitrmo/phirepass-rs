@@ -128,9 +128,17 @@ pub(crate) async fn login(
 
         warn!("authentication failed: {}", error_message);
 
-        ts.delete().context("failed to delete local credentials")?;
+        let err_lower = error_message.to_ascii_lowercase();
+        let should_clear = err_lower.contains("expired")
+            || err_lower.contains("revoked")
+            || err_lower.contains("invalid token")
+            || err_lower.contains("failed to verify token")
+            || err_lower.contains("token has expired");
 
-        info!("local credentials deleted due to token failure");
+        if should_clear {
+            ts.delete().context("failed to delete local credentials")?;
+            info!("local credentials deleted due to token failure");
+        }
 
         anyhow::bail!("authentication failed ({}): {}", status, error_message);
     }
