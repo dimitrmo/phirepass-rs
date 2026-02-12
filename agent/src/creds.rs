@@ -11,12 +11,9 @@ use std::{
 };
 use uuid::Uuid;
 
-const KEYRING_SERVICE: &str = "phirepass-agent";
-
 #[derive(Debug)]
 pub struct TokenStore {
     service: String,
-    account: String,
     state_path: PathBuf,
 }
 
@@ -29,7 +26,7 @@ pub struct StoredState {
 }
 
 impl TokenStore {
-    pub fn new(org: &str, app: &str, service: &str, account: &str) -> std::io::Result<Self> {
+    pub fn new(org: &str, app: &str, service: &str) -> std::io::Result<Self> {
         let proj = ProjectDirs::from("com", org, app)
             .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::Other, "No project dirs"))?;
 
@@ -38,14 +35,11 @@ impl TokenStore {
 
         Ok(Self {
             service: service.to_string(),
-            account: account.to_string(),
             state_path: dir.join("state.json"),
         })
     }
 
-    /// Save node_id and token.
-    /// - token is stored in keyring first (primary)
-    /// - if keyring fails, token is stored in the state file (fallback)
+    /// Save node_id and token to the state file.
     pub fn save(&self, node_id: &str, tok: &SecretString) -> anyhow::Result<()> {
         debug!("saving credentials");
 
@@ -57,33 +51,14 @@ impl TokenStore {
             )
         })?;
 
+        debug!("node id parsed {node_id}");
+
         let state = StoredState {
             node_id,
             token: tok.expose_secret().to_owned(),
             server_host: self.service.clone(),
         };
 
-        let payload = serde_json::to_string(&state).map_err(io_other)?;
-
-        match keyring::Entry::new(KEYRING_SERVICE, &self.account) {
-            Ok(entry) => match entry.set_password(&payload) {
-                Ok(_) => {
-                    debug!("credentials saved to keyring");
-                    if let Err(e) = self.delete_state_file() {
-                        warn!("could not delete state file after keyring save: {e}");
-                    }
-                    return Ok(());
-                }
-                Err(e) => {
-                    warn!("could not save credentials to keyring ({}).", e);
-                }
-            },
-            Err(_) => {
-                debug!("Keyring backend unavailable.");
-            }
-        }
-
-        info!("saving credentials to state file");
         self.save_state(&state)
     }
 
@@ -122,10 +97,6 @@ impl TokenStore {
     }
 
     pub fn delete(&self) -> std::io::Result<()> {
-        if let Ok(entry) = keyring::Entry::new(KEYRING_SERVICE, &self.account) {
-            let _ = entry.delete_credential();
-        }
-
         self.delete_state_file()
     }
 
@@ -135,44 +106,12 @@ impl TokenStore {
     }
 
     fn load_state(&self) -> anyhow::Result<Option<StoredState>> {
-        if let Some(state) = self.load_state_from_keyring()? {
-            return Ok(Some(state));
-        }
-
         self.load_state_from_file()
     }
 
     fn save_state(&self, state: &StoredState) -> anyhow::Result<()> {
         let bytes = serde_json::to_vec_pretty(state).map_err(io_other)?;
         atomic_write(&self.state_path, &bytes)
-    }
-
-    fn load_state_from_keyring(&self) -> anyhow::Result<Option<StoredState>> {
-        match keyring::Entry::new(KEYRING_SERVICE, &self.account) {
-            Ok(entry) => match entry.get_password() {
-                Ok(payload) => match serde_json::from_str::<StoredState>(&payload) {
-                    Ok(state) => {
-                        debug!("credentials retrieved from keyring");
-                        Ok(Some(state))
-                    }
-                    Err(e) => {
-                        warn!(
-                            "Failed to deserialize keyring credentials: {}. Falling back to state file.",
-                            e
-                        );
-                        Ok(None)
-                    }
-                },
-                Err(e) => {
-                    debug!("keyring read failed, falling back to state file: {e}");
-                    Ok(None)
-                }
-            },
-            Err(e) => {
-                debug!("Keyring backend unavailable: {e}");
-                Ok(None)
-            }
-        }
     }
 
     fn load_state_from_file(&self) -> anyhow::Result<Option<StoredState>> {

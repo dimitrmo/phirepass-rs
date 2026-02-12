@@ -5,7 +5,7 @@ use crate::ws;
 use anyhow::Context;
 use axum::Router;
 use axum::routing::get;
-use log::{debug, info, warn};
+use log::{info, warn};
 use phirepass_common::stats::Stats;
 use phirepass_common::token::mask_after_10;
 use secrecy::{ExposeSecret, SecretString};
@@ -84,12 +84,7 @@ pub(crate) async fn login(
     let username = whoami::username()?;
     info!("username found: {}", username);
 
-    let ts = TokenStore::new(
-        "phirepass",
-        "agent",
-        server_host.as_str(),
-        username.as_str(),
-    )?;
+    let ts = TokenStore::new("phirepass", "agent", server_host.as_str())?;
 
     let existing_node_id = match ts.load_state_public() {
         Ok(Some(state)) if state.server_host == server_host && state.node_id != Uuid::nil() => {
@@ -180,7 +175,7 @@ pub(crate) fn load_creds_for_server(server_host: &str) -> Option<(String, Uuid, 
     let username = whoami::username().ok()?;
     info!("username found: {}", username);
 
-    let ts = TokenStore::new("phirepass", "agent", server_host, username.as_str()).ok()?;
+    let ts = TokenStore::new("phirepass", "agent", server_host).ok()?;
 
     match ts.load() {
         Ok((node_id, token)) => Some((server_host.to_string(), node_id, token)),
@@ -197,12 +192,7 @@ pub(crate) async fn logout(server_host: String, server_port: u16) -> anyhow::Res
     let username = whoami::username()?;
     info!("username found: {}", username);
 
-    let ts = TokenStore::new(
-        "phirepass",
-        "agent",
-        server_host.as_str(),
-        username.as_str(),
-    )?;
+    let ts = TokenStore::new("phirepass", "agent", server_host.as_str())?;
 
     // Load current credentials
     let (node_id, token) = ts

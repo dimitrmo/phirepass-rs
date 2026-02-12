@@ -52,7 +52,6 @@ sqlx = { workspace = true }
 argon2 = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true }
-keyring = { workspace = true }
 directories = { workspace = true }
 tempfile = { workspace = true }
 secrecy = { workspace = true }
@@ -90,7 +89,6 @@ sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "postgres", "mac
 argon2 = { version = "0.5.3", features = ["std"] }
 uuid = { version = "1.20.0", features = ["v4", "serde"] }
 chrono = { version = "0.4.43", features = ["serde"] }
-keyring = "3.6.3"
 directories = "6.0.0"
 tempfile = "3.25.0"
 secrecy = "0.10.3"
