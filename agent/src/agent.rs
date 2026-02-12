@@ -5,7 +5,7 @@ use crate::ws;
 use anyhow::Context;
 use axum::Router;
 use axum::routing::get;
-use log::{debug, info, warn};
+use log::{info, warn};
 use phirepass_common::stats::Stats;
 use phirepass_common::token::mask_after_10;
 use secrecy::{ExposeSecret, SecretString};
@@ -268,7 +268,7 @@ fn start_http_server(
     })
 }
 
-pub(crate) fn load_creds_for_server(server_host: &str) -> Option<(String, Uuid, SecretString)> {
+pub(crate) fn load_creds_for_server(server_host: String) -> Option<(String, Uuid, SecretString)> {
     info!("loading credentials from state file for server {server_host}");
 
     let username = whoami::username().ok()?;
@@ -277,49 +277,40 @@ pub(crate) fn load_creds_for_server(server_host: &str) -> Option<(String, Uuid, 
     let ts = TokenStore::new(
         "phirepass",
         "agent",
-        server_host,
+        server_host.as_str(),
         username.as_str(),
     ).ok()?;
 
     match ts.load_state_public() {
         Ok(Some(state)) => {
+            if !state.server_host.is_empty() && state.server_host != server_host {
+                warn!(
+                    "state file server mismatch: '{}' vs '{}'",
+                    state.server_host, server_host
+                );
+                return None;
+            }
+
             if state.node_id == Uuid::nil() {
                 warn!("stored node_id is nil");
                 return None;
             }
 
-            let token_str = if state.token.is_empty() {
-                // Try to get from keyring with fixed service name
-                match keyring::Entry::new("phirepass-agent", &username) {
-                    Ok(entry) => match entry.get_password() {
-                        Ok(t) => {
-                            debug!("Token retrieved from keyring");
-                            t
-                        }
-                        Err(e) => {
-                            warn!("failed to get token from keyring: {}", e);
-                            state.token
-                        }
-                    },
-                    Err(_) => {
-                        debug!("Keyring backend unavailable");
-                        state.token
-                    }
-                }
-            } else {
-                debug!("Using token from state file");
-                state.token
-            };
-
-            if token_str.is_empty() {
-                warn!("no token found in state or keyring");
+            if state.token.is_empty() {
+                warn!("no token found in state file");
                 return None;
             }
 
+            let resolved_host = if state.server_host.is_empty() {
+                server_host.to_string()
+            } else {
+                state.server_host
+            };
+
             Some((
-                state.server_host,
+                resolved_host,
                 state.node_id,
-                SecretString::from(token_str),
+                SecretString::from(state.token),
             ))
         }
         Ok(None) => {
@@ -398,4 +389,56 @@ fn spawn_stats_logger(
             }
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::load_creds_for_server;
+    use crate::creds::StoredState;
+    use secrecy::ExposeSecret;
+    use std::env;
+    use std::fs;
+    use uuid::Uuid;
+
+    #[test]
+    fn load_creds_falls_back_to_state_file() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let old_data_home = env::var_os("XDG_DATA_HOME");
+        // Safe in tests: we isolate the process env for the duration of the test.
+        unsafe {
+            env::set_var("XDG_DATA_HOME", temp_dir.path());
+        }
+
+        let server_host = "test.example.com";
+        let node_id = Uuid::new_v4();
+
+        let proj =
+            directories::ProjectDirs::from("com", "phirepass", "agent").expect("project dirs");
+        let data_dir = proj.data_local_dir();
+        fs::create_dir_all(data_dir).expect("create data dir");
+
+        let state = StoredState {
+            node_id,
+            token: "invalid_token".to_string(),
+            server_host: server_host.to_string(),
+        };
+        let state_path = data_dir.join("state.json");
+        let state_bytes = serde_json::to_vec_pretty(&state).expect("serialize state");
+        fs::write(&state_path, state_bytes).expect("write state file");
+
+        let creds = load_creds_for_server(server_host).expect("creds");
+        assert_eq!(creds.0, server_host);
+        assert_eq!(creds.1, node_id);
+        assert_eq!(creds.2.expose_secret(), "invalid_token");
+
+        if let Some(old) = old_data_home {
+            unsafe {
+                env::set_var("XDG_DATA_HOME", old);
+            }
+        } else {
+            unsafe {
+                env::remove_var("XDG_DATA_HOME");
+            }
+        }
+    }
 }
