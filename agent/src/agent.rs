@@ -341,7 +341,7 @@ fn start_ws_connection(
         loop {
             // Load credentials from stored state, which includes the correct server_host
             let creds_result = load_creds_from_any_server();
-            info!("Credentials load result: {creds_result:?}");
+            info!("credentials load result: {creds_result:?}");
 
             if let Some((_, node_id, token)) = creds_result {
                 let conn = ws::WebSocketConnection::new(node_id, token);
