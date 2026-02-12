@@ -33,6 +33,16 @@ impl TokenStore {
         let dir = proj.data_local_dir();
         fs::create_dir_all(dir)?;
 
+        info!("creating token store in {}", dir.join("stats.json").display());
+
+        if let Ok(exists) = fs::exists(dir) {
+            info!("directory {dir:?} exists: {exists}");
+        }
+
+        if let Ok(exists) = fs::exists(dir.join("state.json")) {
+            info!("directory {:?} exists: {}", dir.join("state.json"), exists);
+        }
+
         Ok(Self {
             service: service.to_string(),
             state_path: dir.join("state.json"),
