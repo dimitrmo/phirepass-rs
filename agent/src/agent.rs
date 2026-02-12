@@ -178,7 +178,14 @@ pub(crate) async fn logout(server_host: String, server_port: u16) -> anyhow::Res
     info!("logging out from {server_host}:{server_port}");
 
     let username = whoami::username()?;
-    let ts = TokenStore::new("phirepass", "agent", &server_host, &username)?;
+    info!("username found: {}", username);
+
+    let ts = TokenStore::new(
+        "phirepass",
+        "agent",
+        server_host.as_str(),
+        username.as_str(),
+    )?;
 
     // Load current credentials
     let (node_id, token) = ts
@@ -261,28 +268,19 @@ fn start_http_server(
     })
 }
 
-/// Load credentials from any saved server.
-/// This tries to load from a generic location first, without depending on env vars.
-pub(crate) fn load_creds_from_any_server() -> Option<(String, Uuid, SecretString)> {
-    let username = match whoami::username() {
-        Ok(u) => u,
-        Err(e) => {
-            warn!("failed to get username: {}", e);
-            return None;
-        }
-    };
+pub(crate) fn load_creds_for_server(server_host: String) -> Option<(String, Uuid, SecretString)> {
+    info!("loading credentials from state file for server {server_host}");
 
-    // Try to load state from a generic location (server_host doesn't matter for reading state)
-    // We use empty string as service which will just use the standard path
-    let ts = match TokenStore::new("phirepass", "agent", "", username.as_str()) {
-        Ok(t) => t,
-        Err(e) => {
-            warn!("failed to create token store: {}", e);
-            return None;
-        }
-    };
+    let username = whoami::username().ok()?;
+    info!("username found: {}", username);
 
-    // Load the state file directly to get server_host
+    let ts = TokenStore::new(
+        "phirepass",
+        "agent",
+        server_host.as_str(),
+        username.as_str(),
+    ).ok()?;
+
     match ts.load_state_public() {
         Ok(Some(state)) => {
             if state.node_id == Uuid::nil() {
@@ -342,11 +340,10 @@ fn start_ws_connection(
     let env = Arc::clone(&state.env);
     tokio::spawn(async move {
         let mut attempt: u32 = 0;
+        let server_host = env.server_host.clone();
 
         loop {
-            // Load credentials from stored state, which includes the correct server_host
-            let creds_result = load_creds_from_any_server();
-            info!("credentials load result: {creds_result:?}");
+            let creds_result = load_creds_for_server(server_host.clone());
 
             if let Some((_, node_id, token)) = creds_result {
                 let conn = ws::WebSocketConnection::new(node_id, token);

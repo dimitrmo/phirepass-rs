@@ -46,7 +46,7 @@ impl TokenStore {
     /// - token also goes to keyring if possible (backup/faster access)
     /// - node_id always goes to state file
     pub fn save(&self, node_id: &str, tok: &SecretString) -> anyhow::Result<()> {
-        debug!("Saving credentials to state file");
+        debug!("saving credentials to state file");
 
         // Load existing state so we can update partially.
         let mut state = self.load_state()?.unwrap_or_default();
@@ -64,7 +64,7 @@ impl TokenStore {
 
         // ALWAYS store token in state file - this is the primary source of truth
         state.token = tok.expose_secret().to_owned();
-        info!("Token stored in state file");
+        info!("token stored in state file");
 
         // Use a fixed keyring service name so it doesn't vary with server_host
         let keyring_service = "phirepass-agent";
@@ -72,11 +72,11 @@ impl TokenStore {
         match keyring::Entry::new(keyring_service, &self.account) {
             Ok(entry) => match entry.set_password(tok.expose_secret()) {
                 Ok(_) => {
-                    debug!("Token saved to keyring");
+                    debug!("token saved to keyring");
                 }
                 Err(e) => {
                     warn!(
-                        "Could not save token to keyring ({}). Token is safely stored in state file.",
+                        "could not save token to keyring ({}). Token is safely stored in state file.",
                         e
                     );
                 }
@@ -90,13 +90,13 @@ impl TokenStore {
     }
 
     pub fn load(&self) -> anyhow::Result<(Uuid, SecretString)> {
-        debug!("Loading credentials from state file");
+        debug!("loading credentials from state file");
 
         let state = self.load_state()?.unwrap_or_default();
 
         if !state.server_host.is_empty() && state.server_host != self.service {
             anyhow::bail!(
-                "server mismatch: credentials are for '{}' but attempting to connect to '{}'. \
+                "Server mismatch: credentials are for '{}' but attempting to connect to '{}'. \
                  please login to the correct server or clear credentials.",
                 state.server_host,
                 self.service
@@ -105,18 +105,16 @@ impl TokenStore {
 
         if state.node_id == Uuid::nil() {
             anyhow::bail!(
-                "stored node_id is nil (uninitialized). Token store needs to be re-initialized via login."
+                "Stored node_id is nil (uninitialized). Token store needs to be re-initialized via login."
             );
         }
 
         // Prefer state file as primary source (more reliable than keyring)
         let token = if !state.token.is_empty() {
-            debug!("Using token from state file");
+            debug!("using token from state file");
             SecretString::from(state.token)
         } else {
-            // Fallback to keyring if state file token is missing
-            let keyring_service = "phirepass-agent";
-            match keyring::Entry::new(keyring_service, &self.account) {
+            match keyring::Entry::new("phirepass-agent", &self.account) {
                 Ok(entry) => match entry.get_password() {
                     Ok(s) => {
                         debug!("Token retrieved from keyring");
