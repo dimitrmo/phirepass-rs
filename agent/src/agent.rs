@@ -82,6 +82,8 @@ pub(crate) async fn login(
     info!("token found: {}", mask_after_10(token.as_str()));
 
     let username = whoami::username()?;
+    info!("username found: {}", username);
+
     let ts = TokenStore::new(
         "phirepass",
         "agent",
@@ -95,6 +97,8 @@ pub(crate) async fn login(
         }
         _ => None,
     };
+
+    info!("existing node id: {:?}", existing_node_id);
 
     let url = match server_port {
         443 | 8443 => format!("https://{}/api/nodes/login", server_host),
@@ -110,12 +114,15 @@ pub(crate) async fn login(
     });
 
     if let Some(node_id) = existing_node_id {
+        info!("sending node id as well");
         payload["node_id"] = json!(node_id);
     }
 
     let response = client.post(&url).json(&payload).send().await?;
 
     if !response.status().is_success() {
+        warn!("response unsuccessful");
+
         let status = response.status();
         let body_text = response.text().await.unwrap_or_default();
         let body = serde_json::from_str::<serde_json::Value>(&body_text)
@@ -158,8 +165,6 @@ pub(crate) async fn login(
     };
 
     info!("successfully authenticated node_id={node_id_str}");
-
-    info!("logging in with {username}");
 
     ts.save(&node_id_str, &SecretString::from(token))
         .context("failed to save token")?;
