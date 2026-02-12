@@ -268,7 +268,7 @@ fn start_http_server(
     })
 }
 
-pub(crate) fn load_creds_for_server(server_host: String) -> Option<(String, Uuid, SecretString)> {
+pub(crate) fn load_creds_for_server(server_host: &str) -> Option<(String, Uuid, SecretString)> {
     info!("loading credentials from state file for server {server_host}");
 
     let username = whoami::username().ok()?;
@@ -277,7 +277,7 @@ pub(crate) fn load_creds_for_server(server_host: String) -> Option<(String, Uuid
     let ts = TokenStore::new(
         "phirepass",
         "agent",
-        server_host.as_str(),
+        server_host,
         username.as_str(),
     ).ok()?;
 
@@ -343,7 +343,7 @@ fn start_ws_connection(
         let server_host = env.server_host.clone();
 
         loop {
-            let creds_result = load_creds_for_server(server_host.clone());
+            let creds_result = load_creds_for_server(server_host.as_str());
 
             if let Some((_, node_id, token)) = creds_result {
                 let conn = ws::WebSocketConnection::new(node_id, token);
