@@ -9,7 +9,7 @@ license-file = { workspace = true }
 maintenance = { status = "experimental" }
 
 [workspace]
-members = ["agent", "common", "server", "channel"]
+members = ["agent", "common", "server", "channel", "relay"]
 
 [workspace.package]
 version = "0.1.119"
@@ -24,6 +24,10 @@ path = "server/src/main.rs"
 [[bin]]
 name = "agent"
 path = "agent/src/main.rs"
+
+[[bin]]
+name = "relay"
+path = "relay/src/main.rs"
 
 [dependencies]
 tokio = { workspace = true }
@@ -59,6 +63,9 @@ whoami = { workspace = true }
 redis = { workspace = true }
 stunclient = { workspace = true }
 local-ip-address = { workspace = true }
+pingora = { workspace = true }
+http = { workspace = true }
+async-trait = { workspace = true }
 
 [workspace.dependencies]
 thiserror = "2.0.18"
@@ -87,7 +94,7 @@ rpassword = "7.4.0"
 reqwest = { version = "0.13.2", features = ["json"] }
 sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "postgres", "macros", "uuid", "chrono"] }
 argon2 = { version = "0.5.3", features = ["std"] }
-uuid = { version = "1.20.0", features = ["v4", "serde"] }
+uuid = { version = "1.21.0", features = ["v4", "serde"] }
 chrono = { version = "0.4.43", features = ["serde"] }
 directories = "6.0.0"
 tempfile = "3.25.0"
@@ -96,6 +103,9 @@ whoami = "2.1.1"
 redis = { version = "1.0.3", features = ["tls-rustls", "json", "uuid"] }
 stunclient = "0.4.2"
 local-ip-address = "0.6.10"
+pingora = { version = "0.7.0", features = ["proxy"] }
+http = "1.4.0"
+async-trait = "0.1.89"
 
 [profile.release]
 lto = "fat"

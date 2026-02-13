@@ -10,7 +10,7 @@ pub struct MemoryDB {
 }
 
 impl MemoryDB {
-    pub async fn create(config: &Env) -> anyhow::Result<Self> {
+    pub fn create(config: &Env) -> anyhow::Result<Self> {
         let client = redis::Client::open(config.redis_database_url.clone())?;
         let connection = client.get_connection()?;
         Ok(Self {
@@ -18,74 +18,58 @@ impl MemoryDB {
         })
     }
 
-    pub async fn set_node_connected(&self, node: &NodeRecord) -> anyhow::Result<()> {
-        let key = format!("phirepass:users:{}:nodes:{}", node.user_id, node.id);
-
-        let mut connection = self
-            .connection
-            .lock()
-            .map_err(|_| anyhow::anyhow!("redis connection lock poisoned"))?;
-
-        let payload = node.to_json()?;
-        let ttl_seconds = 120u64;
-
-        let _: () = connection.set_ex(key, payload, ttl_seconds)?;
-
-        Ok(())
-    }
-
-    pub async fn save_server(
+    pub fn set_node_connected(
         &self,
-        id: &Uuid,
-        public_ip: String,
-        port: u16,
-        fqdn: String,
+        node: &NodeRecord,
+        server: &Arc<ServerIdentifier>,
     ) -> anyhow::Result<()> {
-        let key = format!("phirepass:servers:{}", id);
-        let private_ip = local_ip_address::local_ip()?.to_string();
+        self.update_node_stats(node, server, String::from(""))
+    }
 
-        let identifier = ServerIdentifier {
-            private_ip,
-            public_ip,
-            port,
-            fqdn,
-        };
+    pub fn save_server(&self, node_id: &Uuid, server_payload: &str) -> anyhow::Result<()> {
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| anyhow::anyhow!("redis connection lock poisoned"))?;
 
-        let payload = identifier.get_encoded()?;
+        let server_key = format!("phirepass:servers:{}", node_id);
+        let fields_values = [("server", server_payload)];
+
+        let _: () = connection.hset_multiple(&server_key, &fields_values)?;
+        let _: () = connection.expire(&server_key, 120)?;
+
+        Ok(())
+    }
+
+    pub fn update_node_stats(
+        &self,
+        node: &NodeRecord,
+        server: &Arc<ServerIdentifier>,
+        stats: String,
+    ) -> anyhow::Result<()> {
+        let node_payload = node.to_json()?;
+        let server_payload = server.get_encoded()?;
 
         let mut connection = self
             .connection
             .lock()
             .map_err(|_| anyhow::anyhow!("redis connection lock poisoned"))?;
 
-        let ttl_seconds = 120u64;
+        let node_key = format!("phirepass:users:{}:nodes:{}", node.user_id, node.id);
+        let fields_values = [
+            ("node", node_payload),
+            ("stats", stats),
+            ("server", server_payload),
+        ];
 
-        let _: () = connection.set_ex(key, payload, ttl_seconds)?;
+        let _: () = connection.hset_multiple(&node_key, &fields_values)?;
+        let _: () = connection.expire(&node_key, 120)?;
 
         Ok(())
     }
 
-    pub async fn update_node_stats(&self, node: &NodeRecord, stats: String) -> anyhow::Result<()> {
+    pub fn set_node_disconnected(&self, node: &NodeRecord) -> anyhow::Result<()> {
         let node_key = format!("phirepass:users:{}:nodes:{}", node.user_id, node.id);
-        let stats_key = format!("phirepass:users:{}:nodes:{}:stats", node.user_id, node.id);
-
-        let mut connection = self
-            .connection
-            .lock()
-            .map_err(|_| anyhow::anyhow!("redis connection lock poisoned"))?;
-
-        let nodes_payload = node.to_json()?;
-        let ttl_seconds = 120u64;
-
-        let _: () = connection.set_ex(node_key, nodes_payload, ttl_seconds)?;
-        let _: () = connection.set_ex(stats_key, stats, ttl_seconds)?;
-
-        Ok(())
-    }
-
-    pub async fn set_node_disconnected(&self, node: &NodeRecord) -> anyhow::Result<()> {
-        let node_key = format!("phirepass:users:{}:nodes:{}", node.user_id, node.id);
-        let stats_key = format!("phirepass:users:{}:nodes:{}:stats", node.user_id, node.id);
 
         let mut connection = self
             .connection
@@ -93,7 +77,6 @@ impl MemoryDB {
             .map_err(|_| anyhow::anyhow!("redis connection lock poisoned"))?;
 
         let _: () = connection.del(&node_key)?;
-        let _: () = connection.del(&stats_key)?;
 
         Ok(())
     }

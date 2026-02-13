@@ -22,7 +22,7 @@ const tabButtons = document.querySelectorAll(".tab-button");
 
 const wsScheme = window.location.protocol === "https:" ? "wss" : "ws";
 
-const wsEndpoint = `${wsScheme}://${window.location.hostname}:8080`;
+const wsEndpoint = `${wsScheme}://${window.location.hostname}:8000`;
 const httpEndpoint = `${window.location.protocol}//${window.location.hostname}:8080`;
 
 let term, fitAddon;
@@ -406,7 +406,7 @@ function connectSFTP() {
     setStatus("Connecting to SFTP...");
     log("Establishing SFTP connection...");
 
-    const channel = new PhirepassChannel(`${wsEndpoint}/api/web/ws`);
+    const channel = new PhirepassChannel(`${wsEndpoint}/api/web/ws`, selected_node_id_sftp);
 
     channel.on_connection_open(() => {
         channel.start_heartbeat();
@@ -585,7 +585,7 @@ function connect() {
     fitAddon.fit();
     setStatus("Connecting...");
 
-    const channel = new PhirepassChannel(`${wsEndpoint}/api/web/ws`);
+    const channel = new PhirepassChannel(`${wsEndpoint}/api/web/ws`, selected_node_id);
 
     channel.on_connection_open(() => {
         channel.start_heartbeat();

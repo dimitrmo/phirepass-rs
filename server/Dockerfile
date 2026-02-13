@@ -16,6 +16,7 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     git \
     make \
+    cmake \
     autoconf \
  && rm -rf /var/lib/apt/lists/*
 

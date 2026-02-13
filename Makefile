@@ -16,6 +16,13 @@ agent: client
 web: wasm-dev
 	npx http-server -c-1 -p 8083 channel
 
+proxy: relay
+
+relay:
+	cargo run --bin relay start
+
+dev: build
+
 build:
 	cargo build --all --all-features
 
@@ -43,6 +50,25 @@ docker-server:
 #		--progress=plain \
 #		--push \
 #		.
+
+docker-relay:
+	docker build -f relay/Dockerfile -t dimitrmok/phirepass-relay:latest .
+#	docker buildx build \
+#		-t dimitrmok/phirepass-relay:latest \
+#		--platform linux/amd64,linux/arm64 \
+#		-f relay/Dockerfile \
+#		--progress=plain \
+#		--push \
+#		.
+
+docker-relay-buildx:
+	docker buildx build \
+		-t dimitrmok/phirepass-relay:latest \
+		--platform linux/amd64,linux/arm64 \
+		-f relay/Dockerfile \
+		--progress=plain \
+		--push \
+		.
 
 docker-agent:
 	docker buildx build \
@@ -84,4 +110,4 @@ sshd:
 		docker run -it --rm -p 12222:22 \
             --name phirepass-sshd sshd-pass
 
-.PHONY: server deamon client web build arm format db docker-server docker-agent wasm-dev wasm-prod
+.PHONY: server deamon client web relay build arm format db docker-server docker-agent docker-relay docker-relay-buildx wasm-dev wasm-prod

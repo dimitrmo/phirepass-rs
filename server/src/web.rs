@@ -2,6 +2,8 @@ use crate::connection::WebConnection;
 use crate::http::AppState;
 use axum::extract::ws::{Message, WebSocket};
 use axum::extract::{State, WebSocketUpgrade};
+use axum::http::HeaderMap;
+use axum::http::header::SEC_WEBSOCKET_PROTOCOL;
 use axum_client_ip::ClientIp;
 use bytes::Bytes;
 use futures_util::{SinkExt, StreamExt};
@@ -17,8 +19,21 @@ use uuid::Uuid;
 pub(crate) async fn ws_web_handler(
     State(state): State<AppState>,
     ClientIp(ip): ClientIp,
+    headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> impl axum::response::IntoResponse {
+    let protocol = headers
+        .get(SEC_WEBSOCKET_PROTOCOL)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(',').next())
+        .map(|value| value.trim().to_string());
+
+    let ws = if let Some(protocol) = protocol {
+        ws.protocols([protocol])
+    } else {
+        ws
+    };
+
     ws.on_upgrade(move |socket| handle_web_socket(socket, state, ip))
 }
 

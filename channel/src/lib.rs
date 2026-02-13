@@ -47,6 +47,7 @@ struct ChannelCallbacks {
 #[wasm_bindgen]
 pub struct Channel {
     endpoint: String,
+    node_id: String,
     state: Rc<RefCell<ChannelState>>,
     closures: Rc<RefCell<ChannelClosures>>,
     callbacks: Rc<RefCell<ChannelCallbacks>>,
@@ -56,6 +57,7 @@ impl Clone for Channel {
     fn clone(&self) -> Self {
         Self {
             endpoint: self.endpoint.clone(),
+            node_id: self.node_id.clone(),
             state: self.state.clone(),
             closures: self.closures.clone(),
             callbacks: self.callbacks.clone(),
@@ -66,9 +68,10 @@ impl Clone for Channel {
 #[wasm_bindgen]
 impl Channel {
     #[wasm_bindgen(constructor)]
-    pub fn new(endpoint: String) -> Self {
+    pub fn new(endpoint: String, node_id: String) -> Self {
         Self {
             endpoint,
+            node_id,
             state: Rc::new(RefCell::new(ChannelState::default())),
             closures: Rc::new(RefCell::new(ChannelClosures::default())),
             callbacks: Rc::new(RefCell::new(ChannelCallbacks::default())),
@@ -76,7 +79,7 @@ impl Channel {
     }
 
     pub fn connect(&self) {
-        let socket = match WebSocket::new(&self.endpoint) {
+        let socket = match WebSocket::new_with_str(self.endpoint.as_str(), self.node_id.as_str()) {
             Ok(ws) => ws,
             Err(err) => {
                 console_warn!("{}", &format!("WebSocket init error: {err:?}"));

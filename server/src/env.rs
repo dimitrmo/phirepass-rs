@@ -19,7 +19,7 @@ pub(crate) struct Env {
     #[envconfig(from = "PORT", default = "8080")]
     pub port: u16,
 
-    #[envconfig(from = "STATS_REFRESH_INTERVAL", default = "60")]
+    #[envconfig(from = "STATS_REFRESH_INTERVAL", default = "30")]
     pub stats_refresh_interval: u16,
 
     #[envconfig(from = "ACCESS_CONTROL_ALLOW_ORIGIN")]

@@ -5,7 +5,7 @@ use std::time::{Duration, SystemTime};
 use crate::db::postgres::Database;
 use crate::db::redis::MemoryDB;
 use crate::env::Env;
-use crate::http::{AppState, build_cors, get_stats, get_version, list_connections};
+use crate::http::{AppState, build_cors, get_stats, get_version, list_connections, list_nodes};
 use crate::node::{login_node, logout_node, ws_node_handler};
 use crate::stun;
 use crate::web::ws_web_handler;
@@ -13,29 +13,47 @@ use axum::Router;
 use axum::routing::{get, post};
 use dashmap::DashMap;
 use log::{info, warn};
+use phirepass_common::server::ServerIdentifier;
 use phirepass_common::stats::Stats;
 use tokio::signal;
 use tokio::sync::broadcast;
 use uuid::Uuid;
 
+pub fn create_server_identifier(config: &Env, id: Uuid) -> anyhow::Result<ServerIdentifier> {
+    let public_ip = stun::get_public_address()?.to_string();
+    let private_ip = local_ip_address::local_ip()?.to_string();
+    let fqdn = config.fqdn.clone();
+    let port = config.port;
+    Ok(ServerIdentifier {
+        id,
+        private_ip,
+        public_ip,
+        port,
+        fqdn,
+    })
+}
+
 pub async fn start(config: Env) -> anyhow::Result<()> {
     info!("running server on {} mode", config.mode);
+
+    let id = Uuid::new_v4();
+    info!("server id: {}", id);
 
     let stats_refresh_interval = config.stats_refresh_interval;
     let (shutdown_tx, _shutdown_rx) = broadcast::channel(1);
 
-    let address = stun::get_public_address()?;
-    info!("public ip: {}", address.ip());
-
     let db = Database::create(&config).await?;
     info!("connected to postgres");
 
-    let memory_db = MemoryDB::create(&config).await?;
+    let memory_db = MemoryDB::create(&config)?;
     info!("connected to valkey");
 
+    let server_identifier = create_server_identifier(&config, id.clone())?;
+    info!("server identifier: {:?}", server_identifier);
+
     let state = AppState {
-        id: Arc::new(Uuid::new_v4()),
-        address: Arc::new(address),
+        id: Arc::new(id),
+        server: Arc::new(server_identifier),
         env: Arc::new(config),
         db: Arc::new(db),
         memory_db: Arc::new(memory_db),
@@ -46,9 +64,9 @@ pub async fn start(config: Env) -> anyhow::Result<()> {
 
     let server_task = spawn_server_update_task(&state, 30u64);
     let conns_task = spawn_stats_connections_logger(&state, stats_refresh_interval as u64);
-    let http_task = start_http_server(state.clone(), shutdown_tx.subscribe());
     let stats_task = spawn_stats_logger(stats_refresh_interval as u64, shutdown_tx.subscribe());
-    let cleanup_task = spawn_connection_cleanup_task(&state, 30, shutdown_tx.subscribe());
+    let cleanup_task = spawn_connection_cleanup_task(&state, 30u64, shutdown_tx.subscribe());
+    let http_task = start_http_server(state, shutdown_tx.subscribe());
 
     let shutdown_signal = async {
         if let Err(err) = signal::ctrl_c().await {
@@ -67,7 +85,6 @@ pub async fn start(config: Env) -> anyhow::Result<()> {
         _ = shutdown_signal => info!("shutdown signal received"),
     }
 
-    // Tell all tasks to shut down if they have not already received the signal.
     let _ = shutdown_tx.send(());
 
     Ok(())
@@ -90,6 +107,7 @@ fn start_http_server(
             .route("/api/nodes/login", post(login_node))
             .route("/api/nodes/logout", post(logout_node))
             .route("/api/nodes/ws", get(ws_node_handler))
+            .route("/api/nodes", get(list_nodes))
             .route("/api/connections", get(list_connections))
             .route("/stats", get(get_stats))
             .route("/version", get(get_version))
@@ -117,18 +135,12 @@ fn spawn_server_update_task(state: &AppState, interval: u64) -> tokio::task::Joi
 
     let db = state.memory_db.clone();
     let id = state.id.clone();
-    let ip = state.address.ip().to_string();
-    let port = state.env.port;
-    let fqdn = state.env.fqdn.clone();
+    let payload = state.server.get_encoded().unwrap();
 
     tokio::spawn(async move {
-        let id = id.as_ref();
-        let ip = ip.clone();
-        let fqdn = fqdn.clone();
-        let db = db.clone();
         let mut interval = tokio::time::interval(Duration::from_secs(interval));
         loop {
-            if let Err(err) = db.save_server(id, ip.clone(), port, fqdn.clone()).await {
+            if let Err(err) = db.save_server(id.as_ref(), payload.as_str()) {
                 warn!("failed to save server info: {}", err);
             }
             interval.tick().await;

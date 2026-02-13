@@ -97,6 +97,11 @@ jobs:
                             file: "agent/Dockerfile",
                         },
                         {
+                            image: "dimitrmok/phirepass-relay",
+                            binary: "relay",
+                            file: "relay/Dockerfile",
+                        },
+                        {
                             image: "dimitrmok/phirepass-agent-sandbox",
                             binary: "agent",
                             file: "agent/sandbox/Dockerfile",

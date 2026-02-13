@@ -1,0 +1,19 @@
+[package]
+name = "phirepass-relay"
+version = { workspace = true }
+edition = { workspace = true }
+repository = { workspace = true }
+license-file = { workspace = true }
+
+[dependencies]
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+clap = { workspace = true }
+envconfig = { workspace = true }
+rustls = { workspace = true }
+http = { workspace = true }
+pingora = { workspace = true }
+phirepass-common = { workspace = true, features = ["full"] }
+log = { workspace = true }
+redis = { workspace = true }
+dashmap = { workspace = true }

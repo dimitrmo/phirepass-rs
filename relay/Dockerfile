@@ -4,7 +4,7 @@ FROM --platform=$BUILDPLATFORM rust:1.93-slim-trixie AS builder
 
 ARG TARGETARCH
 ARG BUILDPLATFORM
-ARG APP_NAME=agent
+ARG APP_NAME=relay
 
 WORKDIR /app
 
@@ -39,9 +39,9 @@ FROM gcr.io/distroless/cc-debian13:nonroot AS runtime
 
 ENV RUST_LOG=info
 
-COPY --from=builder /app-bin /app/agent
+COPY --from=builder /app-bin /app/relay
 
 USER nonroot
 
-ENTRYPOINT ["/app/agent"]
+ENTRYPOINT ["/app/relay"]
 CMD ["start"]
