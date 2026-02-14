@@ -17,6 +17,9 @@ RUN apt-get update && apt-get install -y \
     git \
     make \
     cmake \
+    perl \
+    golang \
+    ninja-build \
     autoconf \
  && rm -rf /var/lib/apt/lists/*
 
