@@ -12,10 +12,15 @@ RUN apt-get update && apt-get install -y \
     pkg-config \
     libssl-dev \
     gcc-aarch64-linux-gnu \
+    g++-aarch64-linux-gnu \
     libc6-dev-arm64-cross \
     build-essential \
     git \
     make \
+    cmake \
+    perl \
+    golang \
+    ninja-build \
     autoconf \
  && rm -rf /var/lib/apt/lists/*
 
