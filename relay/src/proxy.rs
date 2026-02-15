@@ -9,6 +9,7 @@ use pingora::proxy::{ProxyHttp, Session, http_proxy_service};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+#[derive(Debug)]
 struct CacheEntry {
     server: ServerIdentifier,
     cached_at: Instant,
@@ -38,20 +39,31 @@ fn extract_node_id(req: &RequestHeader) -> Option<String> {
 
 impl WsProxy {
     fn get_server_by_id(&self, node_id: &str) -> anyhow::Result<ServerIdentifier> {
-        debug!("searching for server by user node {}", node_id);
+        info!("searching for server by user node {}", node_id);
 
-        if let Some(entry) = self.upstream_servers.get(node_id) {
-            if entry.cached_at.elapsed() < Duration::from_secs(30) {
-                debug!("server found in upstream cache: {}", entry.server.id);
+        let needs_refresh = if let Some(entry) = self.upstream_servers.get(node_id) {
+            debug!("found server entry {:?}", entry);
+            let expired = entry.cached_at.elapsed() >= Duration::from_secs(30);
+            if !expired {
+                debug!(
+                    "server found in upstream cache: {} {:?}",
+                    entry.server.id,
+                    entry.cached_at.elapsed()
+                );
                 return Ok(entry.server.clone());
             }
+            true
+        } else {
+            info!("server[id={}] not found in cache", node_id);
+            false
+        };
+
+        if needs_refresh {
             self.upstream_servers.remove(node_id);
         }
 
         let server = self.memory_db.get_user_server_by_node_id(node_id)?;
         let server = ServerIdentifier::get_decoded(server)?;
-
-        debug!("server found: {}", server.id);
 
         self.upstream_servers.insert(
             node_id.to_string(),
@@ -60,6 +72,8 @@ impl WsProxy {
                 cached_at: Instant::now(),
             },
         );
+
+        info!("server found: {}", server.id);
 
         Ok(server)
     }

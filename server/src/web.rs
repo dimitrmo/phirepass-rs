@@ -42,7 +42,7 @@ async fn handle_web_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
 
     let (mut ws_tx, mut ws_rx) = socket.split();
 
-    // Bounded channel so slow clients cannot grow memory unbounded.
+    // bounded channel so slow clients cannot grow memory unbounded.
     let (tx, mut rx) = mpsc::channel::<WebFrameData>(256);
 
     {
@@ -53,7 +53,10 @@ async fn handle_web_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
 
         info!("connection {cid} ({ip}) established (total: {total})");
 
-        if let Err(err) = state.memory_db.set_connection_connected(&cid, ip) {
+        if let Err(err) = state
+            .memory_db
+            .set_connection_connected(&cid, ip, &state.server)
+        {
             warn!("failed to add connection {cid} to redis: {err}");
         }
     }
@@ -294,7 +297,7 @@ async fn update_web_heartbeat(state: &AppState, cid: &Uuid) {
             .elapsed()
             .unwrap_or(Duration::from_secs(0));
         info.last_heartbeat = SystemTime::now();
-        info!(
+        debug!(
             "heartbeat from web {cid} ({}) after {:.1?}",
             info.ip, since_last
         );
@@ -616,7 +619,7 @@ async fn handle_web_resize(
         })
         .await
     {
-        Ok(_) => info!("sent ssh window resize to {node_id}"),
+        Ok(_) => debug!("sent ssh window resize to {node_id}"),
         Err(err) => warn!("failed to forward resize to node {node_id}: {err}"),
     }
 }

@@ -87,8 +87,9 @@ impl MemoryDB {
         &self,
         cid: &Uuid,
         ip: IpAddr,
+        server: &Arc<ServerIdentifier>,
     ) -> anyhow::Result<()> {
-        self.refresh_connection(cid, ip)
+        self.refresh_connection(cid, ip, server)
     }
 
     pub fn set_connection_disconnected(&self, cid: &Uuid) -> anyhow::Result<()> {
@@ -104,19 +105,30 @@ impl MemoryDB {
         Ok(())
     }
 
-    pub fn refresh_connection(&self, cid: &Uuid, ip: IpAddr) -> anyhow::Result<()> {
+    pub fn refresh_connection(
+        &self,
+        cid: &Uuid,
+        ip: IpAddr,
+        server: &Arc<ServerIdentifier>,
+    ) -> anyhow::Result<()> {
         let mut connection = self
             .connection
             .lock()
             .map_err(|_| anyhow::anyhow!("redis connection lock poisoned"))?;
 
+        let server_payload = server.get_encoded()?;
+
         let connection_key = format!("phirepass:connections:{}", cid);
         let connection_data = json!({
-            "id": cid.to_string(),
+            "id": cid.to_string(), // cid
             "ip": ip.to_string(),
-        }).to_string();
+        })
+        .to_string();
 
-        let fields_values = [("connection", connection_data.as_str())];
+        let fields_values = [
+            ("connection", connection_data.as_str()),
+            ("server", server_payload.as_str()),
+        ];
 
         let _: () = connection.hset_multiple(&connection_key, &fields_values)?;
         let _: () = connection.expire(&connection_key, 120)?;

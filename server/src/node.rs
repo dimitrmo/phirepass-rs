@@ -238,12 +238,12 @@ async fn handle_node_messages(
                     NodeFrameData::Ping { sent_at } => {
                         let now = now_millis();
                         let latency = now.saturating_sub(sent_at);
-                        info!("ping from node {node_id}; latency={}ms", latency);
+                        debug!("ping from node {node_id}; latency={}ms", latency);
                         let pong = NodeFrameData::Pong { sent_at: now };
                         if let Err(err) = tx.send(pong).await {
                             warn!("failed to queue pong for node {node_id}: {err}");
                         } else {
-                            info!("pong response to node {node_id} sent");
+                            debug!("pong response to node {node_id} sent");
                         }
                     }
                     // agent notified server that a tunnel has been opened

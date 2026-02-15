@@ -1,4 +1,5 @@
 use crate::env::Env;
+use log::{debug, warn};
 use redis::{Commands, Connection, RedisResult};
 use std::sync::{Arc, Mutex};
 
@@ -39,13 +40,18 @@ impl MemoryDB {
 
     pub fn get_user_server_by_node_id(&self, node_id: &str) -> anyhow::Result<String> {
         let key = format!("phirepass:users:*:nodes:{}", node_id);
+        debug!("scan by key: {}", key);
+
         let keys = self.scan_keys(&key)?;
         if keys.is_empty() {
+            warn!("no entries found for key {}", key);
             anyhow::bail!("server not found for key")
         }
 
-        let server = self.get_server(&keys[0])?;
+        let id = &keys[0];
+        let server = self.get_server(id)?;
         let Some(server) = server else {
+            warn!("server not found for id {}", id);
             anyhow::bail!("server not found for node {}", node_id)
         };
 

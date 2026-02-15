@@ -9,6 +9,7 @@ mod http;
 mod node;
 mod server;
 mod stun;
+mod tasks;
 mod web;
 
 fn main() -> anyhow::Result<()> {

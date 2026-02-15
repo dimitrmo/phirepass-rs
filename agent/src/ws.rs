@@ -399,6 +399,7 @@ async fn handle_message(
             msg_id,
         } => {
             info!("received open tunnel with protocol {protocol}");
+
             if let Err(err) = ensure_credentials(sender, &config, cid, &username, &password, msg_id)
             {
                 warn!("credentials verification error: {err}");
@@ -437,7 +438,7 @@ async fn handle_message(
         NodeFrameData::Pong { sent_at } => {
             let now = now_millis();
             let rtt = now.saturating_sub(sent_at);
-            info!("received pong; round-trip={}ms (sent_at={sent_at})", rtt);
+            debug!("received pong; round-trip={}ms (sent_at={sent_at})", rtt);
         }
         NodeFrameData::ConnectionDisconnect { cid } => {
             info!("received connection disconnect for {cid}");
