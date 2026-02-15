@@ -1,4 +1,4 @@
-export RUST_LOG=info
+export RUST_LOG=agent=debug,channel=debug,common=debug,relay=debug,server=debug
 export RUST_BACKTRACE=full
 export APP_MODE=development
 export SERVER_HOST=localhost

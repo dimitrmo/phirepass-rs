@@ -264,7 +264,7 @@ impl Stats {
 
     pub fn log_line(&self) -> String {
         format!(
-            "pid={} threads={} cpu={:.1}% mem={} uptime={} | host={} ip={} os={} cpu={:.1}% mem={}/{} procs={} conns={} load={:.2}/{:.2}/{:.2} uptime={}",
+            "pid={} threads={} cpu={:.1}% mem={} uptime={} | host={} ip={} os={} cpu={:.1}% mem={}/{} procs={} host_conns={} load={:.2}/{:.2}/{:.2} uptime={}",
             self.proc_id,
             self.proc_threads,
             self.proc_cpu,

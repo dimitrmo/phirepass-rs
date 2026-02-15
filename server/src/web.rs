@@ -22,14 +22,20 @@ pub(crate) async fn ws_web_handler(
     headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> impl axum::response::IntoResponse {
-    let protocol = headers
+    let protocols: Vec<String> = headers
         .get(SEC_WEBSOCKET_PROTOCOL)
         .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.split(',').next())
-        .map(|value| value.trim().to_string());
+        .map(|value| {
+            value
+                .split(',')
+                .map(|part| part.trim().to_string())
+                .filter(|part| !part.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
 
-    let ws = if let Some(protocol) = protocol {
-        ws.protocols([protocol])
+    let ws = if !protocols.is_empty() {
+        ws.protocols(protocols)
     } else {
         ws
     };

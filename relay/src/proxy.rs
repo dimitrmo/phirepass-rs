@@ -22,19 +22,30 @@ struct WsProxy {
 
 struct RequestCtx {
     node_id: Option<String>,
+    server_id: Option<String>,
 }
 
-fn extract_node_id(req: &RequestHeader) -> Option<String> {
-    req.headers
+/// Extracts the node ID and server ID from the `sec-websocket-protocol` header.
+/// According to the project's WebSocket implementation, the node ID is expected to be the first protocol
+/// and the server ID is expected to be the second protocol in the list.
+fn extract_protocols(req: &RequestHeader) -> (Option<String>, Option<String>) {
+    let protocols: Vec<String> = req
+        .headers
         .get("sec-websocket-protocol")
         .and_then(|value| value.to_str().ok())
-        .and_then(|value| {
+        .map(|value| {
             value
                 .split(',')
-                .map(|part| part.trim())
-                .find(|part| !part.is_empty())
+                .map(|part| part.trim().to_string())
+                .filter(|part| !part.is_empty())
+                .collect()
         })
-        .map(str::to_string)
+        .unwrap_or_default();
+
+    let node_id = protocols.get(0).cloned();
+    let server_id = protocols.get(1).cloned();
+
+    (node_id, server_id)
 }
 
 impl WsProxy {
@@ -84,7 +95,10 @@ impl ProxyHttp for WsProxy {
     type CTX = RequestCtx;
 
     fn new_ctx(&self) -> Self::CTX {
-        RequestCtx { node_id: None }
+        RequestCtx {
+            node_id: None,
+            server_id: None,
+        }
     }
 
     async fn upstream_peer(
@@ -117,8 +131,10 @@ impl ProxyHttp for WsProxy {
     }
 
     async fn request_filter(&self, session: &mut Session, ctx: &mut Self::CTX) -> Result<bool> {
+        debug!("request_filter");
+
         let req = session.req_header();
-        let node_id = extract_node_id(req);
+        let (node_id, server_id) = extract_protocols(req);
 
         if node_id.is_none() {
             warn!("sec-websocket-protocol missing or empty");
@@ -127,7 +143,14 @@ impl ProxyHttp for WsProxy {
         }
 
         ctx.node_id = node_id;
-        debug!("node_id is {:?}", ctx.node_id);
+        if let Some(node_id) = ctx.node_id.as_ref() {
+            debug!("node id found: {}", node_id);
+        }
+
+        ctx.server_id = server_id;
+        if let Some(server_id) = ctx.server_id.as_ref() {
+            debug!("server id found: {}", server_id);
+        }
 
         Ok(false)
     }
@@ -166,26 +189,44 @@ mod tests {
     use http::header::HeaderValue;
 
     #[test]
-    fn extract_node_id_none_when_missing_header() {
+    fn extract_protocols_none_when_missing_header() {
         let req = RequestHeader::build(Method::GET, b"/", None).unwrap();
-        assert!(extract_node_id(&req).is_none());
+        let (node_id, server_id) = extract_protocols(&req);
+        assert!(node_id.is_none());
+        assert!(server_id.is_none());
     }
 
     #[test]
-    fn extract_node_id_none_when_empty_header() {
+    fn extract_protocols_none_when_empty_header() {
         let mut req = RequestHeader::build(Method::GET, b"/", None).unwrap();
         req.headers
             .insert("sec-websocket-protocol", HeaderValue::from_static(""));
-        assert!(extract_node_id(&req).is_none());
+        let (node_id, server_id) = extract_protocols(&req);
+        assert!(node_id.is_none());
+        assert!(server_id.is_none());
     }
 
     #[test]
-    fn extract_node_id_first_non_empty_token() {
+    fn extract_protocols_first_and_second_non_empty_tokens() {
         let mut req = RequestHeader::build(Method::GET, b"/", None).unwrap();
         req.headers.insert(
             "sec-websocket-protocol",
-            HeaderValue::from_static(" , node-1 , node-2"),
+            HeaderValue::from_static(" , node-1 , server-1 , other"),
         );
-        assert_eq!(extract_node_id(&req), Some("node-1".to_string()));
+        let (node_id, server_id) = extract_protocols(&req);
+        assert_eq!(node_id, Some("node-1".to_string()));
+        assert_eq!(server_id, Some("server-1".to_string()));
+    }
+
+    #[test]
+    fn extract_protocols_with_multiple_protocols() {
+        let mut req = RequestHeader::build(Method::GET, b"/", None).unwrap();
+        req.headers.insert(
+            "sec-websocket-protocol",
+            HeaderValue::from_static("node-123,server-456"),
+        );
+        let (node_id, server_id) = extract_protocols(&req);
+        assert_eq!(node_id, Some("node-123".to_string()));
+        assert_eq!(server_id, Some("server-456".to_string()));
     }
 }
