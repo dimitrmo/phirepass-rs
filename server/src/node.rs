@@ -137,13 +137,13 @@ async fn handle_node_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
         }
     };
 
-    let Ok(node) = state.db.get_node_by_id(&node_id).await else {
+    let Ok(node_record) = state.db.get_node_by_id(&node_id).await else {
         warn!("node {node_id} does not exist");
         let _ = ws_tx.close().await;
         return;
     };
 
-    if let Err(err) = state.memory_db.set_node_connected(&node, &state.server) {
+    if let Err(err) = state.memory_db.set_node_connected(&node_record, &state.server) {
         warn!("failed to update node {node_id} as connected in postgres: {err}");
     }
 
@@ -151,7 +151,7 @@ async fn handle_node_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
         let server_id = state.id.as_ref().clone();
         state.nodes.insert(
             node_id,
-            NodeConnection::new(server_id, ip, tx.clone(), node),
+            NodeConnection::new(server_id, ip, tx.clone(), node_record),
         );
         let total = state.nodes.len();
         info!("node {node_id} ({ip}) authenticated and registered (total: {total})");

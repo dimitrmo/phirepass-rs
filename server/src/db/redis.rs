@@ -47,7 +47,7 @@ impl MemoryDB {
         &self,
         node: &NodeRecord,
         server: &Arc<ServerIdentifier>,
-        stats: String,
+        stats_payload: String,
     ) -> anyhow::Result<()> {
         let node_payload = node.to_json()?;
         let server_payload = server.get_encoded()?;
@@ -60,7 +60,7 @@ impl MemoryDB {
         let node_key = format!("phirepass:users:{}:nodes:{}", node.user_id, node.id);
         let fields_values = [
             ("node", node_payload),
-            ("stats", stats),
+            ("stats", stats_payload),
             ("server", server_payload),
         ];
 

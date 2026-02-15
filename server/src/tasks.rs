@@ -85,7 +85,7 @@ pub(crate) fn refresh_connections_task(state: &AppState) {
         }
     }
 
-    info!("refreshed {} connections", refreshed);
+    debug!("refreshed {} connections", refreshed);
 }
 
 pub(crate) fn keep_server_alive_task(state: &AppState) {
