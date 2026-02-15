@@ -84,7 +84,7 @@ impl Channel {
     pub fn connect(&self) {
         let sub_protocols = match &self.server_id {
             None => self.node_id.as_str(),
-            Some(server_id) => &format!("{},{}", self.node_id, server_id)
+            Some(server_id) => &format!("{},{}", self.node_id, server_id),
         };
 
         let socket = match WebSocket::new_with_str(self.endpoint.as_str(), sub_protocols) {

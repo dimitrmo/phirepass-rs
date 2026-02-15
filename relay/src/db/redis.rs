@@ -63,18 +63,42 @@ impl MemoryDB {
         Ok(server)
     }
 
-    pub fn get_user_server_by_node_id(&self, node_id: &str) -> anyhow::Result<String> {
+    fn find_server_id_by_node_id(&self, node_id: &str) -> Option<String> {
         let key = format!("phirepass:users:*:nodes:{}", node_id);
         debug!("scan by key: {}", key);
 
-        let keys = self.scan_keys(&key)?;
+        let keys = self.scan_keys(&key).ok()?;
         if keys.is_empty() {
             warn!("no entries found for key {}", key);
-            anyhow::bail!("server not found for key")
+            None
+        } else {
+            Some(keys[0].to_owned())
         }
+    }
 
-        let id = &keys[0];
-        let server = self.get_server(id)?;
+    pub fn get_user_server_by_node_id(
+        &self,
+        node_id: &str,
+        server_id: Option<&str>,
+    ) -> anyhow::Result<String> {
+        debug!("get user server by node id: {}", node_id);
+
+        let id = match server_id {
+            Some(id) => {
+                debug!("found server[id={id}] hint");
+                id.to_owned()
+            }
+            None => {
+                debug!("no server id hint found. fallback to key scanning.");
+                if let Some(id) = self.find_server_id_by_node_id(node_id) {
+                    id
+                } else {
+                    anyhow::bail!("fail to find server by node id {}", node_id);
+                }
+            }
+        };
+
+        let server = self.get_server(id.as_str())?;
         let Some(server) = server else {
             warn!("server not found for id {}", id);
             anyhow::bail!("server not found for node {}", node_id)

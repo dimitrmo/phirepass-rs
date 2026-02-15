@@ -49,7 +49,11 @@ fn extract_protocols(req: &RequestHeader) -> (Option<String>, Option<String>) {
 }
 
 impl WsProxy {
-    fn get_server_by_id(&self, node_id: &str) -> anyhow::Result<ServerIdentifier> {
+    fn get_server_by_node_id(
+        &self,
+        node_id: &str,
+        server_id: Option<&str>,
+    ) -> anyhow::Result<ServerIdentifier> {
         info!("searching for server by user node {}", node_id);
 
         let needs_refresh = if let Some(entry) = self.upstream_servers.get(node_id) {
@@ -73,7 +77,9 @@ impl WsProxy {
             self.upstream_servers.remove(node_id);
         }
 
-        let server = self.memory_db.get_user_server_by_node_id(node_id)?;
+        let server = self
+            .memory_db
+            .get_user_server_by_node_id(node_id, server_id)?;
         let server = ServerIdentifier::get_decoded(server)?;
 
         self.upstream_servers.insert(
@@ -106,14 +112,18 @@ impl ProxyHttp for WsProxy {
         _session: &mut Session,
         ctx: &mut Self::CTX,
     ) -> Result<Box<HttpPeer>> {
-        let Some(node_id) = ctx.node_id.as_deref() else {
+        let Some(node_id) = ctx.node_id.as_ref() else {
             warn!("node_id missing before upstream selection");
             return Err(Error::new(HTTPStatus(400)));
         };
 
         info!("proxying request for node_id {}", node_id);
 
-        let server_with_node = self.get_server_by_id(node_id);
+        let server_with_node = match ctx.server_id {
+            Some(ref server_id) => self.get_server_by_node_id(node_id, Some(server_id)),
+            None => self.get_server_by_node_id(node_id, None),
+        };
+
         let server = match server_with_node {
             Ok(server) => server,
             Err(err) => {
