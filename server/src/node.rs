@@ -101,12 +101,16 @@ async fn wait_for_auth(
                 });
             }
 
-            tx.send(response.unwrap())
+            let Some(response) = response else {
+                anyhow::bail!("failed to generate auth response for node {node_id}");
+            };
+
+            tx.send(response)
                 .await
                 .map_err(|err| anyhow::anyhow!("failed to send auth response: {err}"))?;
 
             if !auth_ok {
-                anyhow::bail!("authentication failed for node {node_id}");
+                anyhow::bail!("authentication failed for node {node_id}")
             }
 
             Ok(node_id)
