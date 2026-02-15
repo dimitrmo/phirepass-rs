@@ -50,7 +50,12 @@ async fn handle_web_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
             .connections
             .insert(cid, WebConnection::new(ip, tx.clone()));
         let total = state.connections.len();
+
         info!("connection {cid} ({ip}) established (total: {total})");
+
+        if let Err(err) = state.memory_db.set_connection_connected(&cid, ip) {
+            warn!("failed to add connection {cid} to redis: {err}");
+        }
     }
 
     let write_task = tokio::spawn(async move {
@@ -268,10 +273,15 @@ async fn disconnect_web_client(state: &AppState, cid: &Uuid) {
     if let Some((_, info)) = state.connections.remove(cid) {
         let alive = info.connected_at.elapsed();
         let total = state.connections.len();
+
         info!(
             "web client {cid} ({}) removed after {:.1?} (total: {})",
             info.ip, alive, total
         );
+
+        if let Err(err) = state.memory_db.set_connection_disconnected(cid) {
+            warn!("failed to remove connection {cid} from redis: {err}");
+        }
     }
 
     notify_nodes_client_disconnect(state, cid).await;

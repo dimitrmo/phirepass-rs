@@ -64,6 +64,7 @@ pub async fn start(config: Env) -> anyhow::Result<()> {
 
     let server_task = spawn_server_update_task(&state, 30u64);
     let conns_task = spawn_stats_connections_logger(&state, stats_refresh_interval as u64);
+    let conns_refresh_task = spawn_connections_refresh_task(&state, 60u64);
     let stats_task = spawn_stats_logger(stats_refresh_interval as u64, shutdown_tx.subscribe());
     let cleanup_task = spawn_connection_cleanup_task(&state, 30u64, shutdown_tx.subscribe());
     let http_task = start_http_server(state, shutdown_tx.subscribe());
@@ -81,6 +82,7 @@ pub async fn start(config: Env) -> anyhow::Result<()> {
         _ = http_task => warn!("http task ended"),
         _ = stats_task => warn!("stats logger task ended"),
         _ = conns_task => warn!("connections stats task ended"),
+        _ = conns_refresh_task => warn!("connections refresh task ended"),
         _ = cleanup_task => warn!("cleanup task ended"),
         _ = shutdown_signal => info!("shutdown signal received"),
     }
@@ -160,6 +162,34 @@ fn spawn_stats_connections_logger(state: &AppState, interval: u64) -> tokio::tas
             interval.tick().await;
             info!("active web connections: {}", connections.len());
             info!("active nodes connections: {}", nodes.len());
+        }
+    })
+}
+
+fn spawn_connections_refresh_task(state: &AppState, interval: u64) -> tokio::task::JoinHandle<()> {
+    info!("starting connections refresh worker");
+
+    let connections = state.connections.clone();
+    let memory_db = state.memory_db.clone();
+
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(interval));
+        loop {
+            interval.tick().await;
+
+            let mut refreshed = 0;
+            for entry in connections.iter() {
+                let (cid, conn_info) = entry.pair();
+                if let Err(err) = memory_db.refresh_connection(cid, conn_info.ip) {
+                    warn!("failed to refresh connection {cid} in redis: {err}");
+                } else {
+                    refreshed += 1;
+                }
+            }
+
+            if refreshed > 0 {
+                info!("refreshed {} connection(s) in redis", refreshed);
+            }
         }
     })
 }

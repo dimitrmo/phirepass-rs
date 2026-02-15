@@ -2,6 +2,8 @@ use crate::db::common::NodeRecord;
 use crate::env::Env;
 use phirepass_common::server::ServerIdentifier;
 use redis::{Commands, Connection};
+use serde_json::json;
+use std::net::IpAddr;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
@@ -77,6 +79,47 @@ impl MemoryDB {
             .map_err(|_| anyhow::anyhow!("redis connection lock poisoned"))?;
 
         let _: () = connection.del(&node_key)?;
+
+        Ok(())
+    }
+
+    pub fn set_connection_connected(
+        &self,
+        cid: &Uuid,
+        ip: IpAddr,
+    ) -> anyhow::Result<()> {
+        self.refresh_connection(cid, ip)
+    }
+
+    pub fn set_connection_disconnected(&self, cid: &Uuid) -> anyhow::Result<()> {
+        let connection_key = format!("phirepass:connections:{}", cid);
+
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| anyhow::anyhow!("redis connection lock poisoned"))?;
+
+        let _: () = connection.del(&connection_key)?;
+
+        Ok(())
+    }
+
+    pub fn refresh_connection(&self, cid: &Uuid, ip: IpAddr) -> anyhow::Result<()> {
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| anyhow::anyhow!("redis connection lock poisoned"))?;
+
+        let connection_key = format!("phirepass:connections:{}", cid);
+        let connection_data = json!({
+            "id": cid.to_string(),
+            "ip": ip.to_string(),
+        }).to_string();
+
+        let fields_values = [("connection", connection_data.as_str())];
+
+        let _: () = connection.hset_multiple(&connection_key, &fields_values)?;
+        let _: () = connection.expire(&connection_key, 120)?;
 
         Ok(())
     }
