@@ -143,7 +143,10 @@ async fn handle_node_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
         return;
     };
 
-    if let Err(err) = state.memory_db.set_node_connected(&node_record, &state.server) {
+    if let Err(err) = state
+        .memory_db
+        .set_node_connected(&node_record, &state.server)
+    {
         warn!("failed to update node {node_id} as connected in postgres: {err}");
     }
 

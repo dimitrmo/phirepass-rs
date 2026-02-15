@@ -2,36 +2,72 @@ use crate::db::common::NodeRecord;
 use crate::db::common::TokenRecord;
 use crate::env::Env;
 use argon2::Argon2;
+use log::warn;
 use sqlx::PgPool;
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use std::str::FromStr;
+use tokio::sync::Mutex;
 use uuid::Uuid;
 
 pub struct Database {
-    pool: PgPool,
+    pool: Mutex<PgPool>,
+    database_url: String,
+    max_connections: u32,
     pub hasher: Argon2<'static>,
 }
 
 impl Database {
     pub async fn create(config: &Env) -> anyhow::Result<Self> {
-        let opts = PgConnectOptions::from_str(&config.database_url)?.statement_cache_capacity(0);
-
-        let pool = PgPoolOptions::new()
-            .max_connections(config.database_max_connections)
-            .connect_with(opts)
-            .await?;
-
+        let database_url = config.database_url.clone();
+        let max_connections = config.database_max_connections;
+        let pool = Self::connect_pool(&database_url, max_connections).await?;
         let argon2 = Argon2::default();
 
         Ok(Self {
-            pool,
+            pool: Mutex::new(pool),
+            database_url,
+            max_connections,
             hasher: argon2,
         })
     }
 
+    async fn connect_pool(database_url: &str, max_connections: u32) -> anyhow::Result<PgPool> {
+        let opts = PgConnectOptions::from_str(database_url)?.statement_cache_capacity(0);
+
+        let pool = PgPoolOptions::new()
+            .max_connections(max_connections)
+            .connect_with(opts)
+            .await?;
+
+        Ok(pool)
+    }
+
+    async fn ensure_pool(&self) -> anyhow::Result<PgPool> {
+        let pool = { self.pool.lock().await.clone() };
+
+        if pool.is_closed() {
+            warn!("postgres pool is closed, reconnecting");
+            return self.reconnect_pool().await;
+        }
+
+        if let Err(err) = pool.acquire().await {
+            warn!("postgres pool acquire failed, reconnecting: {err}");
+            return self.reconnect_pool().await;
+        }
+
+        Ok(pool)
+    }
+
+    async fn reconnect_pool(&self) -> anyhow::Result<PgPool> {
+        let new_pool = Self::connect_pool(&self.database_url, self.max_connections).await?;
+        let mut pool_guard = self.pool.lock().await;
+        *pool_guard = new_pool.clone();
+        Ok(new_pool)
+    }
+
     pub async fn create_node_from_token(&self, token: &TokenRecord) -> anyhow::Result<NodeRecord> {
         let name = format!("node-{}", Uuid::new_v4().to_string()[..8].to_string());
-
+        let pool = self.ensure_pool().await?;
         let node_record = sqlx::query_as::<_, NodeRecord>(
             r#"
             INSERT INTO nodes (user_id, token_id, name)
@@ -43,7 +79,7 @@ impl Database {
         .bind(token.user_id)
         .bind(token.id)
         .bind(name)
-        .fetch_one(&self.pool)
+        .fetch_one(&pool)
         .await?;
 
         Ok(node_record)
@@ -65,6 +101,7 @@ impl Database {
     }
 
     pub async fn get_node_by_id(&self, node_id: &Uuid) -> anyhow::Result<NodeRecord> {
+        let pool = self.ensure_pool().await?;
         let node_record = sqlx::query_as::<_, NodeRecord>(
             r#"
             SELECT *
@@ -74,13 +111,14 @@ impl Database {
         )
         .persistent(false)
         .bind(node_id)
-        .fetch_one(&self.pool)
+        .fetch_one(&pool)
         .await?;
 
         Ok(node_record)
     }
 
     pub async fn get_node_by_token_id(&self, token_id: &Uuid) -> anyhow::Result<NodeRecord> {
+        let pool = self.ensure_pool().await?;
         let node_record = sqlx::query_as::<_, NodeRecord>(
             r#"
             SELECT *
@@ -90,13 +128,14 @@ impl Database {
         )
         .persistent(false)
         .bind(token_id)
-        .fetch_one(&self.pool)
+        .fetch_one(&pool)
         .await?;
 
         Ok(node_record)
     }
 
     pub async fn get_token_by_id(&self, token_id: &str) -> anyhow::Result<TokenRecord> {
+        let pool = self.ensure_pool().await?;
         let token_record = sqlx::query_as::<_, TokenRecord>(
             r#"
             SELECT *
@@ -106,13 +145,14 @@ impl Database {
         )
         .persistent(false)
         .bind(token_id)
-        .fetch_one(&self.pool)
+        .fetch_one(&pool)
         .await?;
 
         Ok(token_record)
     }
 
     pub async fn delete_node(&self, node_id: &Uuid) -> anyhow::Result<()> {
+        let pool = self.ensure_pool().await?;
         sqlx::query(
             r#"
             DELETE FROM nodes
@@ -121,7 +161,7 @@ impl Database {
         )
         .persistent(false)
         .bind(node_id)
-        .execute(&self.pool)
+        .execute(&pool)
         .await?;
 
         Ok(())
