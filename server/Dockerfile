@@ -49,7 +49,5 @@ ENV RUST_LOG=info
 
 COPY --from=builder /app-bin /app/server
 
-USER nonroot
-
 ENTRYPOINT ["/app/server"]
 CMD ["start"]
