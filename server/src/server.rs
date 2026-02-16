@@ -5,7 +5,7 @@ use std::time::Duration;
 use crate::db::postgres::Database;
 use crate::db::redis::MemoryDB;
 use crate::env::Env;
-use crate::http::{AppState, build_cors, list_connections, list_nodes};
+use crate::http::{AppState, READY, build_cors, healthz, list_connections, list_nodes, readiness};
 use crate::node::{login_node, logout_node, ws_node_handler};
 use crate::web::ws_web_handler;
 use crate::{stun, tasks};
@@ -81,6 +81,10 @@ pub async fn start(config: Env) -> anyhow::Result<()> {
 
     info!("shutdown signal listener ready");
 
+    READY.store(true, std::sync::atomic::Ordering::Release);
+
+    info!("server is ready to accept connections");
+
     tokio::select! {
         _ = server_task => warn!("server task terminated"),
         _ = http_task => warn!("http task ended"),
@@ -109,6 +113,8 @@ fn start_http_server(
         let cors = build_cors(&state);
 
         let app = Router::new()
+            .route("/healthz", get(healthz))
+            .route("/readyz", get(readiness))
             .route("/api/web/ws", get(ws_web_handler))
             .route("/api/nodes/login", post(login_node))
             .route("/api/nodes/logout", post(logout_node))

@@ -13,6 +13,7 @@ use phirepass_common::protocol::web::WebFrameData;
 use phirepass_common::server::ServerIdentifier;
 use serde_json::json;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::SystemTime;
 use tower_http::cors::{Any, CorsLayer};
 use uuid::Uuid;
@@ -36,6 +37,8 @@ pub type Nodes = Arc<DashMap<Uuid, NodeConnection>>;
 pub type Connections = Arc<DashMap<Uuid, WebConnection>>;
 
 pub type TunnelSessions = Arc<DashMap<TunnelSessionKey, (Uuid, Uuid)>>;
+
+pub static READY: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone)]
 pub(crate) struct AppState {
@@ -203,4 +206,16 @@ pub async fn list_connections(State(state): State<AppState>) -> impl IntoRespons
         .collect();
 
     Json(data)
+}
+
+pub async fn readiness() -> impl IntoResponse {
+    if READY.load(Ordering::Acquire) {
+        axum::http::StatusCode::OK
+    } else {
+        axum::http::StatusCode::SERVICE_UNAVAILABLE
+    }
+}
+
+pub async fn healthz() -> impl IntoResponse {
+    axum::http::StatusCode::OK
 }
