@@ -39,6 +39,7 @@ pub async fn start(config: Env) -> anyhow::Result<()> {
     info!("server id: {}", id);
 
     let (shutdown_tx, _shutdown_rx) = broadcast::channel(1);
+    info!("comms channel ready");
 
     let db = Database::create(&config).await?;
     info!("connected to postgres");
@@ -60,10 +61,14 @@ pub async fn start(config: Env) -> anyhow::Result<()> {
         tunnel_sessions: Arc::new(DashMap::new()),
     };
 
+    info!("state ready");
+
     let server_task = spawn_server_update_task(&state, 30u64, shutdown_tx.subscribe());
     let conns_refresh_task = spawn_connections_refresh_task(&state, 30u64, shutdown_tx.subscribe());
     let stats_task = spawn_stats_log_task(&state, 60u64, shutdown_tx.subscribe());
     let http_task = start_http_server(state, shutdown_tx.subscribe());
+
+    info!("server tasks started");
 
     let shutdown_signal = async {
         if let Err(err) = signal::ctrl_c().await {
@@ -73,6 +78,8 @@ pub async fn start(config: Env) -> anyhow::Result<()> {
         }
     };
 
+    info!("shutdown signal listener ready");
+
     tokio::select! {
         _ = server_task => warn!("server task terminated"),
         _ = http_task => warn!("http task ended"),
@@ -80,6 +87,8 @@ pub async fn start(config: Env) -> anyhow::Result<()> {
         _ = conns_refresh_task => warn!("connections refresh task ended"),
         _ = shutdown_signal => info!("shutdown signal received"),
     }
+
+    info!("shutting down server");
 
     let _ = shutdown_tx.send(());
 
