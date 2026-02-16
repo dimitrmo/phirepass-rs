@@ -28,7 +28,7 @@ pub(crate) struct Env {
     #[envconfig(from = "DATABASE_MAX_CONNECTIONS", default = "5")]
     pub database_max_connections: u32,
 
-    #[envconfig(from = "REDIS_DATABASE_URL", default = "redis://127.0.0.1")]
+    #[envconfig(from = "REDIS_DATABASE_URL")]
     pub redis_database_url: String,
 }
 

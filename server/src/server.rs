@@ -5,10 +5,11 @@ use std::time::Duration;
 use crate::db::postgres::Database;
 use crate::db::redis::MemoryDB;
 use crate::env::Env;
-use crate::http::{AppState, build_cors, get_stats, get_version, list_connections, list_nodes};
+use crate::http::{AppState, build_cors, list_connections, list_nodes};
 use crate::node::{login_node, logout_node, ws_node_handler};
 use crate::web::ws_web_handler;
 use crate::{stun, tasks};
+use anyhow::Context;
 use axum::Router;
 use axum::routing::{get, post};
 use dashmap::DashMap;
@@ -19,7 +20,7 @@ use tokio::sync::broadcast;
 use uuid::Uuid;
 
 pub fn create_server_identifier(config: &Env, id: Uuid) -> anyhow::Result<ServerIdentifier> {
-    let public_ip = stun::get_public_address()?.to_string();
+    let public_ip = stun::get_public_address().context("failed to get public address from stun")?;
     let private_ip = local_ip_address::local_ip()?.to_string();
     let fqdn = config.fqdn.clone();
     let port = config.port;
@@ -114,8 +115,6 @@ fn start_http_server(
             .route("/api/nodes/ws", get(ws_node_handler))
             .route("/api/nodes", get(list_nodes))
             .route("/api/connections", get(list_connections))
-            .route("/stats", get(get_stats))
-            .route("/version", get(get_version))
             .layer(ip_source.into_extension())
             .layer(cors)
             .with_state(state);

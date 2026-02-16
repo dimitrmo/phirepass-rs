@@ -34,7 +34,7 @@ fn resolve_server(server: &str) -> Option<SocketAddr> {
         .and_then(|mut addrs| addrs.next())
 }
 
-pub(crate) fn get_public_address() -> Result<SocketAddr> {
+pub(crate) fn get_public_address() -> Result<String> {
     let socket = UdpSocket::bind("0.0.0.0:0").context("bind UDP socket")?;
     socket
         .set_read_timeout(Some(Duration::from_secs(DEFAULT_TIMEOUT_SECS)))
@@ -53,7 +53,7 @@ pub(crate) fn get_public_address() -> Result<SocketAddr> {
 
         let client = StunClient::new(addr);
         match client.query_external_address(&socket) {
-            Ok(mapped) => return Ok(mapped),
+            Ok(mapped) => return Ok(mapped.ip().to_string()),
             Err(err) => last_error = Some(format!("{} failed: {}", server, err)),
         }
 

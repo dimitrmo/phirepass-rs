@@ -1,7 +1,6 @@
 use crate::connection::{NodeConnection, WebConnection};
 use crate::db::postgres::Database;
 use crate::db::redis::MemoryDB;
-use crate::env;
 use crate::env::Env;
 use crate::error::ServerError;
 use axum::Json;
@@ -12,7 +11,6 @@ use dashmap::DashMap;
 use log::debug;
 use phirepass_common::protocol::web::WebFrameData;
 use phirepass_common::server::ServerIdentifier;
-use phirepass_common::stats::Stats;
 use serde_json::json;
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -150,29 +148,6 @@ pub fn build_cors(state: &AppState) -> CorsLayer {
     }
 
     cors
-}
-
-pub async fn get_version() -> impl IntoResponse {
-    Json(json!({
-        "version": env::version(),
-    }))
-}
-
-pub async fn get_stats(State(state): State<AppState>) -> impl IntoResponse {
-    let body = match Stats::get() {
-        Some(stats) => json!({
-            "stats": stats,
-            "nodes": state.nodes.len(),
-            "connections": state.connections.len(),
-        }),
-        None => json!({
-            "stats": {},
-            "nodes": 0,
-            "connections": 0,
-        }),
-    };
-
-    Json(body)
 }
 
 pub async fn list_nodes(State(state): State<AppState>) -> impl IntoResponse {

@@ -1,5 +1,6 @@
 use crate::db::common::NodeRecord;
 use crate::env::Env;
+use anyhow::Context;
 use log::{debug, warn};
 use phirepass_common::server::ServerIdentifier;
 use redis::{Commands, Connection, RedisResult};
@@ -15,8 +16,13 @@ pub struct MemoryDB {
 
 impl MemoryDB {
     pub fn create(config: &Env) -> anyhow::Result<Self> {
-        let client = redis::Client::open(config.redis_database_url.clone())?;
-        let connection = client.get_connection()?;
+        let client = redis::Client::open(config.redis_database_url.clone())
+            .context("failed to create a client")?;
+
+        let connection = client
+            .get_connection()
+            .context("failed to get a connection")?;
+
         Ok(Self {
             client,
             connection: Arc::new(Mutex::new(connection)),
@@ -58,6 +64,7 @@ impl MemoryDB {
         server: &Arc<ServerIdentifier>,
     ) -> anyhow::Result<()> {
         self.update_node_stats(node, server, String::from(""))
+            .context("failed to set node connected by updating node stats")
     }
 
     pub fn save_server(&self, node_id: &Uuid, server_payload: &str) -> anyhow::Result<()> {
@@ -112,6 +119,7 @@ impl MemoryDB {
         server: &Arc<ServerIdentifier>,
     ) -> anyhow::Result<()> {
         self.refresh_connection(cid, ip, server)
+            .context("failed to set connection connected by refreshing the connection")
     }
 
     pub fn set_connection_disconnected(&self, cid: &Uuid) -> anyhow::Result<()> {
