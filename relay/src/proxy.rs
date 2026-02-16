@@ -7,7 +7,10 @@ use phirepass_common::server::ServerIdentifier;
 use pingora::prelude::*;
 use pingora::proxy::{ProxyHttp, Session, http_proxy_service};
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
+
+pub static READY: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug)]
 struct CacheEntry {
@@ -49,6 +52,13 @@ fn extract_protocols(req: &RequestHeader) -> (Option<String>, Option<String>) {
 }
 
 impl WsProxy {
+    pub fn new(memory_db: MemoryDB) -> Self {
+        Self {
+            memory_db: Arc::new(memory_db),
+            upstream_servers: DashMap::new(),
+        }
+    }
+
     fn get_server_by_node_id(
         &self,
         node_id: &str,
@@ -178,16 +188,16 @@ pub fn start(config: Env) -> anyhow::Result<()> {
     let mut server = Server::new(None)?;
     server.bootstrap();
 
-    let proxy = WsProxy {
-        upstream_servers: DashMap::new(),
-        memory_db: Arc::new(memory_db),
-    };
-    let mut service = http_proxy_service(&server.configuration, proxy);
+    let mut service = http_proxy_service(&server.configuration, WsProxy::new(memory_db));
     service.add_tcp(&bind_addr);
     info!("proxy prepared");
 
     server.add_service(service);
     info!("proxy running forever");
+
+    READY.store(true, std::sync::atomic::Ordering::Release);
+
+    info!("server is ready to accept connections");
 
     server.run_forever();
 }

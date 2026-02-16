@@ -5,7 +5,7 @@ use crate::env::Env;
 use crate::error::ServerError;
 use axum::Json;
 use axum::extract::State;
-use axum::http::{HeaderValue, Method};
+use axum::http::{HeaderValue, Method, StatusCode};
 use axum::response::IntoResponse;
 use dashmap::DashMap;
 use log::debug;
@@ -210,12 +210,12 @@ pub async fn list_connections(State(state): State<AppState>) -> impl IntoRespons
 
 pub async fn readiness() -> impl IntoResponse {
     if READY.load(Ordering::Acquire) {
-        axum::http::StatusCode::OK
+        StatusCode::OK
     } else {
-        axum::http::StatusCode::SERVICE_UNAVAILABLE
+        StatusCode::SERVICE_UNAVAILABLE
     }
 }
 
 pub async fn healthz() -> impl IntoResponse {
-    axum::http::StatusCode::OK
+    StatusCode::OK
 }

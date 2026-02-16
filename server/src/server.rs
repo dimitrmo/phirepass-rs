@@ -125,8 +125,15 @@ fn start_http_server(
             .layer(cors)
             .with_state(state);
 
-        let listener = tokio::net::TcpListener::bind(host).await.unwrap();
-        info!("listening on: {}", listener.local_addr().unwrap());
+        info!("listening on: {host}");
+
+        let listener= match tokio::net::TcpListener::bind(host).await {
+            Ok(listener) => listener,
+            Err(err) => {
+                warn!("error listening on host: {err}");
+                return;
+            }
+        };
 
         axum::serve(
             listener,

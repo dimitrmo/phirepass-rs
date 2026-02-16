@@ -6,8 +6,8 @@ use std::time::{Duration, SystemTime};
 
 const CONNECTION_TIMEOUT: Duration = Duration::from_secs(120);
 
-fn cleanup_tangling_connections(state: &AppState) {
-    info!("cleaning up tangling connections");
+fn cleanup_dangling_connections(state: &AppState) {
+    info!("cleaning up dangling connections");
 
     let now = SystemTime::now();
 
@@ -70,7 +70,7 @@ fn cleanup_tangling_connections(state: &AppState) {
 pub(crate) fn refresh_connections_task(state: &AppState) {
     info!("refreshing connections tasks");
 
-    cleanup_tangling_connections(state);
+    cleanup_dangling_connections(state);
 
     let mut refreshed = 0;
     for entry in state.connections.iter() {
@@ -107,8 +107,8 @@ pub(crate) fn keep_server_alive_task(state: &AppState) {
 pub(crate) fn print_server_stats_task(state: &AppState) {
     info!("printing server stats");
 
-    info!("active web connections: {}", state.connections.len());
-    info!("active nodes connections: {}", state.nodes.len());
+    info!("\tactive web connections: {}", state.connections.len());
+    info!("\tactive nodes connections: {}", state.nodes.len());
 
     if log::log_enabled!(Debug) {
         if let Some(stats) = Stats::gather() {
