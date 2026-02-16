@@ -1,6 +1,7 @@
 use crate::db::common::NodeRecord;
 use crate::db::common::TokenRecord;
 use crate::env::Env;
+use anyhow::Context;
 use argon2::Argon2;
 use log::warn;
 use sqlx::PgPool;
@@ -20,7 +21,10 @@ impl Database {
     pub async fn create(config: &Env) -> anyhow::Result<Self> {
         let database_url = config.database_url.clone();
         let max_connections = config.database_max_connections;
-        let pool = Self::connect_pool(&database_url, max_connections).await?;
+        let pool = Self::connect_pool(&database_url, max_connections)
+            .await
+            .context("failed to connect to pool")?;
+
         let argon2 = Argon2::default();
 
         Ok(Self {
@@ -32,12 +36,15 @@ impl Database {
     }
 
     async fn connect_pool(database_url: &str, max_connections: u32) -> anyhow::Result<PgPool> {
-        let opts = PgConnectOptions::from_str(database_url)?.statement_cache_capacity(0);
+        let opts = PgConnectOptions::from_str(database_url)
+            .context("failed to parse database url")?
+            .statement_cache_capacity(0);
 
         let pool = PgPoolOptions::new()
             .max_connections(max_connections)
             .connect_with(opts)
-            .await?;
+            .await
+            .context("failed to connect to pooled database")?;
 
         Ok(pool)
     }
@@ -59,15 +66,19 @@ impl Database {
     }
 
     async fn reconnect_pool(&self) -> anyhow::Result<PgPool> {
-        let new_pool = Self::connect_pool(&self.database_url, self.max_connections).await?;
+        let new_pool = Self::connect_pool(&self.database_url, self.max_connections)
+            .await
+            .context("failed to reconnect to pool")?;
+
         let mut pool_guard = self.pool.lock().await;
         *pool_guard = new_pool.clone();
+
         Ok(new_pool)
     }
 
     pub async fn create_node_from_token(&self, token: &TokenRecord) -> anyhow::Result<NodeRecord> {
         let name = format!("node-{}", Uuid::new_v4().to_string()[..8].to_string());
-        let pool = self.ensure_pool().await?;
+        let pool = self.ensure_pool().await.context("failed to ensure pool")?;
         let node_record = sqlx::query_as::<_, NodeRecord>(
             r#"
             INSERT INTO nodes (user_id, token_id, name)
@@ -80,7 +91,8 @@ impl Database {
         .bind(token.id)
         .bind(name)
         .fetch_one(&pool)
-        .await?;
+        .await
+        .context("failed to create node from token")?;
 
         Ok(node_record)
     }
@@ -97,11 +109,13 @@ impl Database {
             );
         }
 
-        self.create_node_from_token(token).await
+        self.create_node_from_token(token)
+            .await
+            .context("failed to create node from token exclusively")
     }
 
     pub async fn get_node_by_id(&self, node_id: &Uuid) -> anyhow::Result<NodeRecord> {
-        let pool = self.ensure_pool().await?;
+        let pool = self.ensure_pool().await.context("failed to ensure pool")?;
         let node_record = sqlx::query_as::<_, NodeRecord>(
             r#"
             SELECT *
@@ -112,7 +126,8 @@ impl Database {
         .persistent(false)
         .bind(node_id)
         .fetch_one(&pool)
-        .await?;
+        .await
+        .context("failed to retrieve node by id")?;
 
         Ok(node_record)
     }
@@ -129,13 +144,14 @@ impl Database {
         .persistent(false)
         .bind(token_id)
         .fetch_one(&pool)
-        .await?;
+        .await
+        .context("failed to retrieve node by token id")?;
 
         Ok(node_record)
     }
 
     pub async fn get_token_by_id(&self, token_id: &str) -> anyhow::Result<TokenRecord> {
-        let pool = self.ensure_pool().await?;
+        let pool = self.ensure_pool().await.context("failed to ensure pool")?;
         let token_record = sqlx::query_as::<_, TokenRecord>(
             r#"
             SELECT *
@@ -146,13 +162,14 @@ impl Database {
         .persistent(false)
         .bind(token_id)
         .fetch_one(&pool)
-        .await?;
+        .await
+        .context("failed to retrieve token by id")?;
 
         Ok(token_record)
     }
 
     pub async fn delete_node(&self, node_id: &Uuid) -> anyhow::Result<()> {
-        let pool = self.ensure_pool().await?;
+        let pool = self.ensure_pool().await.context("failed to ensure pool")?;
         sqlx::query(
             r#"
             DELETE FROM nodes
@@ -162,7 +179,8 @@ impl Database {
         .persistent(false)
         .bind(node_id)
         .execute(&pool)
-        .await?;
+        .await
+        .context("failed to delete node by id")?;
 
         Ok(())
     }
