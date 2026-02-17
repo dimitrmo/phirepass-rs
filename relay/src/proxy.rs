@@ -7,7 +7,7 @@ use phirepass_common::server::ServerIdentifier;
 use pingora::prelude::*;
 use pingora::proxy::{ProxyHttp, Session, http_proxy_service};
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 pub static READY: AtomicBool = AtomicBool::new(false);
@@ -153,13 +153,52 @@ impl ProxyHttp for WsProxy {
     async fn request_filter(&self, session: &mut Session, ctx: &mut Self::CTX) -> Result<bool> {
         debug!("request_filter");
 
+        let path = session.req_header().uri.path();
+        debug!("request path detected: {}", path);
+
+        match path {
+            "/healthz" => {
+                debug!("healthz handler");
+
+                let mut header = ResponseHeader::build(200, None)?;
+                header.insert_header("content-length", "0")?;
+
+                session
+                    .write_response_header(Box::new(header), true)
+                    .await?;
+
+                return Ok(true);
+            },
+            "/readyz" => {
+                debug!("readyz handler");
+
+                let mut header = ResponseHeader::build(200, None)?;
+                header.insert_header("content-length", "0")?;
+
+                if READY.load(Ordering::Relaxed) {
+                    session
+                        .write_response_header(Box::new(header), true)
+                        .await?;
+                } else {
+                    session
+                        .respond_error(503)
+                        .await?;
+                };
+
+                return Ok(true); // stop processing
+            },
+            _ => {}
+        }
+
+        // Handle ws proxy
+
         let req = session.req_header();
         let (node_id, server_id) = extract_protocols(req);
 
         if node_id.is_none() {
             warn!("sec-websocket-protocol missing or empty");
             session.respond_error(400).await?;
-            return Ok(true);
+            return Ok(true); // stop processing
         }
 
         ctx.node_id = node_id;
@@ -195,7 +234,7 @@ pub fn start(config: Env) -> anyhow::Result<()> {
     server.add_service(service);
     info!("proxy running forever");
 
-    READY.store(true, std::sync::atomic::Ordering::Release);
+    READY.store(true, Ordering::Release);
 
     info!("server is ready to accept connections");
 

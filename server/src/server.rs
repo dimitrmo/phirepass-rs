@@ -127,7 +127,7 @@ fn start_http_server(
 
         info!("listening on: {host}");
 
-        let listener= match tokio::net::TcpListener::bind(host).await {
+        let listener = match tokio::net::TcpListener::bind(host).await {
             Ok(listener) => listener,
             Err(err) => {
                 warn!("error listening on host: {err}");

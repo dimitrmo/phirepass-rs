@@ -17,3 +17,4 @@ phirepass-common = { workspace = true, features = ["full"] }
 log = { workspace = true }
 redis = { workspace = true }
 dashmap = { workspace = true }
+bytes = { workspace = true }
