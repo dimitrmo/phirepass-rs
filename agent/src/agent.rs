@@ -59,6 +59,10 @@ pub(crate) async fn login(
     file: Option<PathBuf>,
     from_stdin: bool,
 ) -> anyhow::Result<()> {
+    let server_host = server_host.strip_prefix("https://").unwrap_or(server_host.as_str());
+    let server_host = server_host.strip_prefix("http://").unwrap_or(server_host);
+    let server_host = server_host.strip_prefix("wss://").unwrap_or(server_host);
+    let server_host = server_host.strip_prefix("ws://").unwrap_or(server_host);
     info!("logging in with {server_host}:{server_port}");
 
     let token = if let Some(file_path) = file {
@@ -84,7 +88,7 @@ pub(crate) async fn login(
     let username = whoami::username()?;
     info!("username found: {}", username);
 
-    let ts = TokenStore::new("phirepass", "agent", server_host.as_str())?;
+    let ts = TokenStore::new("phirepass", "agent", server_host)?;
 
     let existing_node_id = match ts.load_state_public() {
         Ok(Some(state)) if state.server_host == server_host && state.node_id != Uuid::nil() => {
