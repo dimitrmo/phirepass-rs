@@ -48,7 +48,7 @@ jobs:
               uses: actions/checkout@v6
 
             - name: Docker builds setup
-              uses: docker/setup-buildx-action@v3
+              uses: docker/setup-buildx-action@v4
 
             - name: Build
               run: cargo build --locked --all-features
@@ -117,7 +117,7 @@ jobs:
                   repo-token: ${{ secrets.GITHUB_TOKEN }}
 
             - name: Docker buildx setup
-              uses: docker/setup-buildx-action@v3
+              uses: docker/setup-buildx-action@v4
 
             - name: QEMU setup
               uses: docker/setup-qemu-action@v4
