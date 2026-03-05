@@ -286,10 +286,15 @@ fn start_ws_connection(
     let env = Arc::clone(&state.env);
     tokio::spawn(async move {
         let mut attempt: u32 = 0;
+
         let server_host = env.server_host.clone();
+        let server_host = env.server_host
+            .split_once("://")
+            .map(|(_, rest)| rest)
+            .unwrap_or(server_host.as_str());
 
         loop {
-            let creds_result = load_creds_for_server(server_host.as_str());
+            let creds_result = load_creds_for_server(server_host);
 
             if let Some((_, node_id, token)) = creds_result {
                 let conn = ws::WebSocketConnection::new(node_id, token);
