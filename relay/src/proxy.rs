@@ -129,15 +129,17 @@ impl WsProxy {
                 .write_response_header(Box::new(header), true)
                 .await?;
         } else {
-            session
-                .respond_error(503)
-                .await?;
+            session.respond_error(503).await?;
         };
 
         Ok(true) // stop processing
     }
 
-    async fn handle_proxy_web_ws(&self, session: &mut Session, ctx: &mut RequestCtx) -> Result<bool> {
+    async fn handle_proxy_web_ws(
+        &self,
+        session: &mut Session,
+        ctx: &mut RequestCtx,
+    ) -> Result<bool> {
         // Handle ws proxy
 
         let req = session.req_header();
@@ -214,22 +216,14 @@ impl ProxyHttp for WsProxy {
         debug!("request path detected: {}", path);
 
         match path {
-            "/healthz" => {
-                self.handle_healthz(session).await
-            },
-            "/readyz" => {
-                self.handle_readyz(session).await
-            },
-            "/api/web/ws" => {
-                self.handle_proxy_web_ws(session, ctx).await
-            },
+            "/healthz" => self.handle_healthz(session).await,
+            "/readyz" => self.handle_readyz(session).await,
+            "/api/web/ws" => self.handle_proxy_web_ws(session, ctx).await,
             _ => {
                 session.respond_error(422).await?;
                 Err(Error::new_str("Unprocessable Content"))
             }
         }
-
-
     }
 }
 
