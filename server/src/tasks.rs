@@ -2,6 +2,7 @@ use crate::http::AppState;
 use log::Level::Debug;
 use log::{debug, info, warn};
 use phirepass_common::stats::Stats;
+use serde_json::json;
 use std::time::{Duration, SystemTime};
 
 const CONNECTION_TIMEOUT: Duration = Duration::from_secs(120);
@@ -96,9 +97,16 @@ pub(crate) fn keep_server_alive_task(state: &AppState) {
         return;
     };
 
+    let stats = json!({
+        "nodes": state.nodes.len(),
+        "connections": state.connections.len(),
+        "sessions": state.tunnel_sessions.len(),
+    })
+    .to_string();
+
     if let Err(err) = state
         .memory_db
-        .save_server(state.id.as_ref(), payload.as_str())
+        .save_server(state.id.as_ref(), payload.as_str(), &stats)
     {
         warn!("failed to save server info: {}", err);
     }

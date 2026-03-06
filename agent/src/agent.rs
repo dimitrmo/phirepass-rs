@@ -288,7 +288,8 @@ fn start_ws_connection(
         let mut attempt: u32 = 0;
 
         let server_host = env.server_host.clone();
-        let server_host = env.server_host
+        let server_host = env
+            .server_host
             .split_once("://")
             .map(|(_, rest)| rest)
             .unwrap_or(server_host.as_str());

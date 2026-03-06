@@ -67,9 +67,14 @@ impl MemoryDB {
             .context("failed to set node connected by updating node stats")
     }
 
-    pub fn save_server(&self, node_id: &Uuid, server_payload: &str) -> anyhow::Result<()> {
+    pub fn save_server(
+        &self,
+        node_id: &Uuid,
+        server_payload: &str,
+        server_stats: &str,
+    ) -> anyhow::Result<()> {
         let server_key = format!("phirepass:servers:{}", node_id);
-        let fields_values = [("server", server_payload)];
+        let fields_values = [("server", server_payload), ("stats", server_stats)];
 
         let _: () = self.with_connection(|connection| {
             let _: () = connection.hset_multiple(&server_key, &fields_values)?;
