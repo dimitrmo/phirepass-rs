@@ -18,15 +18,17 @@ os_info = { version = "3.14.0", optional = true }
 libc = { version = "0.2.182", optional = true }
 netstat2 = { version = "0.11.2", optional = true }
 mac_address = { version = "1.1.8", optional = true }
+axum = { workspace = true, optional = true }
 bytes = { workspace = true, optional = true }
 tokio ={ workspace = true, optional = true }
 uuid = { workspace = true, optional = true }
 
 [features]
-full = ["env", "logger", "node", "protocol", "stats", "time", "runtime", "token", "server"]
+full = ["env", "logger", "node", "protocol", "stats", "time", "runtime", "token", "server", "ip"]
 env = []
 token = []
 server = []
+ip = ["dep:axum"]
 logger = ["dep:serde", "stats"]
 node = ["dep:serde", "dep:uuid", "stats"]
 runtime = ["dep:tokio"]

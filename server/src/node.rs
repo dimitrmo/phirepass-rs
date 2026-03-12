@@ -13,6 +13,7 @@ use axum_client_ip::ClientIp;
 use chrono::Utc;
 use futures_util::{SinkExt, StreamExt};
 use log::{debug, info, warn};
+use phirepass_common::ip::resolve_client_ip;
 use phirepass_common::protocol::common::{Frame, FrameData};
 use phirepass_common::protocol::node::{NodeFrameData, WebFrameId};
 use phirepass_common::protocol::web::WebFrameData;
@@ -29,10 +30,12 @@ use uuid::Uuid;
 
 pub(crate) async fn ws_node_handler(
     State(state): State<AppState>,
-    ClientIp(ip): ClientIp,
+    ClientIp(client_ip): ClientIp,
     headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
+    let ip = resolve_client_ip(&headers, client_ip);
+
     debug!("All websocket headers {:?}", headers);
     debug!("Client IP {:?}", ip);
     for (name, value) in headers.iter() {

@@ -3296,6 +3296,7 @@ name = "phirepass-common"
 version = "0.1.146"
 dependencies = [
  "anyhow",
+ "axum",
  "bytes",
  "env_logger",
  "get_if_addrs",

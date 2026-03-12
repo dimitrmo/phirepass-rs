@@ -8,6 +8,7 @@ use axum_client_ip::ClientIp;
 use bytes::Bytes;
 use futures_util::{SinkExt, StreamExt};
 use log::{debug, info, warn};
+use phirepass_common::ip::resolve_client_ip;
 use phirepass_common::protocol::common::{Frame, FrameData, FrameError};
 use phirepass_common::protocol::node::NodeFrameData;
 use phirepass_common::protocol::web::WebFrameData;
@@ -18,10 +19,12 @@ use uuid::Uuid;
 
 pub(crate) async fn ws_web_handler(
     State(state): State<AppState>,
-    ClientIp(ip): ClientIp,
+    ClientIp(client_ip): ClientIp,
     headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> impl axum::response::IntoResponse {
+    let ip = resolve_client_ip(&headers, client_ip);
+
     let protocols: Vec<String> = headers
         .get(SEC_WEBSOCKET_PROTOCOL)
         .and_then(|value| value.to_str().ok())
