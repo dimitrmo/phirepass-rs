@@ -3229,7 +3229,7 @@ dependencies = [
 
 [[package]]
 name = "phirepass"
-version = "0.1.149"
+version = "0.1.150"
 dependencies = [
  "anyhow",
  "argon2",
@@ -3271,7 +3271,7 @@ dependencies = [
 
 [[package]]
 name = "phirepass-agent"
-version = "0.1.149"
+version = "0.1.150"
 dependencies = [
  "anyhow",
  "axum",
@@ -3304,7 +3304,7 @@ dependencies = [
 
 [[package]]
 name = "phirepass-channel"
-version = "0.1.149"
+version = "0.1.150"
 dependencies = [
  "bytes",
  "gloo-timers",
@@ -3317,7 +3317,7 @@ dependencies = [
 
 [[package]]
 name = "phirepass-common"
-version = "0.1.149"
+version = "0.1.150"
 dependencies = [
  "anyhow",
  "axum",
@@ -3339,7 +3339,7 @@ dependencies = [
 
 [[package]]
 name = "phirepass-relay"
-version = "0.1.149"
+version = "0.1.150"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3357,7 +3357,7 @@ dependencies = [
 
 [[package]]
 name = "phirepass-server"
-version = "0.1.149"
+version = "0.1.150"
 dependencies = [
  "anyhow",
  "argon2",
