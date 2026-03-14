@@ -37,7 +37,7 @@ Rust workspace for the Phirepass remote-access relay. The system has three main 
 
 ## Configuration
 
-Server env (defaults): `APP_MODE=development|production`, `IP_SOURCE=ConnectInfo|XForwardedFor|Forwarded`, `HOST=0.0.0.0`, `PORT=8080`, `FQDN=localhost`, `ACCESS_CONTROL_ALLOW_ORIGIN`, `DATABASE_URL`, `DATABASE_MAX_CONNECTIONS=5`, `REDIS_DATABASE_URL`, `NODE_JWT_SECRET`, `NODE_JWT_TTL_SECS=300`, `NODE_CHALLENGE_TTL_SECS=60`.
+Server env (defaults): `APP_MODE=development|production`, `IP_SOURCE=ConnectInfo|XForwardedFor|Forwarded`, `HOST=0.0.0.0`, `PORT=8080`, `FQDN=localhost`, `ACCESS_CONTROL_ALLOW_ORIGIN`, `DATABASE_URL`, `DATABASE_MAX_CONNECTIONS=5`, `REDIS_DATABASE_URL`, `JWT_SECRET`, `NODE_JWT_TTL_SECS=300`, `NODE_CHALLENGE_TTL_SECS=60`.
 
 Agent env (defaults): `APP_MODE=development|production`, `HOST=0.0.0.0`, `PORT=8081`, `STATS_REFRESH_INTERVAL=30`, `PING_INTERVAL=30`, `SERVER_HOST=api.phirepass.com`, `SERVER_PORT=443`, `SSH_HOST=localhost`, `SSH_PORT=22`, `SSH_AUTH_METHOD=password`, `SSH_INACTIVITY_PERIOD=3600`.
 
@@ -155,13 +155,8 @@ CREATE TABLE public.auth_challenges (
 CREATE EXTENSION IF NOT EXISTS pg_cron;
 
 SELECT cron.schedule(
-           'phirepass-auth-challenge-cleanup',
-           '* * * * *', -- every minute
-           $$DELETE FROM auth_challenges WHERE expires_at <= NOW();$$
-       );
+   'phirepass-auth-challenge-cleanup',
+   '* * * * *', -- every minute
+   $$DELETE FROM auth_challenges WHERE expires_at <= NOW();$$
+);
 ```
-
-## Testing
-
-local-test token
-pat_LDCdDUdMfl1D.APfnvMMVZZSj560k-xkiXZ6PObDmt4OIY8dvetLk9JE

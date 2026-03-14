@@ -1,66 +1,30 @@
 # Plan
 
 ## Objective
-Move node authentication to a zero-trust model where:
-- PAT is used only once for bootstrap claim.
-- Node identity is persistent and cryptographic (Ed25519 key pair generated locally by agent).
-- Runtime auth is challenge-response plus short-lived JWT.
-- WebSocket node auth uses JWT, not PAT.
-- Private keys never leave the agent host.
+Keep zero-trust node auth stable and production-ready.
 
-## What Has Been Done
-- Added node claim endpoint: `POST /api/nodes/claim`.
-- Added challenge-response endpoints:
-  - `POST /api/nodes/auth/challenge`
-  - `POST /api/nodes/auth/verify`
-- Added JWT-protected heartbeat endpoint:
-  - `POST /api/nodes/heartbeat`
-- Switched node WebSocket first-frame auth to JWT.
-- Added DB support for challenge storage and claim lookups.
-- Added migrations:
-  - `0001_step1_nodes_claim.sql`
-  - `0002_step1_pat_scope_support.sql`
-  - `0003_step2_auth_challenges.sql`
-  - `0004_drop_legacy_nodes_columns.sql`
-- Removed legacy node columns from `nodes` table (`token_id`, `name`) via migration.
-- Updated server code paths to use current `nodes` schema (not legacy columns).
-- Improved claim endpoint error semantics:
-  - `400` for invalid request payload
-  - `401` for credential/scope failures
-  - `500` for internal/database claim failures
-- Added anti-enumeration behavior for `/api/nodes/auth/challenge`:
-  - uniform success response for unknown/revoked `node_id`
-  - challenge persistence only for active, non-revoked nodes
-- Added anti-enumeration behavior for `/api/nodes/auth/verify`:
-  - uniform `401 authentication failed` response for node/challenge/signature auth failures
-- Operational decision: rate limiting is implemented at the load balancer layer (not in app handlers).
-- Updated agent flow:
-  - bootstrap claim with PAT
-  - local keypair persistence
-  - runtime challenge signing and JWT retrieval
-  - JWT passed in websocket auth frame
-- Added database-side challenge cleanup via Postgres `pg_cron` job.
+## Implemented
+- PAT bootstrap only via `/api/nodes/claim`.
+- Runtime challenge/verify/JWT flow in place.
+- WebSocket node auth uses JWT.
+- Anti-enumeration behavior added for `challenge` and `verify`.
+- Structured auth/claim error codes added.
+- Rate limiting decision: enforced at load balancer layer.
+- DB cleanup for expired challenges handled via Postgres `pg_cron`.
 
-## Current State
-- Server and agent compile with the new flow.
-- Claim/challenge/verify/websocket auth path is working in local testing.
-- PAT scope required for claim: `server:register`.
+## Remaining Actions
+1. Stabilize server tests (current top priority).
+   - Fix DB test setup so `cargo test -p phirepass-server` is green.
+   - Current failure pattern: multiple SQL statements executed in one prepared query.
+2. Add request correlation for auth paths.
+   - Introduce request IDs in logs/responses for easier production debugging.
+3. Add concise E2E runbook.
+   - Document a minimal claim -> challenge -> verify -> websocket validation flow.
+4. Ops follow-up.
+   - Validate LB rate-limit behavior in production monitoring/logs.
 
-## What Still Needs To Be Done
-- Security hardening:
-  - Validate and monitor LB rate-limit rules in production metrics/logging.
-- Documentation updates beyond schema:
-  - Update README sections that still describe legacy auth behavior.
-  - Add explicit end-to-end testing docs for claim/challenge/verify/ws.
-- Tests:
-  - Add integration tests for claim idempotency and challenge replay prevention.
-  - Add regression tests for websocket auth with JWT.
-- Operational polish:
-  - Add request IDs or structured error codes to claim/auth responses for easier debugging.
-
-## Quick Resume Checklist
-1. Ensure migrations up to `0004` are applied in Postgres.
-2. Start server with `NODE_JWT_SECRET` set.
-3. Run `phirepass-agent login` with PAT that has `server:register`.
-4. Start agent and confirm websocket auth success.
-5. Continue with hardening and tests listed above.
+## Quick Resume
+1. Ensure database schema is current in your environment.
+2. Verify server starts with required env (`JWT_SECRET`, DB/Redis URLs).
+3. Run `phirepass-agent login` with PAT scope `server:register`.
+4. Run `cargo test -p phirepass-server` and fix remaining failures first.

@@ -31,8 +31,8 @@ pub(crate) struct Env {
     #[envconfig(from = "REDIS_DATABASE_URL")]
     pub redis_database_url: String,
 
-    #[envconfig(from = "NODE_JWT_SECRET")]
-    pub node_jwt_secret: String,
+    #[envconfig(from = "JWT_SECRET")]
+    pub jwt_secret: String,
 
     #[envconfig(from = "NODE_JWT_TTL_SECS", default = "300")]
     pub node_jwt_ttl_secs: i64,

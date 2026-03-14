@@ -1,6 +1,6 @@
+use crate::db::postgres::Database;
 use crate::env::Env;
 use crate::http::AppState;
-use crate::db::postgres::Database;
 use axum::Json;
 use axum::extract::{Extension, Request, State};
 use axum::http::StatusCode;
@@ -278,7 +278,7 @@ async fn authenticate_node_jwt_with(
 
     let claims = decode::<NodeJwtClaims>(
         token,
-        &DecodingKey::from_secret(env.node_jwt_secret.as_bytes()),
+        &DecodingKey::from_secret(env.jwt_secret.as_bytes()),
         &validation,
     )?
     .claims;
@@ -334,7 +334,7 @@ fn issue_node_jwt(env: &Env, node_id: Uuid) -> anyhow::Result<(String, chrono::D
     let token = encode(
         &Header::new(Algorithm::HS256),
         &claims,
-        &EncodingKey::from_secret(env.node_jwt_secret.as_bytes()),
+        &EncodingKey::from_secret(env.jwt_secret.as_bytes()),
     )?;
 
     Ok((token, expires_at))
