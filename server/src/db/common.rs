@@ -14,11 +14,12 @@ pub struct TokenRecord {
     pub scopes: Vec<String>,
 }
 
-#[derive(Debug, sqlx::FromRow, Serialize, Deserialize)]
+#[derive(Clone, Debug, sqlx::FromRow, Serialize, Deserialize)]
 #[allow(dead_code)]
 pub struct NodeRecord {
     pub id: Uuid,
     pub user_id: Uuid,
+    pub name: Option<String>,
     pub hostname: String,
     pub created_at: DateTime<Utc>,
 }
