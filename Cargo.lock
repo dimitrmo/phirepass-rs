@@ -137,9 +137,9 @@ dependencies = [
 
 [[package]]
 name = "anstyle"
-version = "1.0.13"
+version = "1.0.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5192cca8006f1fd4f7237516f40fa183bb07f8fbdfedaa0036de5ea9b0b45e78"
+checksum = "940b3a0ca603d1eade50a4846a2afffd5ef57a9feac2c0e2ec2e14f9ead76000"
 
 [[package]]
 name = "anstyle-parse"
@@ -550,9 +550,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.2.56"
+version = "1.2.57"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aebf35691d1bfb0ac386a69bac2fde4dd276fb618cf8bf4f5318fe285e821bb2"
+checksum = "7a0dd1ca384932ff3641c8718a02769f1698e7563dc6974ffd03346116310423"
 dependencies = [
  "find-msvc-tools",
  "jobserver",
@@ -663,9 +663,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.5.61"
+version = "4.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "52fa72306bb30daf11bc97773431628e5b4916e97aaa74b7d3f625d4d495da02"
+checksum = "b193af5b67834b676abd72466a96c1024e6a6ad978a1f484bd90b85c94041351"
 dependencies = [
  "clap_builder",
  "clap_derive",
@@ -673,9 +673,9 @@ dependencies = [
 
 [[package]]
 name = "clap_builder"
-version = "4.5.61"
+version = "4.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2071365c5c56eae7d77414029dde2f4f4ba151cf68d5a3261c9a40de428ace93"
+checksum = "714a53001bf66416adb0e2ef5ac857140e7dc3a0c48fb28b2f10762fc4b5069f"
 dependencies = [
  "anstream 1.0.0",
  "anstyle",
@@ -685,9 +685,9 @@ dependencies = [
 
 [[package]]
 name = "clap_derive"
-version = "4.5.61"
+version = "4.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dec5be1eea072311774b7b84ded287adbd9f293f9d23456817605c6042f4f5e0"
+checksum = "1110bd8a634a1ab8cb04345d8d878267d57c3cf1b38d91b71af6686408bbca6a"
 dependencies = [
  "heck",
  "proc-macro2",
@@ -697,9 +697,9 @@ dependencies = [
 
 [[package]]
 name = "clap_lex"
-version = "1.0.1"
+version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e78417baa3b3114dc0e95e7357389a249c4da97c3c2b540700079db6171bfd7"
+checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
 name = "client-ip"
@@ -728,9 +728,9 @@ checksum = "5417da527aa9bf6a1e10a781231effd1edd3ee82f27d5f8529ac9b279babce96"
 
 [[package]]
 name = "colorchoice"
-version = "1.0.4"
+version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b05b61dc5112cbb17e4b6cd61790d9845d13888356391624cbe7e41efeac1e75"
+checksum = "1d07550c9036bf2ae0c684c4297d503f838287c83c53686d05370d0e139ae570"
 
 [[package]]
 name = "combine"
@@ -1145,9 +1145,9 @@ dependencies = [
 
 [[package]]
 name = "digest"
-version = "0.11.1"
+version = "0.11.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "285743a676ccb6b3e116bc14cc69319b957867930ae9c4822f8e0f54509d7243"
+checksum = "4850db49bf08e663084f7fb5c87d202ef91a3907271aff24a94eb97ff039153c"
 dependencies = [
  "block-buffer 0.12.0",
  "const-oid 0.10.2",
@@ -2195,7 +2195,7 @@ checksum = "fe44f2bbd99fcb302e246e2d6bcf51aeda346d02a365f80296a07a8c711b6da6"
 dependencies = [
  "argon2",
  "bcrypt-pbkdf",
- "digest 0.11.1",
+ "digest 0.11.2",
  "ecdsa",
  "ed25519-dalek",
  "hex",
@@ -3269,7 +3269,7 @@ dependencies = [
 
 [[package]]
 name = "phirepass"
-version = "0.1.150"
+version = "0.1.151"
 dependencies = [
  "anyhow",
  "argon2",
@@ -3315,7 +3315,7 @@ dependencies = [
 
 [[package]]
 name = "phirepass-agent"
-version = "0.1.150"
+version = "0.1.151"
 dependencies = [
  "anyhow",
  "axum",
@@ -3351,7 +3351,7 @@ dependencies = [
 
 [[package]]
 name = "phirepass-channel"
-version = "0.1.150"
+version = "0.1.151"
 dependencies = [
  "bytes",
  "gloo-timers",
@@ -3364,7 +3364,7 @@ dependencies = [
 
 [[package]]
 name = "phirepass-common"
-version = "0.1.150"
+version = "0.1.151"
 dependencies = [
  "anyhow",
  "axum",
@@ -3386,7 +3386,7 @@ dependencies = [
 
 [[package]]
 name = "phirepass-relay"
-version = "0.1.150"
+version = "0.1.151"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3404,7 +3404,7 @@ dependencies = [
 
 [[package]]
 name = "phirepass-server"
-version = "0.1.150"
+version = "0.1.151"
 dependencies = [
  "anyhow",
  "argon2",
@@ -4205,7 +4205,7 @@ dependencies = [
  "const-oid 0.10.2",
  "crypto-bigint 0.7.0-rc.18",
  "crypto-primes",
- "digest 0.11.1",
+ "digest 0.11.2",
  "pkcs1 0.8.0-rc.4",
  "pkcs8 0.11.0-rc.11",
  "rand_core 0.10.0-rc-3",
@@ -4694,7 +4694,7 @@ checksum = "3b167252f3c126be0d8926639c4c4706950f01445900c4b3db0fd7e89fcb750a"
 dependencies = [
  "cfg-if",
  "cpufeatures",
- "digest 0.11.1",
+ "digest 0.11.2",
 ]
 
 [[package]]
@@ -4722,7 +4722,7 @@ checksum = "7c5f3b1e2dc8aad28310d8410bd4d7e180eca65fca176c52ab00d364475d0024"
 dependencies = [
  "cfg-if",
  "cpufeatures",
- "digest 0.11.1",
+ "digest 0.11.2",
 ]
 
 [[package]]
@@ -4757,7 +4757,7 @@ version = "3.0.0-rc.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "597a96996ccff7dfa16f052bd995b4cecc72af22c35138738dc029f0ead6608d"
 dependencies = [
- "digest 0.11.1",
+ "digest 0.11.2",
  "rand_core 0.10.0-rc-3",
 ]
 
