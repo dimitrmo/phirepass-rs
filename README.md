@@ -19,12 +19,17 @@ Rust workspace for the Phirepass remote-access relay. The system has three main 
 
 - Frames: 1 byte protocol + 4 byte BE payload length + payload. `Protocol::Control = 0`, `Protocol::SSH = 1`.
 - Control messages web→server: `Heartbeat`, `OpenTunnel`, `TunnelData` (payload for SSH), `Resize`, `TunnelClosed`, `Error`, `Ok`.
-- Control messages server→agent: `Auth` (stubbed), `Heartbeat { stats }`, `OpenTunnel`, `TunnelData`, `Resize`, `Ping/Pong`, `ConnectionDisconnect`, `Frame { frame, cid }`, `Error`, `Ok`.
+- First frame from agent→server on node websocket is `NodeFrameData::Auth { node_id, token=<node-jwt>, version }`.
+- Control messages server→agent after auth: `Heartbeat { stats }`, `OpenTunnel`, `TunnelData`, `Resize`, `Ping/Pong`, `ConnectionDisconnect`, `Frame { frame, cid }`, `Error`, `Ok`.
 - Errors back to web use `WebControlMessage::Error` with kinds `Generic`, `RequiresPassword`.
 
 ## HTTP endpoints (server)
 
 - `GET /api/web/ws` and `GET /api/nodes/ws`: WebSocket upgrades for web clients and nodes.
+- `POST /api/nodes/claim`: PAT bootstrap endpoint (requires `Authorization: Bearer pat_*` with scope `server:register`).
+- `POST /api/nodes/auth/challenge`: returns a one-time challenge for `node_id`.
+- `POST /api/nodes/auth/verify`: verifies Ed25519 signature and returns short-lived node JWT.
+- `POST /api/nodes/heartbeat`: JWT-protected node heartbeat endpoint.
 - `GET /api/nodes`: connected nodes with last heartbeat and stats.
 - `GET /api/connections`: active web connections.
 - `GET /stats`: server process stats plus counts of nodes/connections.
@@ -32,13 +37,20 @@ Rust workspace for the Phirepass remote-access relay. The system has three main 
 
 ## Configuration
 
-Server env (defaults): `APP_MODE=development|production`, `IP_SOURCE=ConnectInfo|XForwardedFor|Forwarded`, `HOST=0.0.0.0`, `PORT=8080`, `STATS_REFRESH_INTERVAL=15`, `ACCESS_CONTROL_ALLOW_ORIGIN` (set in production).
+Server env (defaults): `APP_MODE=development|production`, `IP_SOURCE=ConnectInfo|XForwardedFor|Forwarded`, `HOST=0.0.0.0`, `PORT=8080`, `FQDN=localhost`, `ACCESS_CONTROL_ALLOW_ORIGIN`, `DATABASE_URL`, `DATABASE_MAX_CONNECTIONS=5`, `REDIS_DATABASE_URL`, `NODE_JWT_SECRET`, `NODE_JWT_TTL_SECS=300`, `NODE_CHALLENGE_TTL_SECS=60`.
 
-Agent env (defaults): `APP_MODE=development|production`, `HOST=0.0.0.0`, `PORT=8081`, `PAT_TOKEN` (sent in Auth, not yet enforced server-side), `STATS_REFRESH_INTERVAL=15`, `PING_INTERVAL=30`, `SERVER_HOST=0.0.0.0`, `SERVER_PORT=8080`, `SSH_HOST=0.0.0.0`, `SSH_PORT=22`, `SSH_AUTH_METHOD=credentials_prompt`.
+Agent env (defaults): `APP_MODE=development|production`, `HOST=0.0.0.0`, `PORT=8081`, `STATS_REFRESH_INTERVAL=30`, `PING_INTERVAL=30`, `SERVER_HOST=api.phirepass.com`, `SERVER_PORT=443`, `SSH_HOST=localhost`, `SSH_PORT=22`, `SSH_AUTH_METHOD=password`, `SSH_INACTIVITY_PERIOD=3600`.
 
 ## Agent login
 
-The agent must be authenticated with a node token before starting. Three token input modes are available:
+The agent uses PAT only for bootstrap. During `login`, it:
+- calls `/api/nodes/claim` with PAT,
+- generates and stores a local Ed25519 keypair,
+- stores `node_id` + key material locally.
+
+At runtime, the agent uses challenge-sign-verify to obtain a short-lived JWT and authenticates websocket with that JWT.
+
+PAT input modes for `login`:
 
 - **Interactive prompt** (default): `phirepass-agent login` — prompts for the token interactively.
 - **File input**: `phirepass-agent login --from-file /path/to/token` — reads the token from a file (recommended for Kubernetes/Docker secrets).
@@ -65,7 +77,7 @@ services:
     command: sh -c 'echo $$AGENT_TOKEN | /app/agent login --from-stdin && /app/agent start'
 ```
 
-By default, the container runs `login --from-stdin`, which reads the token and then starts the agent.
+By default, the container runs `login --from-stdin`, which reads the PAT and then starts the agent.
 
 ## Local development
 
@@ -77,8 +89,8 @@ By default, the container runs `login --from-stdin`, which reads the token and t
 
 ## Current gaps and notes
 
-- Node authentication is a stub: `NodeControlMessage::Auth` is received but not validated yet.
-- No persistent storage; node/connection lists are in-memory.
+- Node runtime authentication is challenge-response with short-lived JWT; websocket auth requires a valid node JWT.
+- Node identity metadata/challenges are persisted in Postgres; connection presence is tracked in memory/Redis.
 - Open tasks live in `TASKS.md` (UI, OAuth device flow, PAT revocation, packaging).
 
 ## Directory map
@@ -122,12 +134,21 @@ CREATE TABLE public.pat_tokens (
 CREATE TABLE public.nodes (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   user_id uuid NOT NULL,
-  token_id uuid NOT NULL,
-  name text UNIQUE,
+  public_key text UNIQUE,
+  hostname text NOT NULL DEFAULT ''::text,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  last_seen timestamp with time zone,
+  revoked boolean NOT NULL DEFAULT false,
   created_at timestamp with time zone NOT NULL DEFAULT (now() AT TIME ZONE 'utc'::text),
   CONSTRAINT nodes_pkey PRIMARY KEY (id),
-  CONSTRAINT nodes_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id),
-  CONSTRAINT nodes_token_id_fkey FOREIGN KEY (token_id) REFERENCES public.pat_tokens(id)
+  CONSTRAINT nodes_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id)
+);
+CREATE TABLE public.auth_challenges (
+  node_id uuid NOT NULL,
+  challenge text NOT NULL,
+  expires_at timestamp with time zone NOT NULL,
+  CONSTRAINT auth_challenges_pkey PRIMARY KEY (node_id),
+  CONSTRAINT auth_challenges_node_id_fkey FOREIGN KEY (node_id) REFERENCES public.nodes(id) ON DELETE CASCADE
 );
 ```
 
