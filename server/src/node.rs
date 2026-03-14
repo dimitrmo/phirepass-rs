@@ -51,7 +51,7 @@ async fn wait_for_auth(
     ws_rx: &mut futures_util::stream::SplitStream<WebSocket>,
     tx: &mpsc::Sender<NodeFrameData>,
     state: &AppState,
-    _ip: IpAddr,
+    ip: IpAddr,
 ) -> anyhow::Result<Uuid> {
     // Wait for the first message which must be Auth
     let msg = ws_rx
@@ -86,43 +86,104 @@ async fn wait_for_auth(
         } => {
             info!("auth request received for node {node_id}");
 
-            let mut response: Option<NodeFrameData> = None;
-            let mut correct_node_id = Uuid::nil();
-            let mut auth_ok = false;
-
-            if let Ok(auth) = authenticate_node_jwt(state, token.as_str()).await {
-                correct_node_id = auth.node_id;
-                if auth.node_id.eq(&node_id) {
-                    response = Some(NodeFrameData::AuthResponse {
-                        node_id: correct_node_id,
-                        success: true,
+            let auth = match authenticate_node_jwt(state, token.as_str()).await {
+                Ok(auth) => auth,
+                Err(err) => {
+                    warn!(
+                        "node websocket auth failed: reason=jwt_invalid ip={ip} frame_node_id={node_id} error={err}"
+                    );
+                    tx.send(NodeFrameData::AuthResponse {
+                        node_id: Uuid::nil(),
+                        success: false,
                         version: env::version().to_string(),
-                    });
-                    auth_ok = true;
+                    })
+                    .await
+                    .map_err(|send_err| {
+                        anyhow::anyhow!(
+                            "failed to send auth response after jwt failure: {send_err}"
+                        )
+                    })?;
+
+                    anyhow::bail!("jwt authentication failed for node {node_id}: {err}");
                 }
-            }
-
-            if response.is_none() {
-                response = Some(NodeFrameData::AuthResponse {
-                    node_id: correct_node_id,
-                    success: false,
-                    version: env::version().to_string(),
-                });
-            }
-
-            let Some(response) = response else {
-                anyhow::bail!("failed to generate auth response for node {node_id}");
             };
 
-            tx.send(response)
+            if auth.node_id != node_id {
+                warn!(
+                    "node websocket auth failed: reason=jwt_mismatch ip={ip} frame_node_id={node_id} token_node_id={}",
+                    auth.node_id
+                );
+                tx.send(NodeFrameData::AuthResponse {
+                    node_id: auth.node_id,
+                    success: false,
+                    version: env::version().to_string(),
+                })
                 .await
                 .map_err(|err| anyhow::anyhow!("failed to send auth response: {err}"))?;
 
-            if !auth_ok {
-                anyhow::bail!("authentication failed for node {node_id}")
+                anyhow::bail!(
+                    "jwt node mismatch: frame node {node_id}, token node {}",
+                    auth.node_id
+                );
             }
 
-            Ok(node_id)
+            match state.db.get_node_claim_by_id_optional(&auth.node_id).await {
+                Ok(Some(node_claim)) if !node_claim.revoked => {
+                    tx.send(NodeFrameData::AuthResponse {
+                        node_id: auth.node_id,
+                        success: true,
+                        version: env::version().to_string(),
+                    })
+                    .await
+                    .map_err(|err| anyhow::anyhow!("failed to send auth response: {err}"))?;
+
+                    Ok(node_id)
+                }
+                Ok(Some(_)) => {
+                    warn!(
+                        "node websocket auth failed: reason=node_revoked ip={ip} node_id={node_id}"
+                    );
+                    tx.send(NodeFrameData::AuthResponse {
+                        node_id: auth.node_id,
+                        success: false,
+                        version: env::version().to_string(),
+                    })
+                    .await
+                    .map_err(|err| anyhow::anyhow!("failed to send auth response: {err}"))?;
+
+                    anyhow::bail!("node {node_id} is revoked")
+                }
+                Ok(None) => {
+                    warn!(
+                        "node websocket auth failed: reason=node_missing ip={ip} node_id={node_id}"
+                    );
+                    tx.send(NodeFrameData::AuthResponse {
+                        node_id: auth.node_id,
+                        success: false,
+                        version: env::version().to_string(),
+                    })
+                    .await
+                    .map_err(|err| anyhow::anyhow!("failed to send auth response: {err}"))?;
+
+                    anyhow::bail!("node {node_id} does not exist")
+                }
+                Err(err) => {
+                    warn!(
+                        "node websocket auth failed: reason=db_error ip={ip} node_id={node_id} error={err}"
+                    );
+                    tx.send(NodeFrameData::AuthResponse {
+                        node_id: auth.node_id,
+                        success: false,
+                        version: env::version().to_string(),
+                    })
+                    .await
+                    .map_err(|send_err| {
+                        anyhow::anyhow!("failed to send auth response after db error: {send_err}")
+                    })?;
+
+                    anyhow::bail!("failed to load node {node_id} during websocket auth: {err}")
+                }
+            }
         }
         other => {
             anyhow::bail!("expected Auth as first message, got: {:?}", other);
