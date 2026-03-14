@@ -30,3 +30,7 @@ argon2 = { workspace = true }
 redis = { workspace = true }
 stunclient = { workspace = true }
 local-ip-address = { workspace = true }
+base64 = { workspace = true }
+ed25519-dalek = { workspace = true }
+jsonwebtoken = { workspace = true }
+rand = { workspace = true }

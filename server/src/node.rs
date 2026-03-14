@@ -3,10 +3,12 @@ use crate::db::common::TokenRecord;
 use crate::db::postgres::Database;
 use crate::env;
 use crate::http::AppState;
+use crate::node_auth::authenticate_node_jwt;
 use argon2::{PasswordHash, PasswordVerifier};
 use axum::Json;
 use axum::extract::ws::{Message, WebSocket};
 use axum::extract::{State, WebSocketUpgrade};
+use axum::http::HeaderMap;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum_client_ip::ClientIp;
@@ -20,11 +22,11 @@ use phirepass_common::protocol::web::WebFrameData;
 use phirepass_common::stats::Stats;
 use phirepass_common::token::extract_creds;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use serde_json::json;
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
-use axum::http::HeaderMap;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
@@ -48,7 +50,7 @@ pub(crate) async fn ws_node_handler(
 async fn wait_for_auth(
     ws_rx: &mut futures_util::stream::SplitStream<WebSocket>,
     tx: &mpsc::Sender<NodeFrameData>,
-    db: Arc<Database>,
+    state: &AppState,
     _ip: IpAddr,
 ) -> anyhow::Result<Uuid> {
     // Wait for the first message which must be Auth
@@ -88,19 +90,15 @@ async fn wait_for_auth(
             let mut correct_node_id = Uuid::nil();
             let mut auth_ok = false;
 
-            if let Ok((token_id, token_secret)) = extract_creds(token) {
-                if let Ok(token) = validate_creds(db.clone(), token_id, token_secret).await {
-                    if let Ok(node_record) = db.get_node_by_token_id(&token.id).await {
-                        correct_node_id = node_record.id;
-                        if node_record.id.eq(&node_id) {
-                            response = Some(NodeFrameData::AuthResponse {
-                                node_id: correct_node_id,
-                                success: true,
-                                version: env::version().to_string(),
-                            });
-                            auth_ok = true;
-                        }
-                    }
+            if let Ok(auth) = authenticate_node_jwt(state, token.as_str()).await {
+                correct_node_id = auth.node_id;
+                if auth.node_id.eq(&node_id) {
+                    response = Some(NodeFrameData::AuthResponse {
+                        node_id: correct_node_id,
+                        success: true,
+                        version: env::version().to_string(),
+                    });
+                    auth_ok = true;
                 }
             }
 
@@ -139,7 +137,7 @@ async fn handle_node_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
     let (tx, mut rx) = mpsc::channel::<NodeFrameData>(256);
 
     // Wait for authentication as the first message
-    let node_id = match wait_for_auth(&mut ws_rx, &tx, state.db.clone(), ip).await {
+    let node_id = match wait_for_auth(&mut ws_rx, &tx, &state, ip).await {
         Ok(node_id) => node_id,
         Err(err) => {
             warn!("authentication failed from {ip}: {err}");
@@ -485,39 +483,73 @@ fn now_millis() -> u64 {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct AuthRequest {
-    pub token: String,
-    pub version: String,
-    pub node_id: Option<Uuid>,
+pub struct ClaimNodeRequest {
+    pub public_key: String,
+    pub hostname: String,
+    #[serde(default = "default_metadata")]
+    pub metadata: Value,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-#[allow(dead_code)]
-pub struct AuthResponse {
-    pub node_id: String,
-    pub success: bool,
+fn default_metadata() -> Value {
+    Value::Object(Default::default())
 }
 
 fn unauthorized(value: serde_json::Value) -> Response {
     (StatusCode::UNAUTHORIZED, Json(value)).into_response()
 }
 
+fn bad_request(value: serde_json::Value) -> Response {
+    (StatusCode::BAD_REQUEST, Json(value)).into_response()
+}
+
+fn internal_error(value: serde_json::Value) -> Response {
+    (StatusCode::INTERNAL_SERVER_ERROR, Json(value)).into_response()
+}
+
 fn success(value: serde_json::Value) -> Response {
     (StatusCode::OK, Json(value)).into_response()
+}
+
+fn extract_bearer_token(headers: &HeaderMap) -> anyhow::Result<String> {
+    let header = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .ok_or_else(|| anyhow::anyhow!("missing authorization header"))?;
+
+    let header = header
+        .to_str()
+        .map_err(|_| anyhow::anyhow!("invalid authorization header"))?;
+
+    let token = header
+        .strip_prefix("Bearer ")
+        .ok_or_else(|| anyhow::anyhow!("expected Bearer token"))?
+        .trim();
+
+    if token.is_empty() {
+        anyhow::bail!("bearer token is empty")
+    }
+
+    Ok(token.to_string())
+}
+
+enum CredentialValidationError {
+    Unauthorized(String),
+    Internal(String),
 }
 
 async fn validate_creds(
     db: Arc<Database>,
     token_id: String,
     token_secret: String,
-) -> anyhow::Result<TokenRecord> {
+) -> Result<TokenRecord, CredentialValidationError> {
     info!("validating credentials against postgres");
 
     let token_record = match db.get_token_by_id(token_id.as_str()).await {
         Ok(record) => record,
         Err(err) => {
             warn!("database error while validating token {token_id}: {err}");
-            anyhow::bail!("error while validating token {token_id}")
+            return Err(CredentialValidationError::Internal(
+                "failed to validate token".to_string(),
+            ));
         }
     };
 
@@ -526,7 +558,9 @@ async fn validate_creds(
     if let Some(expires_at) = token_record.expires_at {
         if expires_at < Utc::now() {
             warn!("token {} expired: {:?}", token_id, token_record.expires_at);
-            anyhow::bail!("token has expired")
+            return Err(CredentialValidationError::Unauthorized(
+                "token has expired".to_string(),
+            ));
         }
     }
 
@@ -536,7 +570,9 @@ async fn validate_creds(
         Ok(hash) => hash,
         Err(err) => {
             warn!("failed to parse stored password hash: {}", err);
-            anyhow::bail!("failed to parse stored password hash")
+            return Err(CredentialValidationError::Internal(
+                "failed to parse stored password hash".to_string(),
+            ));
         }
     };
 
@@ -547,7 +583,9 @@ async fn validate_creds(
         .verify_password(token_secret.as_bytes(), &parsed_hash)
     {
         warn!("invalid token secret for token_id={}: {}", token_id, e);
-        anyhow::bail!("failed to verify token")
+        return Err(CredentialValidationError::Unauthorized(
+            "failed to verify token".to_string(),
+        ));
     }
 
     debug!("password verified successfully");
@@ -555,155 +593,122 @@ async fn validate_creds(
     Ok(token_record)
 }
 
-pub async fn login_node(
+pub async fn claim_node(
     State(state): State<AppState>,
-    Json(payload): Json<AuthRequest>,
+    headers: HeaderMap,
+    Json(payload): Json<ClaimNodeRequest>,
 ) -> impl IntoResponse {
-    info!(
-        "authenticating node with token version: {}",
-        payload.version
-    );
+    if payload.public_key.trim().is_empty() {
+        return bad_request(json!({
+            "success": false,
+            "code": "BAD_REQUEST_PUBLIC_KEY_REQUIRED",
+            "error": "public_key is required",
+        }));
+    }
 
-    let (token_id, token_secret) = match extract_creds(payload.token) {
-        Ok((token_id, token_secret)) => (token_id, token_secret),
-        Err(err) => {
-            return unauthorized(json!({
-                "success": false,
-                "error": err.to_string(),
-            }));
-        }
-    };
+    if payload.hostname.trim().is_empty() {
+        return bad_request(json!({
+            "success": false,
+            "code": "BAD_REQUEST_HOSTNAME_REQUIRED",
+            "error": "hostname is required",
+        }));
+    }
 
-    info!("credentials extracted [id={}, secret=***]", token_id);
-
-    let token = match validate_creds(state.db.clone(), token_id, token_secret).await {
+    let bearer = match extract_bearer_token(&headers) {
         Ok(token) => token,
         Err(err) => {
             return unauthorized(json!({
                 "success": false,
+                "code": "AUTH_HEADER_INVALID",
                 "error": err.to_string(),
             }));
         }
     };
 
-    info!("token ready {}", token.id);
-
-    if let Some(node_id) = payload.node_id {
-        let node = match state.db.get_node_by_token_id(&token.id).await {
-            Ok(record) => record,
-            Err(err) => {
-                warn!("error getting node by token id: {err}");
-                return unauthorized(json!({
-                    "success": false,
-                    "error": err.to_string(),
-                }));
-            }
-        };
-
-        if node.id != node_id {
-            warn!("node_id does not match token");
+    let (token_id, token_secret) = match extract_creds(bearer) {
+        Ok(parts) => parts,
+        Err(err) => {
             return unauthorized(json!({
                 "success": false,
-                "error": "node_id does not match token",
+                "code": "AUTH_TOKEN_FORMAT_INVALID",
+                "error": err.to_string(),
             }));
         }
+    };
 
-        info!("node ready {}", node.id);
+    let token = match validate_creds(state.db.clone(), token_id, token_secret).await {
+        Ok(token) => token,
+        Err(CredentialValidationError::Unauthorized(err)) => {
+            return unauthorized(json!({
+                "success": false,
+                "code": "AUTH_TOKEN_UNAUTHORIZED",
+                "error": err,
+            }));
+        }
+        Err(CredentialValidationError::Internal(err)) => {
+            return internal_error(json!({
+                "success": false,
+                "code": "AUTH_TOKEN_VALIDATION_FAILED",
+                "error": err,
+            }));
+        }
+    };
 
-        return success(json!({
-            "success": true,
-            "node_id": node.id,
+    if !token.scopes.iter().any(|scope| scope == "server:register") {
+        return unauthorized(json!({
+            "success": false,
+            "code": "AUTH_SCOPE_MISSING",
+            "error": "missing required scope: server:register",
         }));
     }
 
-    let node = match state.db.create_node_from_token_exclusive(&token).await {
-        Ok(record) => record,
+    if let Some(existing) = match state
+        .db
+        .get_node_by_public_key(payload.public_key.trim())
+        .await
+    {
+        Ok(result) => result,
         Err(err) => {
-            warn!(
-                "failed to create exclusive node for token {}: {}",
-                token.id, err
-            );
+            warn!("failed to query node by public key: {err}");
+            return internal_error(json!({
+                "success": false,
+                "code": "CLAIM_LOOKUP_FAILED",
+                "error": "failed to check node claim",
+            }));
+        }
+    } {
+        if existing.user_id != token.user_id {
             return unauthorized(json!({
                 "success": false,
-                "error": err.to_string(),
+                "code": "CLAIM_PUBLIC_KEY_OWNERSHIP_CONFLICT",
+                "error": "public key already claimed by another user",
+            }));
+        }
+    }
+
+    let node = match state
+        .db
+        .claim_node_by_public_key(
+            token.user_id,
+            payload.public_key.trim(),
+            payload.hostname.trim(),
+            &payload.metadata,
+        )
+        .await
+    {
+        Ok(node) => node,
+        Err(err) => {
+            warn!("failed to claim node: {err}");
+            return internal_error(json!({
+                "success": false,
+                "code": "CLAIM_WRITE_FAILED",
+                "error": "failed to claim node",
             }));
         }
     };
-
-    info!("node ready {}", node.id);
 
     success(json!({
         "success": true,
         "node_id": node.id,
     }))
-}
-
-#[derive(Deserialize)]
-pub struct LogoutRequest {
-    pub node_id: Uuid,
-    pub token: String,
-}
-
-pub async fn logout_node(
-    State(state): State<AppState>,
-    Json(payload): Json<LogoutRequest>,
-) -> impl IntoResponse {
-    info!("logout request for node {}", payload.node_id);
-
-    // Validate token
-    let (token_id, token_secret) = match extract_creds(payload.token) {
-        Ok((token_id, token_secret)) => (token_id, token_secret),
-        Err(err) => {
-            return unauthorized(json!({
-                "success": false,
-                "error": err.to_string(),
-            }));
-        }
-    };
-
-    // Validate credentials
-    let token_record = match validate_creds(state.db.clone(), token_id, token_secret).await {
-        Ok(record) => record,
-        Err(err) => {
-            return unauthorized(json!({
-                "success": false,
-                "error": err.to_string(),
-            }));
-        }
-    };
-
-    let node_record = match state.db.get_node_by_token_id(&token_record.id).await {
-        Ok(record) => record,
-        Err(err) => {
-            return unauthorized(json!({
-                "success": false,
-                "error": err.to_string(),
-            }));
-        }
-    };
-
-    if node_record.id != payload.node_id {
-        return unauthorized(json!({
-            "success": false,
-            "error": "node_id does not match token",
-        }));
-    }
-
-    // Delete the node
-    match state.db.delete_node(&node_record.id).await {
-        Ok(_) => {
-            info!("node {} successfully deleted", node_record.id);
-            success(json!({
-                "success": true,
-                "message": "Node deleted and token is now available for reuse"
-            }))
-        }
-        Err(err) => {
-            warn!("failed to delete node {}: {}", payload.node_id, err);
-            unauthorized(json!({
-                "success": false,
-                "error": err.to_string(),
-            }))
-        }
-    }
 }

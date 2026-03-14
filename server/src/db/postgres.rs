@@ -1,9 +1,12 @@
+use crate::db::common::AuthChallengeRecord;
+use crate::db::common::NodeClaimRecord;
 use crate::db::common::NodeRecord;
 use crate::db::common::TokenRecord;
 use crate::env::Env;
 use anyhow::Context;
 use argon2::Argon2;
 use log::warn;
+use serde_json::Value;
 use sqlx::PgPool;
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use std::str::FromStr;
@@ -76,49 +79,11 @@ impl Database {
         Ok(new_pool)
     }
 
-    pub async fn create_node_from_token(&self, token: &TokenRecord) -> anyhow::Result<NodeRecord> {
-        let name = format!("node-{}", Uuid::new_v4().to_string()[..8].to_string());
-        let pool = self.ensure_pool().await.context("failed to ensure pool")?;
-        let node_record = sqlx::query_as::<_, NodeRecord>(
-            r#"
-            INSERT INTO nodes (user_id, token_id, name)
-            VALUES ($1, $2, $3)
-            RETURNING *
-            "#,
-        )
-        .persistent(false)
-        .bind(token.user_id)
-        .bind(token.id)
-        .bind(name)
-        .fetch_one(&pool)
-        .await
-        .context("failed to create node from token")?;
-
-        Ok(node_record)
-    }
-
-    pub async fn create_node_from_token_exclusive(
-        &self,
-        token: &TokenRecord,
-    ) -> anyhow::Result<NodeRecord> {
-        if let Ok(existing_node) = self.get_node_by_token_id(&token.id).await {
-            anyhow::bail!(
-                "Token is already in use by node {}. \
-                 Please close the existing connection or logout first before using this token again.",
-                existing_node.id
-            );
-        }
-
-        self.create_node_from_token(token)
-            .await
-            .context("failed to create node from token exclusively")
-    }
-
     pub async fn get_node_by_id(&self, node_id: &Uuid) -> anyhow::Result<NodeRecord> {
         let pool = self.ensure_pool().await.context("failed to ensure pool")?;
         let node_record = sqlx::query_as::<_, NodeRecord>(
             r#"
-            SELECT *
+            SELECT id, user_id, hostname, created_at
             FROM nodes
             WHERE id = $1
             "#,
@@ -128,24 +93,6 @@ impl Database {
         .fetch_one(&pool)
         .await
         .context("failed to retrieve node by id")?;
-
-        Ok(node_record)
-    }
-
-    pub async fn get_node_by_token_id(&self, token_id: &Uuid) -> anyhow::Result<NodeRecord> {
-        let pool = self.ensure_pool().await?;
-        let node_record = sqlx::query_as::<_, NodeRecord>(
-            r#"
-            SELECT *
-            FROM nodes
-            WHERE token_id = $1
-            "#,
-        )
-        .persistent(false)
-        .bind(token_id)
-        .fetch_one(&pool)
-        .await
-        .context("failed to retrieve node by token id")?;
 
         Ok(node_record)
     }
@@ -168,11 +115,183 @@ impl Database {
         Ok(token_record)
     }
 
-    pub async fn delete_node(&self, node_id: &Uuid) -> anyhow::Result<()> {
+    pub async fn get_node_by_public_key(
+        &self,
+        public_key: &str,
+    ) -> anyhow::Result<Option<NodeClaimRecord>> {
         let pool = self.ensure_pool().await.context("failed to ensure pool")?;
+        let node_record = sqlx::query_as::<_, NodeClaimRecord>(
+            r#"
+            SELECT id, user_id, public_key, hostname, metadata, created_at, last_seen, revoked
+            FROM nodes
+            WHERE public_key = $1
+            "#,
+        )
+        .persistent(false)
+        .bind(public_key)
+        .fetch_optional(&pool)
+        .await
+        .context("failed to retrieve node by public key")?;
+
+        Ok(node_record)
+    }
+
+    pub async fn claim_node_by_public_key(
+        &self,
+        user_id: Uuid,
+        public_key: &str,
+        hostname: &str,
+        metadata: &Value,
+    ) -> anyhow::Result<NodeClaimRecord> {
+        let pool = self.ensure_pool().await.context("failed to ensure pool")?;
+
+        let node_record = sqlx::query_as::<_, NodeClaimRecord>(
+            r#"
+            INSERT INTO nodes (user_id, public_key, hostname, metadata)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (public_key)
+            DO UPDATE SET
+                hostname = EXCLUDED.hostname,
+                metadata = EXCLUDED.metadata
+            RETURNING id, user_id, public_key, hostname, metadata, created_at, last_seen, revoked
+            "#,
+        )
+        .persistent(false)
+        .bind(user_id)
+        .bind(public_key)
+        .bind(hostname)
+        .bind(metadata)
+        .fetch_one(&pool)
+        .await
+        .context("failed to claim node by public key")?;
+
+        Ok(node_record)
+    }
+
+    pub async fn get_node_claim_by_id(&self, node_id: &Uuid) -> anyhow::Result<NodeClaimRecord> {
+        let pool = self.ensure_pool().await.context("failed to ensure pool")?;
+
+        let node_record = sqlx::query_as::<_, NodeClaimRecord>(
+            r#"
+            SELECT id, user_id, public_key, hostname, metadata, created_at, last_seen, revoked
+            FROM nodes
+            WHERE id = $1
+            "#,
+        )
+        .persistent(false)
+        .bind(node_id)
+        .fetch_one(&pool)
+        .await
+        .context("failed to retrieve node claim by id")?;
+
+        Ok(node_record)
+    }
+
+    pub async fn get_node_claim_by_id_optional(
+        &self,
+        node_id: &Uuid,
+    ) -> anyhow::Result<Option<NodeClaimRecord>> {
+        let pool = self.ensure_pool().await.context("failed to ensure pool")?;
+
+        let node_record = sqlx::query_as::<_, NodeClaimRecord>(
+            r#"
+            SELECT id, user_id, public_key, hostname, metadata, created_at, last_seen, revoked
+            FROM nodes
+            WHERE id = $1
+            "#,
+        )
+        .persistent(false)
+        .bind(node_id)
+        .fetch_optional(&pool)
+        .await
+        .context("failed to retrieve node claim by id")?;
+
+        Ok(node_record)
+    }
+
+    pub async fn upsert_auth_challenge(
+        &self,
+        node_id: &Uuid,
+        challenge: &str,
+        expires_at: chrono::DateTime<chrono::Utc>,
+    ) -> anyhow::Result<()> {
+        let pool = self.ensure_pool().await.context("failed to ensure pool")?;
+
         sqlx::query(
             r#"
-            DELETE FROM nodes
+            INSERT INTO auth_challenges (node_id, challenge, expires_at)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (node_id)
+            DO UPDATE SET
+                challenge = EXCLUDED.challenge,
+                expires_at = EXCLUDED.expires_at
+            "#,
+        )
+        .persistent(false)
+        .bind(node_id)
+        .bind(challenge)
+        .bind(expires_at)
+        .execute(&pool)
+        .await
+        .context("failed to upsert auth challenge")?;
+
+        Ok(())
+    }
+
+    pub async fn get_auth_challenge(
+        &self,
+        node_id: &Uuid,
+        challenge: &str,
+    ) -> anyhow::Result<Option<AuthChallengeRecord>> {
+        let pool = self.ensure_pool().await.context("failed to ensure pool")?;
+
+        let challenge_record = sqlx::query_as::<_, AuthChallengeRecord>(
+            r#"
+            SELECT node_id, challenge, expires_at
+            FROM auth_challenges
+            WHERE node_id = $1 AND challenge = $2
+            "#,
+        )
+        .persistent(false)
+        .bind(node_id)
+        .bind(challenge)
+        .fetch_optional(&pool)
+        .await
+        .context("failed to get auth challenge")?;
+
+        Ok(challenge_record)
+    }
+
+    pub async fn consume_auth_challenge(
+        &self,
+        node_id: &Uuid,
+        challenge: &str,
+    ) -> anyhow::Result<()> {
+        let pool = self.ensure_pool().await.context("failed to ensure pool")?;
+
+        sqlx::query(
+            r#"
+            DELETE FROM auth_challenges
+            WHERE node_id = $1 AND challenge = $2
+            "#,
+        )
+        .persistent(false)
+        .bind(node_id)
+        .bind(challenge)
+        .execute(&pool)
+        .await
+        .context("failed to consume auth challenge")?;
+
+        Ok(())
+    }
+
+    pub async fn touch_node_last_seen(&self, node_id: &Uuid) -> anyhow::Result<()> {
+        let pool = self.ensure_pool().await.context("failed to ensure pool")?;
+
+        sqlx::query(
+            r#"
+            UPDATE nodes
+            SET last_seen = NOW()
             WHERE id = $1
             "#,
         )
@@ -180,7 +299,7 @@ impl Database {
         .bind(node_id)
         .execute(&pool)
         .await
-        .context("failed to delete node by id")?;
+        .context("failed to update node last_seen")?;
 
         Ok(())
     }

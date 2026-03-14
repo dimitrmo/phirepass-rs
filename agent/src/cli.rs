@@ -14,7 +14,7 @@ pub(crate) enum Commands {
     Start(StartArgs),
     /// Login
     Login(LoginArgs),
-    /// Logout and delete node from server
+    /// Logout and delete local node identity
     Logout(LogoutArgs),
     /// Print version information
     Version,

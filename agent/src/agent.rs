@@ -1,14 +1,18 @@
-use crate::creds::TokenStore;
+use crate::creds::{StoredState, TokenStore};
 use crate::env::Env;
 use crate::http::{AppState, get_version};
 use crate::ws;
 use anyhow::Context;
 use axum::Router;
 use axum::routing::get;
+use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use ed25519_dalek::{Signer, SigningKey};
 use log::{info, warn};
 use phirepass_common::stats::Stats;
 use phirepass_common::token::mask_after_10;
-use secrecy::{ExposeSecret, SecretString};
+use secrecy::SecretString;
+use serde::Deserialize;
 use serde_json::json;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -65,7 +69,7 @@ pub(crate) async fn login(
         .unwrap_or(server_host.as_str());
     info!("logging in with {server_host}:{server_port}");
 
-    let token = if let Some(file_path) = file {
+    let pat = if let Some(file_path) = file {
         info!("reading token from file: {}", file_path.display());
         if !file_path.exists() {
             return Err(anyhow::anyhow!("file does not exist"));
@@ -83,7 +87,7 @@ pub(crate) async fn login(
         rpassword::prompt_password("Enter authentication token: ")?
     };
 
-    save_token(server_host, server_port, token.as_str()).await
+    bootstrap_identity(server_host, server_port, pat.as_str()).await
 }
 
 pub(crate) async fn save_token(
@@ -91,174 +95,39 @@ pub(crate) async fn save_token(
     server_port: u16,
     token: &str,
 ) -> anyhow::Result<()> {
-    info!("token found: {}", mask_after_10(token));
+    let server_host = server_host
+        .split_once("://")
+        .map(|(_, rest)| rest)
+        .unwrap_or(server_host);
 
-    let username = whoami::username()?;
-    info!("username found: {}", username);
-
-    let ts = TokenStore::new("phirepass", "agent", server_host)?;
-
-    let existing_node_id = match ts.load_state_public() {
-        Ok(Some(state)) if state.server_host == server_host && state.node_id != Uuid::nil() => {
-            Some(state.node_id)
-        }
-        _ => None,
-    };
-
-    info!("existing node id: {:?}", existing_node_id);
-
-    let url = match server_port {
-        443 | 8443 => format!("https://{}/api/nodes/login", server_host),
-        port => format!("http://{}:{}/api/nodes/login", server_host, port),
-    };
-
-    info!("authenticating with server at {}", url);
-
-    let client = reqwest::Client::new();
-    let mut payload = json!({
-        "token": token,
-        "version": crate::env::version(),
-    });
-
-    if let Some(node_id) = existing_node_id {
-        info!("sending node id as well");
-        payload["node_id"] = json!(node_id);
-    }
-
-    let response = client.post(&url).json(&payload).send().await?;
-
-    if !response.status().is_success() {
-        warn!("response unsuccessful");
-
-        let status = response.status();
-        let body_text = response.text().await.unwrap_or_default();
-        let body = serde_json::from_str::<serde_json::Value>(&body_text)
-            .unwrap_or_else(|_| json!({ "raw": body_text }));
-
-        let error_message = body
-            .get("error")
-            .and_then(|v| v.as_str())
-            .unwrap_or("authentication failed");
-
-        warn!("authentication failed [code={}, message={}]", status, error_message);
-
-        let err_lower = error_message.to_ascii_lowercase();
-        let should_clear = err_lower.contains("expired")
-            || err_lower.contains("revoked")
-            || err_lower.contains("invalid token")
-            || err_lower.contains("failed to verify token")
-            || err_lower.contains("token has expired");
-
-        if should_clear {
-            ts.delete().context("failed to delete local credentials")?;
-            info!("local credentials deleted due to token failure");
-        }
-
-        anyhow::bail!("authentication failed ({}): {}", status, error_message);
-    }
-
-    let body = response.json::<serde_json::Value>().await?;
-
-    let node_id_str = if let Some(node_id_val) = body.get("node_id") {
-        if let Some(s) = node_id_val.as_str() {
-            s.to_string()
-        } else {
-            serde_json::from_value::<Uuid>(node_id_val.clone())
-                .map(|uuid| uuid.to_string())
-                .map_err(|e| anyhow::anyhow!("Invalid node_id format in response: {}", e))?
-        }
-    } else {
-        anyhow::bail!("node_id not found in response")
-    };
-
-    info!("successfully authenticated node_id={node_id_str}");
-
-    ts.save(&node_id_str, &SecretString::from(token))
-        .context("failed to save token")?;
-
-    info!("successfully saved credentials for node_id={}", node_id_str);
-
-    Ok(())
+    bootstrap_identity(server_host, server_port, token.trim()).await
 }
 
-pub(crate) fn load_creds_for_server(server_host: &str) -> Option<(String, Uuid, SecretString)> {
-    info!("loading credentials for server {server_host}");
-
-    let username = whoami::username().ok()?;
-    info!("username found: {}", username);
-
+pub(crate) fn load_creds_for_server(server_host: &str) -> Option<(String, StoredState)> {
     let ts = TokenStore::new("phirepass", "agent", server_host).ok()?;
 
     match ts.load() {
-        Ok((node_id, token)) => Some((server_host.to_string(), node_id, token)),
-        Err(e) => {
-            warn!("failed to load credentials: {}", e);
+        Ok(state) => Some((server_host.to_string(), state)),
+        Err(err) => {
+            warn!("failed to load node identity: {}", err);
             None
         }
     }
 }
 
 pub(crate) async fn logout(server_host: String, server_port: u16) -> anyhow::Result<()> {
-    info!("logging out from {server_host}:{server_port}");
-
-    let username = whoami::username()?;
-    info!("username found: {}", username);
+    let _ = server_port;
 
     let ts = TokenStore::new("phirepass", "agent", server_host.as_str())?;
-
-    // Load current credentials
-    let (node_id, token) = ts
+    let _ = ts
         .load()
         .context("no active login found - please login first")?;
 
-    info!("loaded credentials for node {node_id}");
+    ts.delete().context("failed to delete local identity")?;
+    info!("local identity deleted");
+    println!("Successfully logged out locally.");
 
-    let scheme = if server_port == 443 { "https" } else { "http" };
-    let url = format!(
-        "{}://{}:{}/api/nodes/logout",
-        scheme, server_host, server_port
-    );
-
-    info!("sending logout request to {}", url);
-
-    let client = reqwest::Client::new();
-    let response = client
-        .post(&url)
-        .json(&json!({
-            "node_id": node_id,
-            "token": token.expose_secret(),
-        }))
-        .send()
-        .await?;
-
-    let status = response.status();
-    let body_text = response.text().await.unwrap_or_default();
-    let body = serde_json::from_str::<serde_json::Value>(&body_text)
-        .unwrap_or_else(|_| json!({ "raw": body_text }));
-
-    let server_ok = status.is_success()
-        && body
-            .get("success")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-
-    if server_ok {
-        info!("successfully logged out from server");
-    } else {
-        warn!("logout request rejected by server: {:?}", body);
-    }
-
-    // Delete local credentials regardless of server response
-    ts.delete().context("failed to delete local credentials")?;
-
-    info!("local credentials deleted - token is now free for use with another node");
-    println!("Successfully logged out locally. Token is now available for reuse.");
-
-    if server_ok {
-        Ok(())
-    } else {
-        anyhow::bail!("logout request rejected by server: {:?}", body)
-    }
+    Ok(())
 }
 
 fn start_http_server(
@@ -305,22 +174,29 @@ fn start_ws_connection(
         loop {
             let creds_result = load_creds_for_server(server_host);
 
-            if let Some((_, node_id, token)) = creds_result {
-                let conn = ws::WebSocketConnection::new(node_id, token);
-                tokio::select! {
-                    res = conn.connect(Arc::clone(&env)) => {
-                        match res {
-                            Ok(()) => warn!("ws connection ended, attempting reconnect"),
-                            Err(err) => warn!("ws client error: {err}, attempting reconnect"),
+            if let Some((_, identity)) = creds_result {
+                match fetch_session_jwt(&env, &identity).await {
+                    Ok(session_token) => {
+                        let conn = ws::WebSocketConnection::new(identity.node_id, session_token);
+                        tokio::select! {
+                            res = conn.connect(Arc::clone(&env)) => {
+                                match res {
+                                    Ok(()) => warn!("ws connection ended, attempting reconnect"),
+                                    Err(err) => warn!("ws client error: {err}, attempting reconnect"),
+                                }
+                            }
+                            _ = shutdown.recv() => {
+                                info!("ws connection shutting down");
+                                break;
+                            }
                         }
                     }
-                    _ = shutdown.recv() => {
-                        info!("ws connection shutting down");
-                        break;
+                    Err(err) => {
+                        warn!("failed to obtain node session token: {err}");
                     }
                 }
             } else {
-                warn!("credentials not found");
+                warn!("node identity not found");
                 info!("please login first");
             }
 
@@ -335,6 +211,189 @@ fn start_ws_connection(
             }
         }
     })
+}
+
+#[derive(Debug, Deserialize)]
+struct ClaimResponse {
+    node_id: Uuid,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChallengeResponse {
+    challenge: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct VerifyResponse {
+    access_token: String,
+}
+
+#[derive(Debug)]
+struct LocalIdentity {
+    private_key: String,
+    public_key: String,
+}
+
+fn generate_identity() -> LocalIdentity {
+    let mut rng = rand::rngs::OsRng;
+    let signing_key = SigningKey::generate(&mut rng);
+
+    let private_key = URL_SAFE_NO_PAD.encode(signing_key.to_bytes());
+    let public_key = URL_SAFE_NO_PAD.encode(signing_key.verifying_key().to_bytes());
+
+    LocalIdentity {
+        private_key,
+        public_key,
+    }
+}
+
+fn local_hostname() -> String {
+    std::env::var("HOSTNAME")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "unknown-host".to_string())
+}
+
+fn generate_http_endpoint(server_host: &str, server_port: u16) -> String {
+    let server_host = server_host
+        .split_once("://")
+        .map(|(_, rest)| rest)
+        .unwrap_or(server_host);
+
+    let scheme = match server_port {
+        443 | 8443 => "https",
+        _ => "http",
+    };
+
+    if matches!(server_port, 80 | 443 | 8443) {
+        format!("{}://{}", scheme, server_host)
+    } else {
+        format!("{}://{}:{}", scheme, server_host, server_port)
+    }
+}
+
+async fn bootstrap_identity(
+    server_host: &str,
+    server_port: u16,
+    pat_token: &str,
+) -> anyhow::Result<()> {
+    info!("token found: {}", mask_after_10(pat_token));
+
+    let username = whoami::username()?;
+    let identity = generate_identity();
+    let hostname = local_hostname();
+
+    let client = reqwest::Client::new();
+    let base_url = generate_http_endpoint(server_host, server_port);
+
+    let claim: ClaimResponse = post_with_pat(
+        &client,
+        &format!("{}/api/nodes/claim", base_url),
+        pat_token,
+        &json!({
+            "public_key": identity.public_key,
+            "hostname": hostname,
+            "metadata": {
+                "agent_version": crate::env::version(),
+                "user": username,
+            }
+        }),
+    )
+    .await
+    .context("failed to claim node identity")?;
+
+    let ts = TokenStore::new("phirepass", "agent", server_host)?;
+    ts.save_identity(claim.node_id, identity.private_key, identity.public_key)
+        .context("failed to persist local node identity")?;
+
+    info!(
+        "node identity bootstrap complete; node_id={}",
+        claim.node_id
+    );
+    Ok(())
+}
+
+async fn fetch_session_jwt(env: &Env, state: &StoredState) -> anyhow::Result<SecretString> {
+    let base_url = generate_http_endpoint(&env.server_host, env.server_port);
+    let client = reqwest::Client::new();
+
+    let challenge: ChallengeResponse = post_json(
+        &client,
+        &format!("{}/api/nodes/auth/challenge", base_url),
+        &json!({ "node_id": state.node_id }),
+    )
+    .await
+    .context("failed to request auth challenge")?;
+
+    let private_key_bytes = URL_SAFE_NO_PAD
+        .decode(&state.private_key)
+        .context("invalid private key encoding")?;
+
+    let private_key_bytes: [u8; 32] = private_key_bytes
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("private key must decode to 32 bytes"))?;
+
+    let signing_key = SigningKey::from_bytes(&private_key_bytes);
+    let signature = signing_key.sign(challenge.challenge.as_bytes());
+    let signature = URL_SAFE_NO_PAD.encode(signature.to_bytes());
+
+    let verify: VerifyResponse = post_json(
+        &client,
+        &format!("{}/api/nodes/auth/verify", base_url),
+        &json!({
+            "node_id": state.node_id,
+            "challenge": challenge.challenge,
+            "signature": signature,
+        }),
+    )
+    .await
+    .context("failed to verify auth challenge")?;
+
+    Ok(SecretString::from(verify.access_token))
+}
+
+async fn post_with_pat<T: for<'de> Deserialize<'de>>(
+    client: &reqwest::Client,
+    url: &str,
+    pat: &str,
+    body: &serde_json::Value,
+) -> anyhow::Result<T> {
+    let response = client.post(url).bearer_auth(pat).json(body).send().await?;
+
+    parse_json_response(response).await
+}
+
+async fn post_json<T: for<'de> Deserialize<'de>>(
+    client: &reqwest::Client,
+    url: &str,
+    body: &serde_json::Value,
+) -> anyhow::Result<T> {
+    let response = client.post(url).json(body).send().await?;
+    parse_json_response(response).await
+}
+
+async fn parse_json_response<T: for<'de> Deserialize<'de>>(
+    response: reqwest::Response,
+) -> anyhow::Result<T> {
+    let status = response.status();
+    let body_text = response.text().await.unwrap_or_default();
+
+    if !status.is_success() {
+        let body = serde_json::from_str::<serde_json::Value>(&body_text)
+            .unwrap_or_else(|_| json!({ "raw": body_text }));
+
+        let error = body
+            .get("error")
+            .and_then(|value| value.as_str())
+            .unwrap_or("request failed");
+
+        anyhow::bail!("request failed ({}): {}", status, error);
+    }
+
+    let parsed = serde_json::from_str::<T>(&body_text)
+        .map_err(|err| anyhow::anyhow!("failed to decode response json: {err}"))?;
+
+    Ok(parsed)
 }
 
 fn spawn_stats_logger(

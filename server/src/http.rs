@@ -163,7 +163,7 @@ pub async fn list_nodes(State(state): State<AppState>) -> impl IntoResponse {
             let (id, info) = entry.pair();
             json!({
                 "id": id,
-                "name": &info.node_record.name,
+                "name": info.node_record.hostname,
                 "ip": info.node.ip,
                 "server_id": info.server_id,
                 "connected_for_secs": now

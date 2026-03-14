@@ -66,6 +66,10 @@ local-ip-address = { workspace = true }
 pingora = { workspace = true }
 http = { workspace = true }
 async-trait = { workspace = true }
+base64 = { workspace = true }
+ed25519-dalek = { workspace = true }
+jsonwebtoken = { workspace = true }
+rand = { workspace = true }
 
 [workspace.dependencies]
 thiserror = "2.0.18"
@@ -106,6 +110,10 @@ local-ip-address = "0.6.10"
 pingora = { version = "0.8.0", features = ["proxy"] }
 http = "1.4.0"
 async-trait = "0.1.89"
+base64 = "0.22.1"
+ed25519-dalek = { version = "2.2.0", features = ["rand_core"] }
+jsonwebtoken = "9.3.1"
+rand = "0.8.5"
 
 [profile.release]
 lto = "fat"

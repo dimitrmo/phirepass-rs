@@ -3,6 +3,7 @@ export RUST_BACKTRACE=full
 export APP_MODE=development
 export SERVER_HOST=localhost
 export SERVER_PORT=8080
+export JWT_SECRET=something
 
 server:
 	cargo run --bin server -- start
