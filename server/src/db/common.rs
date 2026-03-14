@@ -19,8 +19,7 @@ pub struct TokenRecord {
 pub struct NodeRecord {
     pub id: Uuid,
     pub user_id: Uuid,
-    pub token_id: Uuid,
-    pub name: String,
+    pub hostname: String,
     pub created_at: DateTime<Utc>,
 }
 

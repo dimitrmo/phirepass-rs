@@ -83,7 +83,7 @@ impl Database {
         let pool = self.ensure_pool().await.context("failed to ensure pool")?;
         let node_record = sqlx::query_as::<_, NodeRecord>(
             r#"
-            SELECT *
+            SELECT id, user_id, hostname, created_at
             FROM nodes
             WHERE id = $1
             "#,
@@ -147,8 +147,8 @@ impl Database {
 
         let node_record = sqlx::query_as::<_, NodeClaimRecord>(
             r#"
-            INSERT INTO nodes (user_id, token_id, name, public_key, hostname, metadata)
-            VALUES ($1, NULL, NULL, $2, $3, $4)
+            INSERT INTO nodes (user_id, public_key, hostname, metadata)
+            VALUES ($1, $2, $3, $4)
             ON CONFLICT (public_key)
             DO UPDATE SET
                 hostname = EXCLUDED.hostname,

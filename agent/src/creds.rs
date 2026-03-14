@@ -1,8 +1,8 @@
 use anyhow::Context;
+use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use directories::ProjectDirs;
 use log::{debug, info, warn};
-use phirepass_common::token::extract_creds;
-use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
@@ -20,31 +20,21 @@ pub struct TokenStore {
 #[derive(Serialize, Deserialize, Default, Debug, Clone)]
 pub struct StoredState {
     pub node_id: Uuid,
-    pub token: String,
+    pub private_key: String,
+    pub public_key: String,
     #[serde(default)]
-    pub server_host: String, // track which server these creds are for
+    pub server_host: String,
 }
 
 impl TokenStore {
     pub fn new(org: &str, app: &str, service: &str) -> std::io::Result<Self> {
         let proj = ProjectDirs::from("com", org, app)
-            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::Other, "No project dirs"))?;
+            .ok_or_else(|| std::io::Error::other("No project dirs"))?;
 
         let dir = proj.data_local_dir();
         fs::create_dir_all(dir)?;
 
-        debug!(
-            "creating token store in {}",
-            dir.join("stats.json").display()
-        );
-
-        if let Ok(exists) = fs::exists(dir) {
-            debug!("directory {dir:?} exists: {exists}");
-        }
-
-        if let Ok(exists) = fs::exists(dir.join("state.json")) {
-            debug!("directory {:?} exists: {}", dir.join("state.json"), exists);
-        }
+        debug!("creating identity store in {}", dir.join("state.json").display());
 
         Ok(Self {
             service: service.to_string(),
@@ -52,70 +42,47 @@ impl TokenStore {
         })
     }
 
-    /// Save node_id and token to the state file.
-    pub fn save(&self, node_id: &str, tok: &SecretString) -> anyhow::Result<()> {
-        debug!("saving credentials");
-
-        let node_id = Uuid::parse_str(node_id).map_err(|e| {
-            anyhow::anyhow!(
-                "Invalid node_id format: '{}'. Expected valid UUID. Error: {}",
-                node_id,
-                e
-            )
-        })?;
-
-        debug!("node id parsed {node_id}");
-
+    pub fn save_identity(
+        &self,
+        node_id: Uuid,
+        private_key: String,
+        public_key: String,
+    ) -> anyhow::Result<()> {
         let state = StoredState {
             node_id,
-            token: tok.expose_secret().to_owned(),
+            private_key,
+            public_key,
             server_host: self.service.clone(),
         };
 
         self.save_state(&state)
     }
 
-    pub fn load(&self) -> anyhow::Result<(Uuid, SecretString)> {
-        debug!("loading credentials");
+    pub fn load(&self) -> anyhow::Result<StoredState> {
+        debug!("loading node identity");
 
         let state = self.load_state()?.unwrap_or_default();
 
         if !state.server_host.is_empty() && state.server_host != self.service {
             anyhow::bail!(
-                "Server mismatch: credentials are for '{}' but attempting to connect to '{}'. \
-                 please login to the correct server or clear credentials.",
+                "Server mismatch: identity is for '{}' but attempting to connect to '{}'",
                 state.server_host,
                 self.service
             );
         }
 
         if state.node_id == Uuid::nil() {
-            anyhow::bail!(
-                "Stored node_id is nil (uninitialized). Token store needs to be re-initialized via login."
-            );
+            anyhow::bail!("stored node_id is nil; run login first")
         }
 
-        if state.token.is_empty() {
-            anyhow::bail!("stored token is empty. Please login again.");
-        }
+        validate_b64_len(&state.private_key, 32, "private_key")?;
+        validate_b64_len(&state.public_key, 32, "public_key")?;
 
-        let token = SecretString::from(state.token);
-
-        // Validate token format using extract_creds
-        extract_creds(token.expose_secret().to_string()).context(
-            "token format validation failed. token may be corrupted. please login again.",
-        )?;
-
-        Ok((state.node_id, token))
+        Ok(state)
     }
 
     pub fn delete(&self) -> std::io::Result<()> {
         self.delete_state_file()
-    }
-
-    /// Public version of load_state for retrieving raw state without validation
-    pub fn load_state_public(&self) -> anyhow::Result<Option<StoredState>> {
-        self.load_state()
     }
 
     fn load_state(&self) -> anyhow::Result<Option<StoredState>> {
@@ -133,12 +100,8 @@ impl TokenStore {
                 Ok(s) => Ok(Some(s)),
                 Err(e) => {
                     warn!(
-                        "Failed to deserialize state from {:?}: {}. Error details: line {}, column {}. \
-                         This may indicate state file corruption. Resetting state.",
-                        self.state_path,
-                        e,
-                        e.line(),
-                        e.column()
+                        "Failed to deserialize state from {:?}: {}. Resetting state.",
+                        self.state_path, e
                     );
                     Ok(None)
                 }
@@ -157,24 +120,35 @@ impl TokenStore {
     }
 }
 
+fn validate_b64_len(value: &str, expected_len: usize, field: &str) -> anyhow::Result<()> {
+    let decoded = URL_SAFE_NO_PAD
+        .decode(value)
+        .with_context(|| format!("failed to decode {}", field))?;
+
+    if decoded.len() != expected_len {
+        anyhow::bail!(
+            "{} decoded to {} bytes, expected {}",
+            field,
+            decoded.len(),
+            expected_len
+        );
+    }
+
+    Ok(())
+}
+
 fn atomic_write(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
     let dir = path
         .parent()
-        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::Other, "No parent dir"))?;
+        .ok_or_else(|| std::io::Error::other("No parent dir"))?;
 
-    // Ensure directory permissions are secure (owner only: 0o700)
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        if dir.exists() {
-            match fs::set_permissions(dir, fs::Permissions::from_mode(0o700)) {
-                Ok(_) => {
-                    debug!("Set directory permissions to 0o700 (owner only)");
-                }
-                Err(e) => {
-                    warn!("Could not set directory permissions to 0o700: {}", e);
-                }
-            }
+        if dir.exists()
+            && let Err(e) = fs::set_permissions(dir, fs::Permissions::from_mode(0o700))
+        {
+            warn!("Could not set directory permissions to 0o700: {}", e);
         }
     }
 
@@ -187,7 +161,6 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
         use std::os::unix::fs::PermissionsExt;
         tmp.as_file()
             .set_permissions(fs::Permissions::from_mode(0o600))?;
-        debug!("Set state file permissions to 0o600 (owner read/write only)");
     }
 
     tmp.persist(path).map_err(|e| e.error)?;
@@ -196,5 +169,5 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
 }
 
 fn io_other<E: std::fmt::Display>(e: E) -> std::io::Error {
-    std::io::Error::new(std::io::ErrorKind::Other, e.to_string())
+    std::io::Error::other(e.to_string())
 }

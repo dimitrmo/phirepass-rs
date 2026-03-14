@@ -68,7 +68,7 @@ impl NodeConnection {
 
         let payload = json!({
             "id": self.node_record.id,
-            "name": self.node_record.name,
+            "name": self.node_record.hostname,
             "ip": self.node.ip,
             "server_id": self.server_id,
             "connected_for_secs": now
