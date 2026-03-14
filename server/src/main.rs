@@ -7,6 +7,7 @@ mod env;
 mod error;
 mod http;
 mod node;
+mod node_auth;
 mod server;
 mod stun;
 mod tasks;

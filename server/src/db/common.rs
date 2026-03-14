@@ -42,3 +42,11 @@ pub struct NodeClaimRecord {
     pub last_seen: Option<DateTime<Utc>>,
     pub revoked: bool,
 }
+
+#[derive(Debug, sqlx::FromRow)]
+#[allow(dead_code)]
+pub struct AuthChallengeRecord {
+    pub node_id: Uuid,
+    pub challenge: String,
+    pub expires_at: DateTime<Utc>,
+}
