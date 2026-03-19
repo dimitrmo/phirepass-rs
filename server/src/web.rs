@@ -46,13 +46,56 @@ pub(crate) async fn ws_web_handler(
     ws.on_upgrade(move |socket| handle_web_socket(socket, state, ip))
 }
 
-async fn handle_web_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
-    let cid = Uuid::new_v4();
+async fn wait_for_auth(
+    ws_rx: &mut futures_util::stream::SplitStream<WebSocket>,
+    tx: &mpsc::Sender<WebFrameData>,
+    state: &AppState,
+    ip: IpAddr,
+) -> anyhow::Result<Uuid> {
+    let msg = ws_rx
+        .next()
+        .await
+        .ok_or_else(|| anyhow::anyhow!("connection closed before auth"))??;
 
+    let data = match msg {
+        Message::Binary(data) => data,
+        Message::Close(reason) => {
+            anyhow::bail!("connection closed before auth: {:?}", reason);
+        }
+        _ => {
+            anyhow::bail!("expected binary message for auth, got: {:?}", msg);
+        }
+    };
+
+    let frame = Frame::decode(&data)?;
+
+    let web_frame = match frame.data {
+        FrameData::Web(data) => data,
+        FrameData::Node(_) => {
+            anyhow::bail!("expected node frame for auth, got web frame");
+        }
+    };
+
+    match web_frame {
+        _ => todo!(),
+    }
+
+    Ok(Uuid::new_v4())
+}
+
+async fn handle_web_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
     let (mut ws_tx, mut ws_rx) = socket.split();
 
-    // bounded channel so slow clients cannot grow memory unbounded.
     let (tx, mut rx) = mpsc::channel::<WebFrameData>(256);
+
+    let cid = match wait_for_auth(&mut ws_rx, &tx, &state, ip).await {
+        Ok(uuid) => uuid,
+        Err(err) => {
+            warn!("authenticated failed from {ip}: {err}");
+            let _ = ws_tx.close().await;
+            return;
+        }
+    };
 
     {
         state
@@ -104,6 +147,7 @@ async fn handle_web_messages(
     state: &AppState,
     cid: Uuid,
 ) {
+    //
     while let Some(msg) = ws_rx.next().await {
         let msg = match msg {
             Ok(msg) => msg,
@@ -134,6 +178,21 @@ async fn handle_web_messages(
                 match web_frame {
                     WebFrameData::Heartbeat => {
                         update_web_heartbeat(&state, &cid).await;
+                    }
+                    WebFrameData::Auth { .. } => {
+                        // auth already handled before.
+                        // any attempt to reauthenticate will result in connection shutdown
+                        // might allow this in the future
+                        warn!(
+                            "received auth request which is invalid if sent by web client more than once"
+                        );
+                        break;
+                    }
+                    WebFrameData::AuthResponse { .. } => {
+                        warn!(
+                            "received auth response which is invalid if sent by web client"
+                        );
+                        break;
                     }
                     WebFrameData::OpenTunnel {
                         protocol,

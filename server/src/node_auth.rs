@@ -303,6 +303,7 @@ fn verify_signature(public_key: &str, challenge: &str, signature: &str) -> anyho
     let pk = URL_SAFE_NO_PAD
         .decode(public_key)
         .map_err(|_| anyhow::anyhow!("invalid public key encoding"))?;
+
     let sig = URL_SAFE_NO_PAD
         .decode(signature)
         .map_err(|_| anyhow::anyhow!("invalid signature encoding"))?;
@@ -313,6 +314,7 @@ fn verify_signature(public_key: &str, challenge: &str, signature: &str) -> anyho
 
     let verifying_key =
         VerifyingKey::from_bytes(&pk).map_err(|_| anyhow::anyhow!("invalid ed25519 public key"))?;
+
     let signature =
         Signature::from_slice(&sig).map_err(|_| anyhow::anyhow!("invalid ed25519 signature"))?;
 

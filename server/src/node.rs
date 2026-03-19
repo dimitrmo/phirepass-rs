@@ -53,7 +53,6 @@ async fn wait_for_auth(
     state: &AppState,
     ip: IpAddr,
 ) -> anyhow::Result<Uuid> {
-    // Wait for the first message which must be Auth
     let msg = ws_rx
         .next()
         .await
@@ -194,10 +193,8 @@ async fn wait_for_auth(
 async fn handle_node_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
     let (mut ws_tx, mut ws_rx) = socket.split();
 
-    // Bounded channel to avoid unbounded memory growth if the node socket is back-pressured.
     let (tx, mut rx) = mpsc::channel::<NodeFrameData>(256);
 
-    // Wait for authentication as the first message
     let node_id = match wait_for_auth(&mut ws_rx, &tx, &state, ip).await {
         Ok(node_id) => node_id,
         Err(err) => {

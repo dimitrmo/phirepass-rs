@@ -5,11 +5,28 @@ use crate::protocol::sftp::{
 };
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+use crate::protocol::node::NodeFrameData;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(tag = "type")]
 pub enum WebFrameData {
     Heartbeat, // send from web to server to keep connection alive
+
+    /// user has already logged in and acquired a token,
+    /// and it sends this request to validate
+    /// same token for login
+    Auth {
+        token: String,
+        version: String,
+    },
+
+    /// server must validate token again and again and respond
+    AuthResponse {
+        cid: Uuid,
+        success: bool,
+        version: String,
+    },
 
     OpenTunnel {
         protocol: u8,
@@ -129,7 +146,9 @@ pub enum WebFrameData {
 impl WebFrameData {
     pub fn code(&self) -> u8 {
         match self {
-            WebFrameData::Heartbeat => 10,
+            WebFrameData::Heartbeat => 1,
+            WebFrameData::Auth { .. } => 10,
+            WebFrameData::AuthResponse { .. } => 11,
             WebFrameData::OpenTunnel { .. } => 20,
             WebFrameData::TunnelOpened { .. } => 21,
             WebFrameData::TunnelData { .. } => 22,
