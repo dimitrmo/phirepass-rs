@@ -194,6 +194,7 @@ impl From<u8> for FrameError {
     fn from(value: u8) -> Self {
         match value {
             0 => Self::Generic,
+            10 => Self::Authentication,
             100 => Self::RequiresUsername,
             110 => Self::RequiresPassword,
             _ => Self::Generic,
