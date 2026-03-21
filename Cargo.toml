@@ -113,7 +113,7 @@ async-trait = "0.1.89"
 base64 = "0.22.1"
 ed25519-dalek = { version = "2.2.0", features = ["rand_core"] }
 jsonwebtoken = { version = "10.3.0", features = ["rust_crypto"] }
-rand = "0.9.2"
+rand = "0.8.5"
 
 [profile.release]
 lto = "fat"
@@ -122,12 +122,12 @@ codegen-units = 1
 opt-level = 3
 debug = 0
 strip = "symbols"
-incremental = false    # NEW: Faster final builds when not incrementally compiling
+incremental = false
 
 [profile.dev]
-opt-level = 1          # NEW: Faster dev compilation
-split-debuginfo = "packed"  # NEW: Smaller debug info
+opt-level = 1
+split-debuginfo = "packed"
 
 [profile.bench]
 inherits = "release"
-debug = true           # NEW: Allow profiling
+debug = true
