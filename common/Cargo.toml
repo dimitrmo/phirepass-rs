@@ -32,7 +32,7 @@ ip = ["dep:axum"]
 logger = ["dep:serde", "stats"]
 node = ["dep:serde", "dep:uuid", "stats"]
 runtime = ["dep:tokio"]
-protocol = ["dep:serde", "dep:serde_json", "dep:rmp-serde", "dep:bytes"]
+protocol = ["dep:serde", "dep:serde_json", "dep:rmp-serde", "dep:bytes", "dep:uuid"]
 stats = [
     "dep:get_if_addrs",
     "dep:mac_address",

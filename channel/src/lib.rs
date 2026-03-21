@@ -184,6 +184,15 @@ impl Channel {
         self.callbacks.borrow_mut().on_protocol_message = cb;
     }
 
+    pub fn authenticate(&self, token: String, node_id: String, msg_id: Option<u32>) {
+        self.send_frame_data(WebFrameData::Auth {
+            token,
+            node_id,
+            version: version(),
+            msg_id,
+        })
+    }
+
     pub fn stop_heartbeat(&self) {
         if let Some(interval) = self.state.borrow_mut().heartbeat.take() {
             interval.cancel();

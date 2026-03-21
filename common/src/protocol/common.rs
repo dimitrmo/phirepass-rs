@@ -166,6 +166,7 @@ impl Frame {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FrameError {
     Generic = 0,
+    Authentication = 10,
     RequiresUsername = 100,
     RequiresPassword = 110,
 }

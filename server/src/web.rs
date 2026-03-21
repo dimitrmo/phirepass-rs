@@ -7,15 +7,29 @@ use axum::http::header::SEC_WEBSOCKET_PROTOCOL;
 use axum_client_ip::ClientIp;
 use bytes::Bytes;
 use futures_util::{SinkExt, StreamExt};
+use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
 use log::{debug, info, warn};
 use phirepass_common::ip::resolve_client_ip;
 use phirepass_common::protocol::common::{Frame, FrameData, FrameError};
 use phirepass_common::protocol::node::NodeFrameData;
 use phirepass_common::protocol::web::WebFrameData;
+use serde::Deserialize;
 use std::net::IpAddr;
 use std::time::{Duration, SystemTime};
 use tokio::sync::mpsc;
+use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
+
+#[derive(Debug, Deserialize)]
+struct WebJwtClaims {
+    sub: String,
+    #[allow(dead_code)]
+    exp: usize,
+    #[allow(dead_code)]
+    iat: Option<usize>,
+    #[allow(dead_code)]
+    provider: Option<String>,
+}
 
 pub(crate) async fn ws_web_handler(
     State(state): State<AppState>,
@@ -48,9 +62,8 @@ pub(crate) async fn ws_web_handler(
 
 async fn wait_for_auth(
     ws_rx: &mut futures_util::stream::SplitStream<WebSocket>,
-    tx: &mpsc::Sender<WebFrameData>,
+    tx: &Sender<WebFrameData>,
     state: &AppState,
-    ip: IpAddr,
 ) -> anyhow::Result<Uuid> {
     let msg = ws_rx
         .next()
@@ -72,23 +85,145 @@ async fn wait_for_auth(
     let web_frame = match frame.data {
         FrameData::Web(data) => data,
         FrameData::Node(_) => {
-            anyhow::bail!("expected node frame for auth, got web frame");
+            anyhow::bail!("expected web frame for auth, got node frame");
         }
     };
 
     match web_frame {
-        _ => todo!(),
+        WebFrameData::Auth {
+            token,
+            node_id,
+            msg_id,
+            version,
+        } => {
+            let cid = Uuid::new_v4();
+            info!("authenticating connection {cid} for node {node_id} for version {version}");
+
+            // to enable local dev
+            if !cfg!(debug_assertions) {
+                let claims = validate_jwt(tx, state, &token, cid.clone(), msg_id.clone()).await?;
+                validate_user_node(tx, state, claims, node_id, cid.clone(), msg_id).await?;
+            }
+
+            successful_auth(tx, cid.clone(), version, msg_id).await?;
+
+            Ok(cid)
+        }
+        other => {
+            anyhow::bail!("expected Auth as first message, got: {:?}", other);
+        }
+    }
+}
+
+async fn successful_auth(
+    tx: &Sender<WebFrameData>,
+    cid: Uuid,
+    version: String,
+    msg_id: Option<u32>,
+) -> anyhow::Result<()> {
+    info!("notifying user {cid} for successful authentication");
+
+    tx.send(WebFrameData::AuthSuccess {
+        cid,
+        version,
+        msg_id,
+    })
+    .await
+    .map_err(|err| anyhow::anyhow!("failed to send auth response: {err}"))?;
+
+    Ok(())
+}
+
+async fn validate_jwt(
+    tx: &Sender<WebFrameData>,
+    state: &AppState,
+    token: &str,
+    cid: Uuid,
+    msg_id: Option<u32>,
+) -> anyhow::Result<WebJwtClaims> {
+    match authenticate_web_jwt(state, token).await {
+        Ok(claims) => {
+            info!("websocket auth succeeded for client {cid}");
+            Ok(claims)
+        }
+        Err(err) => {
+            warn!("websocket auth failed for client {cid}: {err}");
+            tx.send(WebFrameData::Error {
+                kind: FrameError::Authentication,
+                message: "failed to validate token".to_string(),
+                msg_id,
+            })
+            .await
+            .map_err(|send_err| {
+                anyhow::anyhow!("failed to send auth response after auth failure: {send_err}")
+            })?;
+            anyhow::bail!("web jwt authentication failed: {err}");
+        }
+    }
+}
+
+async fn validate_user_node(
+    tx: &Sender<WebFrameData>,
+    state: &AppState,
+    claims: WebJwtClaims,
+    node_id: String,
+    cid: Uuid,
+    msg_id: Option<u32>,
+) -> anyhow::Result<()> {
+    let user_id = Uuid::parse_str(claims.sub.as_str())
+        .map_err(|err| anyhow::anyhow!("invalid jwt sub claim: {err}"))?;
+
+    let node_id = Uuid::parse_str(node_id.as_str())
+        .map_err(|err| anyhow::anyhow!("invalid node id: {err}"))?;
+
+    let node = match state.db.get_node_by_id(&node_id).await {
+        Ok(node) => node,
+        Err(err) => {
+            warn!("failed to load node {node_id} for client {cid}: {err}");
+
+            tx.send(WebFrameData::Error {
+                kind: FrameError::Authentication,
+                message: "failed to validate node ownership".to_string(),
+                msg_id,
+            })
+            .await
+            .map_err(|send_err| {
+                anyhow::anyhow!("failed to send node ownership validation error: {send_err}")
+            })?;
+
+            anyhow::bail!("failed to validate node ownership: {err}");
+        }
+    };
+
+    if node.user_id != user_id {
+        warn!("websocket auth failed for client {cid}: user {user_id} does not own node {node_id}");
+
+        tx.send(WebFrameData::Error {
+            kind: FrameError::Authentication,
+            message: "you do not own this node".to_string(),
+            msg_id,
+        })
+        .await
+        .map_err(|send_err| {
+            anyhow::anyhow!("failed to send node ownership error to client: {send_err}")
+        })?;
+
+        anyhow::bail!("user {user_id} does not own node {node_id}");
     }
 
-    Ok(Uuid::new_v4())
+    info!("websocket node ownership validated for client {cid} on node {node_id}");
+
+    Ok(())
 }
 
 async fn handle_web_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
+    info!("handling web socket connection for {ip}");
+
     let (mut ws_tx, mut ws_rx) = socket.split();
 
     let (tx, mut rx) = mpsc::channel::<WebFrameData>(256);
 
-    let cid = match wait_for_auth(&mut ws_rx, &tx, &state, ip).await {
+    let cid = match wait_for_auth(&mut ws_rx, &tx, &state).await {
         Ok(uuid) => uuid,
         Err(err) => {
             warn!("authenticated failed from {ip}: {err}");
@@ -132,11 +267,11 @@ async fn handle_web_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
         }
     });
 
-    // Handle messages in separate function to ensure cleanup always happens
+    // Handle messages in a separate function to ensure cleanup always happens
     handle_web_messages(&mut ws_rx, &state, cid).await;
 
-    // Always abort write task regardless of how we exited message loop
-    drop(tx); // Close sender first to wake write task
+    // Always abort a write task regardless of how we exited the message loop
+    drop(tx); // Close sender first to wake a write task
     write_task.abort();
     disconnect_web_client(&state, &cid).await;
 }
@@ -181,17 +316,15 @@ async fn handle_web_messages(
                     }
                     WebFrameData::Auth { .. } => {
                         // auth already handled before.
-                        // any attempt to reauthenticate will result in connection shutdown
+                        // any attempt to reauthenticate will result in a connection shutdown
                         // might allow this in the future
                         warn!(
                             "received auth request which is invalid if sent by web client more than once"
                         );
                         break;
                     }
-                    WebFrameData::AuthResponse { .. } => {
-                        warn!(
-                            "received auth response which is invalid if sent by web client"
-                        );
+                    WebFrameData::AuthSuccess { .. } => {
+                        warn!("received auth success which is invalid if sent by web client");
                         break;
                     }
                     WebFrameData::OpenTunnel {
@@ -769,4 +902,26 @@ async fn notify_nodes_client_disconnect(state: &AppState, cid: &Uuid) {
             }
         }
     }
+}
+
+async fn authenticate_web_jwt(state: &AppState, token: &str) -> anyhow::Result<WebJwtClaims> {
+    let mut validation = Validation::new(Algorithm::HS256);
+    validation.validate_exp = true;
+    validation.required_spec_claims = ["exp".to_string()].into();
+
+    let claims = decode::<WebJwtClaims>(
+        token,
+        &DecodingKey::from_secret(state.env.jwt_secret.as_bytes()),
+        &validation,
+    )?
+    .claims;
+
+    let user_id = Uuid::parse_str(claims.sub.as_str())
+        .map_err(|err| anyhow::anyhow!("invalid jwt sub claim: {err}"))?;
+
+    if !state.db.user_exists(&user_id).await? {
+        anyhow::bail!("user not found")
+    }
+
+    Ok(claims)
 }

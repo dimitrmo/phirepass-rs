@@ -22,7 +22,7 @@ const tabButtons = document.querySelectorAll(".tab-button");
 
 const wsScheme = window.location.protocol === "https:" ? "wss" : "ws";
 
-const wsEndpoint = `${wsScheme}://${window.location.hostname}:8000`;
+const wsEndpoint = `${wsScheme}://${window.location.hostname}:8080`;
 const httpEndpoint = `${window.location.protocol}//${window.location.hostname}:8080`;
 
 let term, fitAddon;
@@ -409,7 +409,7 @@ function connectSFTP() {
     const channel = new PhirepassChannel(`${wsEndpoint}/api/web/ws`, selected_node_id_sftp);
 
     channel.on_connection_open(() => {
-        channel.start_heartbeat();
+        // channel.start_heartbeat();
         // Don't open tunnel here - wait for credentials
         log("SFTP WebSocket connected");
         setStatus("Awaiting credentials...", "info");
@@ -587,9 +587,10 @@ function connect() {
 
     const channel = new PhirepassChannel(`${wsEndpoint}/api/web/ws`, selected_node_id);
 
+    const TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIyNzFmZjM0Ni0wOWY4LTQ1MjUtOWIzZi0xMzVjNGNjYTZjNWEiLCJwcm92aWRlciI6ImdpdGh1YiIsImlhdCI6MTc3NDA3NDgzMiwiZXhwIjoxNzc0Njc5NjMyfQ.9KhBradDX-exN_INopkhaBF7X1rLw4TOLMJH9DLM0B8"
+
     channel.on_connection_open(() => {
-        channel.start_heartbeat();
-        channel.open_ssh_tunnel(selected_node_id);
+        channel.authenticate(TOKEN, selected_node_id);
         log("WebSocket connected");
         setStatus("Connecting to node...", "info");
     });
@@ -618,6 +619,12 @@ function connect() {
 
     channel.on_protocol_message((frame) => {
         switch (frame.data.web.type) {
+            case "AuthSuccess":
+                console.log(frame)
+                log(`Authenticated connection id ${frame.data.web.cid}`);
+                channel.start_heartbeat();
+                channel.open_ssh_tunnel(selected_node_id);
+                break;
             case "TunnelData":
                 if (!isSshConnected) {
                     isSshConnected = true;

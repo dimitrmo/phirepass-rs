@@ -6,41 +6,43 @@ use crate::protocol::sftp::{
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use crate::protocol::node::NodeFrameData;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(tag = "type")]
 pub enum WebFrameData {
-    Heartbeat, // send from web to server to keep connection alive
+    Heartbeat, // send it from web to server to keep the connection alive
 
-    /// user has already logged in and acquired a token,
+    /// a user has already logged in and acquired a token,
     /// and it sends this request to validate
-    /// same token for login
+    /// the same token for login via websockets
     Auth {
         token: String,
+        node_id: String,
         version: String,
+        msg_id: Option<u32>,
     },
 
-    /// server must validate token again and again and respond
-    AuthResponse {
+    /// server validates token, validates node ownership and responds with success,
+    /// else with auth error
+    AuthSuccess {
         cid: Uuid,
-        success: bool,
         version: String,
+        msg_id: Option<u32>,
     },
 
     OpenTunnel {
         protocol: u8,
         node_id: String,
-        msg_id: Option<u32>, // custom web user supplied. easier to track responses and map them to requests
         username: Option<String>, // optional username for auth
         password: Option<String>, // optional password for auth
-    }, // open a tunnel to node by id - send form web to server
+        msg_id: Option<u32>, // custom web user supplied. easier to track responses and map them to requests
+    }, // open a tunnel to node by id - send from web to server
 
     TunnelOpened {
         protocol: u8,
         sid: u32,
         msg_id: Option<u32>, // echo back the user supplied msg_id
-    }, // notify web that tunnel is opened
+    }, // notify web that a tunnel is opened
 
     TunnelData {
         protocol: u8,
@@ -53,14 +55,14 @@ pub enum WebFrameData {
         protocol: u8,
         sid: u32,
         msg_id: Option<u32>, // echo back the user supplied msg_id
-    }, // notify web that tunnel is closed
+    }, // notify web that the tunnel is closed
 
     SSHWindowResize {
         node_id: String,
         sid: u32,
         cols: u32,
         rows: u32,
-    }, // resize a tunnel's pty ( only for SSH tunnel ) - request sent from web to server
+    }, // resize a tunnel's pty (only for the SSH tunnel) - request sent from web to server
 
     SFTPList {
         node_id: String,
@@ -148,7 +150,7 @@ impl WebFrameData {
         match self {
             WebFrameData::Heartbeat => 1,
             WebFrameData::Auth { .. } => 10,
-            WebFrameData::AuthResponse { .. } => 11,
+            WebFrameData::AuthSuccess { .. } => 11,
             WebFrameData::OpenTunnel { .. } => 20,
             WebFrameData::TunnelOpened { .. } => 21,
             WebFrameData::TunnelData { .. } => 22,

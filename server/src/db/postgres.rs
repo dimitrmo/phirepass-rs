@@ -115,6 +115,26 @@ impl Database {
         Ok(token_record)
     }
 
+    pub async fn user_exists(&self, user_id: &Uuid) -> anyhow::Result<bool> {
+        let pool = self.ensure_pool().await.context("failed to ensure pool")?;
+        let exists = sqlx::query_scalar::<_, bool>(
+            r#"
+            SELECT EXISTS(
+                SELECT 1
+                FROM users
+                WHERE id = $1
+            )
+            "#,
+        )
+        .persistent(false)
+        .bind(user_id)
+        .fetch_one(&pool)
+        .await
+        .context("failed to check user existence")?;
+
+        Ok(exists)
+    }
+
     pub async fn get_node_by_public_key(
         &self,
         public_key: &str,
