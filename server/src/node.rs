@@ -38,10 +38,10 @@ pub(crate) async fn ws_node_handler(
 ) -> impl IntoResponse {
     let ip = resolve_client_ip(&headers, client_ip);
 
-    debug!("All websocket headers {:?}", headers);
-    debug!("Client IP {:?}", ip);
+    debug!("NODE websocket headers {:?}", headers);
+    debug!("NODE Client IP {:?}", ip);
     for (name, value) in headers.iter() {
-        debug!("{}: {:?}", name, value);
+        debug!("NODE {}: {:?}", name, value);
     }
 
     ws.on_upgrade(move |socket| handle_node_socket(socket, state, ip))

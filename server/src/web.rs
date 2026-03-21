@@ -39,6 +39,12 @@ pub(crate) async fn ws_web_handler(
 ) -> impl axum::response::IntoResponse {
     let ip = resolve_client_ip(&headers, client_ip);
 
+    debug!("WEB websocket headers {:?}", headers);
+    debug!("WEB Client IP {:?}", ip);
+    for (name, value) in headers.iter() {
+        debug!("WEB {}: {:?}", name, value);
+    }
+
     let protocols: Vec<String> = headers
         .get(SEC_WEBSOCKET_PROTOCOL)
         .and_then(|value| value.to_str().ok())
@@ -226,7 +232,7 @@ async fn handle_web_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
     let cid = match wait_for_auth(&mut ws_rx, &tx, &state).await {
         Ok(uuid) => uuid,
         Err(err) => {
-            warn!("authenticated failed from {ip}: {err}");
+            warn!("authentication failed from {ip}: {err}");
             let _ = ws_tx.close().await;
             return;
         }
