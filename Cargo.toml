@@ -14,7 +14,7 @@ members = ["agent", "common", "server", "channel", "relay"]
 [workspace.package]
 version = "0.1.165"
 edition = "2024"
-repository = "https://github.com/dimitrmo/phirepass-rs"
+repository = "https://github.com/phirepass/phirepass-rs"
 license-file = "LICENCE"
 
 [[bin]]
