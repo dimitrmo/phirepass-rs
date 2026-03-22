@@ -8,7 +8,7 @@ use std::time::{Duration, SystemTime};
 const CONNECTION_TIMEOUT: Duration = Duration::from_secs(120);
 
 fn cleanup_dangling_connections(state: &AppState) {
-    info!("cleaning up dangling connections");
+    debug!("cleaning up dangling connections");
 
     let now = SystemTime::now();
 
@@ -69,7 +69,7 @@ fn cleanup_dangling_connections(state: &AppState) {
 }
 
 pub(crate) fn refresh_connections_task(state: &AppState) {
-    info!("refreshing connections tasks");
+    debug!("refreshing connections tasks");
 
     cleanup_dangling_connections(state);
 
@@ -90,7 +90,7 @@ pub(crate) fn refresh_connections_task(state: &AppState) {
 }
 
 pub(crate) fn keep_server_alive_task(state: &AppState) {
-    info!("keeping server alive");
+    debug!("keeping server alive");
 
     let Ok(payload) = state.server.get_encoded() else {
         warn!("failed to encode server payload");
