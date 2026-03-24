@@ -36,8 +36,6 @@ impl RuntimeBuilder {
             .max_blocking_threads(max_blocking_threads)
             .enable_all();
 
-        builder.build().expect("failed to build Tokio runtime");
-
         Self { inner: builder }
     }
 

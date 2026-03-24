@@ -249,6 +249,7 @@ async fn handle_web_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
         if let Err(err) = state
             .memory_db
             .set_connection_connected(&cid, ip, &state.server)
+            .await
         {
             warn!("failed to add connection {cid} to redis: {err}");
         }
@@ -489,7 +490,7 @@ async fn disconnect_web_client(state: &AppState, cid: &Uuid) {
             info.ip, alive, total
         );
 
-        if let Err(err) = state.memory_db.set_connection_disconnected(cid) {
+        if let Err(err) = state.memory_db.set_connection_disconnected(cid).await {
             warn!("failed to remove connection {cid} from redis: {err}");
         }
     }
