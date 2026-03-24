@@ -446,7 +446,7 @@ async fn handle_tunnel_opened(
 
 async fn disconnect_node(state: &AppState, id: &Uuid) {
     if let Some((_, info)) = state.nodes.remove(id) {
-        let alive = info.node.connected_at.elapsed();
+        let alive = info.node.connected_at.elapsed().unwrap_or_default();
         let mut total = state.nodes.len() as u32;
         info!(
             "node {id} ({}) removed after {:.1?} (total: {})",
@@ -534,10 +534,10 @@ async fn handle_node_heartbeat(
     info.node.last_heartbeat = SystemTime::now();
 
     match since_last {
-        Ok(_) => {
+        Ok(elapsed) => {
             info!(
                 "heartbeat from node {node_id} ({}) after {:.1?}; \n{}",
-                info.node.ip, since_last, log_line
+                info.node.ip, elapsed, log_line
             );
         }
         Err(_) => {
@@ -642,27 +642,30 @@ async fn validate_creds(
 
     debug!("token is still valid");
 
-    let parsed_hash = match PasswordHash::new(&token_record.token_hash) {
-        Ok(hash) => hash,
-        Err(err) => {
-            warn!("failed to parse stored password hash: {}", err);
-            return Err(CredentialValidationError::Internal(
-                "failed to parse stored password hash".to_string(),
-            ));
-        }
-    };
+    // Argon2 is intentionally CPU-intensive; use block_in_place so other async tasks
+    // are not starved while the hash computation runs on the current worker thread.
+    let verify_result = tokio::task::block_in_place(|| {
+        let parsed_hash = match PasswordHash::new(&token_record.token_hash) {
+            Ok(hash) => hash,
+            Err(err) => {
+                warn!("failed to parse stored password hash: {}", err);
+                return Err(CredentialValidationError::Internal(
+                    "failed to parse stored password hash".to_string(),
+                ));
+            }
+        };
 
-    debug!("token hash generated");
+        debug!("token hash generated");
 
-    if let Err(e) = db
-        .hasher
-        .verify_password(token_secret.as_bytes(), &parsed_hash)
-    {
-        warn!("invalid token secret for token_id={}: {}", token_id, e);
-        return Err(CredentialValidationError::Unauthorized(
-            "failed to verify token".to_string(),
-        ));
-    }
+        db.hasher
+            .verify_password(token_secret.as_bytes(), &parsed_hash)
+            .map_err(|e| {
+                warn!("invalid token secret for token_id={}: {}", token_id, e);
+                CredentialValidationError::Unauthorized("failed to verify token".to_string())
+            })
+    });
+
+    verify_result?;
 
     debug!("password verified successfully");
 
