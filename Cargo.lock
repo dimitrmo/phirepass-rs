@@ -3443,6 +3443,7 @@ dependencies = [
  "clap",
  "dashmap",
  "envconfig",
+ "futures-util",
  "http",
  "log",
  "phirepass-common",

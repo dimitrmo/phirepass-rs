@@ -14,6 +14,7 @@ rustls = { workspace = true }
 http = { workspace = true }
 pingora = { workspace = true }
 phirepass-common = { workspace = true, features = ["full"] }
+futures-util = { workspace = true }
 log = { workspace = true }
 redis = { workspace = true }
 dashmap = { workspace = true }

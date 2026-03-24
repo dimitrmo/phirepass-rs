@@ -11,7 +11,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 pub struct MemoryDB {
-    // ConnectionManager is Arc-internally cheap to clone and is the recommended way
+    // ConnectionManager is Arc-internally inexpensive to clone and is the recommended way
     // to share it across concurrent callers when the struct is behind Arc<MemoryDB>.
     manager: ConnectionManager,
 }
