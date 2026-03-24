@@ -121,11 +121,11 @@ pub(crate) fn print_server_stats_task(state: &AppState) {
     info!("\tactive nodes connections: {}", state.nodes.len());
 
     if log::log_enabled!(Debug) {
-        // Stats::gather() calls blocking syscalls (sysinfo, netstat). Use block_in_place so the
-        // async runtime's worker threads are not stalled while waiting for OS data.
-        let stats = tokio::task::block_in_place(Stats::gather);
-        if let Some(stats) = stats {
-            debug!("server stats\n{}", stats.log_line());
+        // Stats::refresh() calls blocking syscalls (sysinfo, netstat). Use
+        // block_in_place so the async runtime's worker threads are not installed.
+        match tokio::task::block_in_place(Stats::refresh) {
+            Some(stats) => info!("server stats\n{}", stats.log_line()),
+            None => warn!("stats: unable to read process metrics"),
         }
     }
 }

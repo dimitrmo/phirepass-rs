@@ -437,7 +437,7 @@ fn spawn_stats_logger(
             tokio::select! {
                 _ = interval.tick() => {
                     // Stats::refresh() calls blocking syscalls (sysinfo, netstat). Use
-                    // block_in_place so the async runtime's worker threads are not stalled.
+                    // block_in_place so the async runtime's worker threads are not installed.
                     match tokio::task::block_in_place(Stats::refresh) {
                         Some(stats) => info!("agent stats\n{}", stats.log_line()),
                         None => warn!("stats: unable to read process metrics"),
