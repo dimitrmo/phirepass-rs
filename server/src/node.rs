@@ -269,22 +269,21 @@ async fn handle_node_messages(
             Ok(msg) => msg,
             Err(err) => {
                 warn!("node web socket error: {err}");
-                disconnect_node(&state, &node_id).await;
-                return;
+                break; // cleanup handled by caller
             }
         };
 
         match msg {
             Message::Close(reason) => {
                 warn!("node connection close message: {:?}", reason);
-                break; // Cleanup handled by caller
+                break; // cleanup handled by caller
             }
             Message::Binary(data) => {
                 let frame = match Frame::decode(&data) {
                     Ok(frame) => frame,
                     Err(err) => {
                         warn!("received malformed frame: {err:?}");
-                        break;
+                        break; // cleanup handled by caller
                     }
                 };
 
@@ -294,7 +293,7 @@ async fn handle_node_messages(
                     FrameData::Node(data) => data,
                     FrameData::Web(_) => {
                         warn!("received web frame, but expected a node frame");
-                        break;
+                        break; // cleanup handled by caller
                     }
                 };
 
@@ -302,14 +301,13 @@ async fn handle_node_messages(
                     NodeFrameData::Heartbeat { stats } => {
                         if let Err(err) = update_node_heartbeat(&state, &node_id, Some(stats)).await {
                             warn!("failed to update node heartbeat: {err}");
-                            break;
+                            break; // cleanup handled by caller
                         }
                     }
                     NodeFrameData::Auth { .. } => {
                         warn!(
                             "received Auth message after initial authentication from node {node_id}"
                         );
-                        break;
                     }
                     // ping from agent
                     NodeFrameData::Ping { sent_at } => {
