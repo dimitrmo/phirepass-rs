@@ -299,27 +299,20 @@ async fn handle_node_messages(
 
                 match node_frame {
                     NodeFrameData::Heartbeat { stats } => {
-                        if let Err(err) = update_node_heartbeat(&state, &node_id, Some(stats)).await {
+                        if let Err(err) = handle_node_heartbeat(&state, &node_id, Some(stats)).await
+                        {
                             warn!("failed to update node heartbeat: {err}");
                             break; // cleanup handled by caller
                         }
                     }
                     NodeFrameData::Auth { .. } => {
                         warn!(
-                            "received Auth message after initial authentication from node {node_id}"
+                            "received [Auth] message after initial authentication from node {node_id}"
                         );
                     }
                     // ping from agent
                     NodeFrameData::Ping { sent_at } => {
-                        let now = now_millis();
-                        let latency = now.saturating_sub(sent_at);
-                        debug!("ping from node {node_id}; latency={}ms", latency);
-                        let pong = NodeFrameData::Pong { sent_at: now };
-                        if let Err(err) = tx.send(pong).await {
-                            warn!("failed to queue pong for node {node_id}: {err}");
-                        } else {
-                            debug!("pong response to node {node_id} sent");
-                        }
+                        handle_node_ping(tx, sent_at, &node_id).await;
                     }
                     // agent notified server that a tunnel has been opened
                     NodeFrameData::TunnelOpened {
@@ -350,6 +343,18 @@ async fn handle_node_messages(
                 info!("unknown message: {:?}", msg);
             }
         }
+    }
+}
+
+async fn handle_node_ping(tx: &mpsc::Sender<NodeFrameData>, sent_at: u64, node_id: &Uuid) {
+    let now = now_millis();
+    let latency = now.saturating_sub(sent_at);
+    debug!("ping from node {node_id}; latency={}ms", latency);
+    let pong = NodeFrameData::Pong { sent_at: now };
+    if let Err(err) = tx.send(pong).await {
+        warn!("failed to queue pong for node {node_id}: {err}");
+    } else {
+        debug!("pong response to node {node_id} sent");
     }
 }
 
@@ -486,10 +491,14 @@ async fn notify_all_clients_for_closed_tunnel(state: &AppState, id: &Uuid) -> u3
     count
 }
 
-async fn update_node_heartbeat(state: &AppState, node_id: &Uuid, stats: Option<Stats>) -> anyhow::Result<()> {
+async fn handle_node_heartbeat(
+    state: &AppState,
+    node_id: &Uuid,
+    stats: Option<Stats>,
+) -> anyhow::Result<()> {
     let mut info = match state.nodes.get_mut(node_id) {
         Some(info) => info,
-        None => anyhow::bail!("node {node_id} not found")
+        None => anyhow::bail!("node {node_id} not found"),
     };
 
     let Some(stats) = stats else {
