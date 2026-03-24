@@ -63,7 +63,7 @@ impl NodeConnection {
         }
     }
 
-    pub fn get_extended_stats(&self) -> anyhow::Result<String> {
+    pub fn get_extended_stats(&self, latency: u64) -> anyhow::Result<String> {
         let now = SystemTime::now();
         let record = self.node_record.clone();
         let id = record.id;
@@ -73,6 +73,7 @@ impl NodeConnection {
             "id": id,
             "name": name,
             "ip": self.node.ip,
+            "latency": latency,
             "server_id": self.server_id,
             "connected_for_secs": now
                 .duration_since(self.node.connected_at)

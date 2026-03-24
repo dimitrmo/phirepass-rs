@@ -157,12 +157,6 @@ impl WebSocketConnection {
             cancellation_token.clone(),
         );
 
-        let ping_task = spawn_ping_task(
-            self.writer.clone(),
-            config.ping_interval as u64,
-            cancellation_token.clone(),
-        );
-
         let cleanup_task = spawn_cleanup_task(
             self.uploads.clone(),
             self.downloads.clone(),
@@ -170,7 +164,6 @@ impl WebSocketConnection {
         );
 
         tokio::select! {
-            _ = ping_task => warn!("ping task ended"),
             _ = write_task => warn!("write task ended"),
             _ = reader_task => warn!("read task ended"),
             _ = heartbeat_task => warn!("heartbeat task ended"),
@@ -282,28 +275,6 @@ fn spawn_reader_task(
     })
 }
 
-fn spawn_ping_task(
-    sender: Sender<Frame>,
-    interval: u64,
-    cancellation_token: CancellationToken,
-) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(interval));
-        loop {
-            tokio::select! {
-                _ = interval.tick() => {
-                    let sent_at = now_millis();
-                    send_frame_data(&sender, NodeFrameData::Ping { sent_at });
-                }
-                _ = cancellation_token.cancelled() => {
-                    debug!("ping task cancelled");
-                    break;
-                }
-            }
-        }
-    })
-}
-
 fn spawn_heartbeat_task(
     sender: Sender<Frame>,
     interval: u64,
@@ -318,7 +289,8 @@ fn spawn_heartbeat_task(
                         warn!("failed to get stats for heartbeat");
                         continue;
                     };
-                    send_frame_data(&sender, NodeFrameData::Heartbeat { stats });
+                    let sent_at = now_millis();
+                    send_frame_data(&sender, NodeFrameData::Heartbeat { stats, sent_at });
                 }
                 _ = cancellation_token.cancelled() => {
                     debug!("heartbeat task cancelled");
@@ -441,11 +413,6 @@ async fn handle_message(
                 }
                 Err(err) => warn!("invalid protocol value {protocol}: {err:?}"),
             }
-        }
-        NodeFrameData::Pong { sent_at } => {
-            let now = now_millis();
-            let rtt = now.saturating_sub(sent_at);
-            debug!("received pong; round-trip={}ms (sent_at={sent_at})", rtt);
         }
         NodeFrameData::ConnectionDisconnect { cid } => {
             info!("received connection disconnect for {cid}");

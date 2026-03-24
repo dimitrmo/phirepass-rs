@@ -26,9 +26,10 @@ use serde_json::Value;
 use serde_json::json;
 use std::net::IpAddr;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::SystemTime;
 use tokio::sync::mpsc;
 use uuid::Uuid;
+use phirepass_common::time::now_millis;
 
 pub(crate) async fn ws_node_handler(
     State(state): State<AppState>,
@@ -250,7 +251,7 @@ async fn handle_node_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
     });
 
     // Handle messages in a separate function to ensure cleanup always happens
-    handle_node_messages(&mut ws_rx, &state, node_id, &tx).await;
+    handle_node_messages(&mut ws_rx, &state, node_id).await;
 
     // Always abort a write task regardless of how we exited the message loop
     drop(tx); // Close sender first to wake a write task
@@ -263,7 +264,6 @@ async fn handle_node_messages(
     ws_rx: &mut futures_util::stream::SplitStream<WebSocket>,
     state: &AppState,
     node_id: Uuid,
-    tx: &mpsc::Sender<NodeFrameData>,
 ) {
     while let Some(msg) = ws_rx.next().await {
         let msg = match msg {
@@ -299,8 +299,8 @@ async fn handle_node_messages(
                 };
 
                 match node_frame {
-                    NodeFrameData::Heartbeat { stats } => {
-                        if let Err(err) = handle_node_heartbeat(state, &node_id, Some(stats)).await
+                    NodeFrameData::Heartbeat { stats, sent_at } => {
+                        if let Err(err) = handle_node_heartbeat(state, &node_id, stats, sent_at).await
                         {
                             warn!("failed to update node heartbeat: {err}");
                             break; // cleanup handled by caller
@@ -310,10 +310,6 @@ async fn handle_node_messages(
                         warn!(
                             "received [Auth] message after initial authentication from node {node_id}"
                         );
-                    }
-                    // ping from agent
-                    NodeFrameData::Ping { sent_at } => {
-                        handle_node_ping(tx, sent_at, &node_id).await;
                     }
                     // agent notified server that a tunnel has been opened
                     NodeFrameData::TunnelOpened {
@@ -344,18 +340,6 @@ async fn handle_node_messages(
                 info!("unknown message: {:?}", msg);
             }
         }
-    }
-}
-
-async fn handle_node_ping(tx: &mpsc::Sender<NodeFrameData>, sent_at: u64, node_id: &Uuid) {
-    let now = now_millis();
-    let latency = now.saturating_sub(sent_at);
-    debug!("ping from node {node_id}; latency={}ms", latency);
-    let pong = NodeFrameData::Pong { sent_at: now };
-    if let Err(err) = tx.send(pong).await {
-        warn!("failed to queue pong for node {node_id}: {err}");
-    } else {
-        debug!("pong response to node {node_id} sent");
     }
 }
 
@@ -498,19 +482,18 @@ async fn notify_all_clients_for_closed_tunnel(state: &AppState, id: &Uuid) -> u3
 async fn handle_node_heartbeat(
     state: &AppState,
     node_id: &Uuid,
-    stats: Option<Stats>,
+    stats: Stats,
+    sent_at: u64,
 ) -> anyhow::Result<()> {
     let mut info = match state.nodes.get_mut(node_id) {
         Some(info) => info,
         None => anyhow::bail!("node {node_id} not found"),
     };
 
-    let Some(stats) = stats else {
-        warn!("node {node_id} stats not found");
-        return Ok(());
-    };
+    let now = now_millis();
+    let latency = now.saturating_sub(sent_at);
 
-    let Ok(extended_stats) = info.get_extended_stats() else {
+    let Ok(extended_stats) = info.get_extended_stats(latency) else {
         warn!("failed to encode stats");
         return Ok(());
     };
@@ -549,13 +532,6 @@ async fn handle_node_heartbeat(
     };
 
     Ok(())
-}
-
-fn now_millis() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
 }
 
 #[derive(Debug, Serialize, Deserialize)]

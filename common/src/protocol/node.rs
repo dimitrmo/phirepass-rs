@@ -18,6 +18,7 @@ pub enum WebFrameId {
 pub enum NodeFrameData {
     Heartbeat {
         stats: Stats,
+        sent_at: u64,
     },
 
     /// agent has already logged in and acquired a token and a node_id,
@@ -28,7 +29,7 @@ pub enum NodeFrameData {
         version: String,
     },
 
-    /// server must validate token again and again and respond
+    /// server must validate the token again and again and respond
     AuthResponse {
         node_id: Uuid,
         success: bool,
@@ -62,7 +63,7 @@ pub enum NodeFrameData {
         cid: Uuid,
         sid: u32,
         msg_id: Option<u32>, // echo back the user supplied msg_id
-    }, // notify web that tunnel is closed
+    }, // notify web that the tunnel is closed
 
     SSHWindowResize {
         cid: Uuid,
@@ -121,14 +122,6 @@ pub enum NodeFrameData {
         data: SFTPDelete,
     },
 
-    Ping {
-        sent_at: u64,
-    },
-
-    Pong {
-        sent_at: u64,
-    },
-
     WebFrame {
         frame: WebFrameData,
         id: WebFrameId,
@@ -157,8 +150,6 @@ impl NodeFrameData {
             NodeFrameData::SFTPUploadStart { .. } => 35,
             NodeFrameData::SFTPUpload { .. } => 36,
             NodeFrameData::SFTPDelete { .. } => 37,
-            NodeFrameData::Ping { .. } => 40,
-            NodeFrameData::Pong { .. } => 41,
             NodeFrameData::WebFrame { .. } => 50,
             NodeFrameData::ConnectionDisconnect { .. } => 60,
         }
