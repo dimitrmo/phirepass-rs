@@ -216,6 +216,7 @@ async fn handle_node_socket(socket: WebSocket, state: AppState, ip: IpAddr) {
     if let Err(err) = state
         .memory_db
         .set_node_connected(&node_record, &state.server)
+        .await
     {
         warn!("failed to update node {node_id} as connected in postgres: {err}");
     }
@@ -452,7 +453,7 @@ async fn disconnect_node(state: &AppState, id: &Uuid) {
             info.node.ip, alive, total
         );
 
-        if let Err(err) = state.memory_db.set_node_disconnected(&info.node_record) {
+        if let Err(err) = state.memory_db.set_node_disconnected(&info.node_record).await {
             warn!("failed to update node {id} as disconnected in postgres: {err}");
         }
 
@@ -518,6 +519,7 @@ async fn handle_node_heartbeat(
         state
             .memory_db
             .update_node_stats(&info.node_record, &state.server, extended_stats)
+            .await
     {
         warn!("failed to update node stats for node {node_id}: {err}");
         return Ok(());

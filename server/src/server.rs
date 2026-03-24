@@ -47,7 +47,7 @@ pub async fn start(config: Env) -> anyhow::Result<()> {
     let db = Database::create(&config).await?;
     info!("connected to postgres");
 
-    let memory_db = MemoryDB::create(&config)?;
+    let memory_db = MemoryDB::create(&config).await?;
     info!("connected to valkey");
 
     let server_identifier = create_server_identifier(&config, id)?;
@@ -169,7 +169,7 @@ fn spawn_server_update_task(
         loop {
             tokio::select! {
                 _ = interval.tick() => {
-                    tasks::keep_server_alive_task(&state);
+                    tasks::keep_server_alive_task(&state).await;
                 }
                 _ = shutdown.recv() => {
                     info!("stats logger shutting down");
@@ -215,7 +215,7 @@ fn spawn_connections_refresh_task(
         loop {
             tokio::select! {
                 _ = interval.tick() => {
-                    tasks::refresh_connections_task(&state);
+                    tasks::refresh_connections_task(&state).await;
                 }
                 _ = shutdown.recv() => {
                     info!("stats logger shutting down");
