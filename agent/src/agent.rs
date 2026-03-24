@@ -79,10 +79,18 @@ pub(crate) async fn login(
         token.trim().to_string()
     } else if from_stdin {
         info!("reading token from stdin");
-        let mut token = String::new();
-        use std::io::Read;
-        std::io::stdin().read_to_string(&mut token)?;
-        token.trim().to_string()
+        // std::io::stdin().read_to_string() is blocking; run it on the blocking thread pool
+        // so the async executor is not stalled while waiting for pipe/terminal input.
+        let raw = tokio::task::spawn_blocking(|| -> std::io::Result<String> {
+            let mut buf = String::new();
+            use std::io::Read;
+            std::io::stdin().read_to_string(&mut buf)?;
+            Ok(buf)
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("stdin read task panicked: {e}"))?
+        .map_err(|e| anyhow::anyhow!("failed to read from stdin: {e}"))?;
+        raw.trim().to_string()
     } else {
         rpassword::prompt_password("Enter authentication token: ")?
     };

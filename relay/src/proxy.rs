@@ -88,13 +88,10 @@ impl WsProxy {
         }
 
         let memory_db = self.memory_db.clone();
-        let node_id_owned = node_id.to_owned();
-        let server_id_owned = server_id.map(ToOwned::to_owned);
-        let server_str: String = tokio::task::spawn_blocking(move || {
-            memory_db.get_user_server_by_node_id(&node_id_owned, server_id_owned.as_deref())
-        })
-        .await
-        .map_err(|e| anyhow::anyhow!("redis lookup task failed: {e}"))??;
+        let server_str: String = memory_db
+            .get_user_server_by_node_id(node_id, server_id)
+            .await
+            .map_err(|e| anyhow::anyhow!("redis lookup failed: {e}"))?;
 
         let server = ServerIdentifier::get_decoded(server_str)?;
 
@@ -236,7 +233,14 @@ impl ProxyHttp for WsProxy {
 pub fn start(config: Env) -> anyhow::Result<()> {
     info!("running server on {} mode", config.mode);
 
-    let memory_db = MemoryDB::create(&config)?;
+    // MemoryDB uses an async ConnectionManager; create it with a temporary single-thread
+    // Tokio runtime before handing control to Pingora (which starts its own runtime).
+    let memory_db = {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?;
+        rt.block_on(MemoryDB::create(&config))?
+    };
     info!("connected to valkey");
 
     let bind_addr = format!("{}:{}", config.host, config.port);

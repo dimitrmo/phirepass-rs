@@ -1,73 +1,60 @@
 use crate::env::Env;
 use log::{debug, warn};
-use redis::{Commands, Connection, RedisResult};
-use std::sync::{Arc, Mutex};
+use redis::AsyncCommands;
+use redis::aio::ConnectionManager;
 
 pub struct MemoryDB {
-    client: redis::Client,
-    connection: Arc<Mutex<Connection>>,
+    // ConnectionManager is an Arc-internally cheap clone, designed to be cloned per
+    // call site. Our methods take `&self` (MemoryDB is always behind Arc<MemoryDB>),
+    // so we clone the manager to obtain the `&mut` required by AsyncCommands.
+    manager: ConnectionManager,
 }
 
 impl MemoryDB {
-    pub fn create(config: &Env) -> anyhow::Result<Self> {
+    pub async fn create(config: &Env) -> anyhow::Result<Self> {
         let client = redis::Client::open(config.redis_database_url.clone())?;
-        let connection = client.get_connection()?;
-        Ok(Self {
-            client,
-            connection: Arc::new(Mutex::new(connection)),
-        })
+        let manager = ConnectionManager::new(client).await?;
+        Ok(Self { manager })
     }
 
-    fn with_connection<T, F>(&self, mut op: F) -> anyhow::Result<T>
-    where
-        F: FnMut(&mut Connection) -> RedisResult<T>,
-    {
-        let mut connection = self
-            .connection
-            .lock()
-            .map_err(|_| anyhow::anyhow!("redis connection lock poisoned"))?;
+    /// Iterates over all Redis keys matching `pattern` using SCAN (cursor-based, non-blocking).
+    async fn scan_keys(&self, pattern: &str) -> anyhow::Result<Vec<String>> {
+        let mut conn = self.manager.clone();
+        let mut keys = Vec::new();
+        let mut cursor: u64 = 0;
 
-        match op(&mut connection) {
-            Ok(value) => return Ok(value),
-            Err(err) if err.is_io_error() => {
-                warn!("redis connection dropped, reconnecting");
+        loop {
+            let (next_cursor, batch): (u64, Vec<String>) = redis::cmd("SCAN")
+                .arg(cursor)
+                .arg("MATCH")
+                .arg(pattern)
+                .arg("COUNT")
+                .arg(100u32)
+                .query_async(&mut conn)
+                .await?;
+
+            keys.extend(batch);
+            cursor = next_cursor;
+
+            if cursor == 0 {
+                break;
             }
-            Err(err) => return Err(err.into()),
         }
-
-        drop(connection);
-
-        let new_connection = self.client.get_connection()?;
-        let mut connection = self
-            .connection
-            .lock()
-            .map_err(|_| anyhow::anyhow!("redis connection lock poisoned"))?;
-        *connection = new_connection;
-
-        Ok(op(&mut connection)?)
-    }
-
-    fn scan_keys(&self, key: &str) -> anyhow::Result<Vec<String>> {
-        let keys = self.with_connection(|connection| {
-            connection
-                .scan_match(key)?
-                .collect::<RedisResult<Vec<String>>>()
-        })?;
 
         Ok(keys)
     }
 
-    fn get_server(&self, key: &str) -> anyhow::Result<Option<String>> {
-        let server: Option<String> =
-            self.with_connection(|connection| connection.hget(key, "server"))?;
+    async fn get_server(&self, key: &str) -> anyhow::Result<Option<String>> {
+        let mut conn = self.manager.clone();
+        let server: Option<String> = conn.hget(key, "server").await?;
         Ok(server)
     }
 
-    fn find_server_id_by_node_id(&self, node_id: &str) -> Option<String> {
+    async fn find_server_id_by_node_id(&self, node_id: &str) -> Option<String> {
         let key = format!("phirepass:users:*:nodes:{}", node_id);
         debug!("scan by key: {}", key);
 
-        let keys = self.scan_keys(&key).ok()?;
+        let keys = self.scan_keys(&key).await.ok()?;
         if keys.is_empty() {
             warn!("no entries found for key {}", key);
             None
@@ -76,7 +63,7 @@ impl MemoryDB {
         }
     }
 
-    pub fn get_user_server_by_node_id(
+    pub async fn get_user_server_by_node_id(
         &self,
         node_id: &str,
         server_id: Option<&str>,
@@ -90,7 +77,7 @@ impl MemoryDB {
             }
             None => {
                 debug!("no server id hint found. fallback to key scanning.");
-                if let Some(id) = self.find_server_id_by_node_id(node_id) {
+                if let Some(id) = self.find_server_id_by_node_id(node_id).await {
                     id
                 } else {
                     anyhow::bail!("fail to find server by node id {}", node_id);
@@ -98,7 +85,7 @@ impl MemoryDB {
             }
         };
 
-        let server = self.get_server(id.as_str())?;
+        let server = self.get_server(id.as_str()).await?;
         let Some(server) = server else {
             warn!("server not found for id {}", id);
             anyhow::bail!("server not found for node {}", node_id)
