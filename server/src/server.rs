@@ -145,7 +145,7 @@ fn start_http_server(
             }
         };
 
-        axum::serve(
+        if let Err(err) = axum::serve(
             listener,
             app.into_make_service_with_connect_info::<SocketAddr>(),
         )
@@ -153,7 +153,9 @@ fn start_http_server(
             let _ = shutdown.recv().await;
         })
         .await
-        .unwrap();
+        {
+            warn!("http server error: {err}");
+        }
     })
 }
 

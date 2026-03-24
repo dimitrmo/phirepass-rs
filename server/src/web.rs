@@ -109,6 +109,8 @@ async fn wait_for_auth(
             if !cfg!(debug_assertions) {
                 let claims = validate_jwt(tx, state, &token, cid, msg_id).await?;
                 validate_user_node(tx, state, claims, node_id, cid, msg_id).await?;
+            } else {
+                warn!("authentication bypass is active (debug build) — do not use in production");
             }
 
             successful_auth(tx, cid, version, msg_id).await?;
@@ -294,8 +296,7 @@ async fn handle_web_messages(
         let msg = match msg {
             Ok(msg) => msg,
             Err(_) => {
-                disconnect_web_client(state, &cid).await;
-                return;
+                break; // handle_web_socket calls disconnect_web_client after this returns
             }
         };
 
@@ -482,7 +483,7 @@ async fn handle_web_messages(
 
 async fn disconnect_web_client(state: &AppState, cid: &Uuid) {
     if let Some((_, info)) = state.connections.remove(cid) {
-        let alive = info.connected_at.elapsed();
+        let alive = info.connected_at.elapsed().unwrap_or_default();
         let total = state.connections.len();
 
         info!(
